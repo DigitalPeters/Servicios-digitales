@@ -206,6 +206,45 @@
       font-size: 19px;
     }
 
+
+    .recharge-card {
+      margin-top: 18px;
+      border: 2px solid #111827;
+      background: linear-gradient(180deg, #ffffff, #f9fafb);
+    }
+
+    .recharge-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .recharge-title h2 {
+      margin: 0;
+    }
+
+    .recharge-button {
+      background: #047857;
+      max-width: 240px;
+      font-size: 16px;
+    }
+
+    .recharge-button:hover {
+      background: #065f46;
+    }
+
+    .balance-alert {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
     .product-price {
       font-weight: bold;
       color: var(--text);
@@ -328,7 +367,46 @@
         align-items: flex-start;
       }
 
-      .product-price {
+  
+    .recharge-card {
+      margin-top: 18px;
+      border: 2px solid #111827;
+      background: linear-gradient(180deg, #ffffff, #f9fafb);
+    }
+
+    .recharge-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .recharge-title h2 {
+      margin: 0;
+    }
+
+    .recharge-button {
+      background: #047857;
+      max-width: 240px;
+      font-size: 16px;
+    }
+
+    .recharge-button:hover {
+      background: #065f46;
+    }
+
+    .balance-alert {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
+    .product-price {
         font-size: 16px;
       }
     }
@@ -386,6 +464,42 @@
             <div class="account-label">Saldo</div>
             <div class="account-value">$<span id="userBalance"></span></div>
           </div>
+        </div>
+
+        <div id="rechargeCard" class="recharge-card">
+          <div class="recharge-title">
+            <div>
+              <h2>Recargar saldo</h2>
+              <p class="small-text" style="margin-bottom:0">Solicita que revisemos tu transferencia y agreguemos saldo a tu cuenta.</p>
+            </div>
+            <button class="recharge-button" onclick="toggleBalanceRequestForm()">+ Cargar saldo</button>
+          </div>
+
+          <div class="balance-alert">
+            El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa el pago y aprueba la carga.
+          </div>
+
+          <div id="balanceRequestForm" class="hidden">
+            <label class="field-label">Monto transferido</label>
+            <input id="rechargeAmount" type="number" step="0.01" min="1" placeholder="Ejemplo: 100" />
+
+            <label class="field-label">Banco desde donde enviaste</label>
+            <input id="rechargeBank" placeholder="Ejemplo: BBVA, Banorte, Nu, Mercado Pago" />
+
+            <label class="field-label">Referencia / clave de rastreo</label>
+            <input id="rechargeReference" placeholder="Referencia o clave de rastreo" />
+
+            <label class="field-label">Nombre del titular que envió</label>
+            <input id="rechargeHolder" placeholder="Nombre completo del titular" />
+
+            <label class="field-label">Comprobante o nota opcional</label>
+            <input id="rechargeProof" placeholder="Liga de comprobante, folio o nota" />
+
+            <button onclick="sendBalanceRequest()">Enviar solicitud de saldo</button>
+          </div>
+
+          <h3>Mis solicitudes de saldo</h3>
+          <div id="myBalanceRequestsList"></div>
         </div>
       </div>
 
@@ -456,6 +570,12 @@
             <h2>Usuarios</h2>
             <div id="usersList"></div>
           </div>
+        </div>
+
+        <div class="card">
+          <h2>Solicitudes de carga de saldo</h2>
+          <p class="small-text">Revisa tu banco antes de aprobar. Al aprobar, el saldo se suma automáticamente al cliente.</p>
+          <div id="adminBalanceRequestsList"></div>
         </div>
 
         <div class="card">
@@ -647,12 +767,14 @@
 
         await loadProducts();
         await loadMyOrders();
+        await loadMyBalanceRequests();
 
         if (currentUser.role === "admin") {
           document.getElementById("adminSection").classList.remove("hidden");
           await loadUsers();
           await loadAdminProducts();
           await loadAdminOrders();
+          await loadAdminBalanceRequests();
         } else {
           document.getElementById("adminSection").classList.add("hidden");
         }
@@ -870,6 +992,115 @@
             user_id: Number(document.getElementById("balanceUserId").value),
             amount: document.getElementById("balanceAmount").value,
             note: document.getElementById("balanceNote").value
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    function toggleBalanceRequestForm() {
+      const form = document.getElementById("balanceRequestForm");
+      form.classList.toggle("hidden");
+    }
+
+    async function sendBalanceRequest() {
+      try {
+        const data = await api("/api/balance-requests", {
+          method: "POST",
+          body: JSON.stringify({
+            amount: document.getElementById("rechargeAmount").value,
+            bank: document.getElementById("rechargeBank").value,
+            reference: document.getElementById("rechargeReference").value,
+            account_holder: document.getElementById("rechargeHolder").value,
+            proof: document.getElementById("rechargeProof").value
+          })
+        });
+
+        document.getElementById("rechargeAmount").value = "";
+        document.getElementById("rechargeBank").value = "";
+        document.getElementById("rechargeReference").value = "";
+        document.getElementById("rechargeHolder").value = "";
+        document.getElementById("rechargeProof").value = "";
+        document.getElementById("balanceRequestForm").classList.add("hidden");
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadMyBalanceRequests() {
+      const container = document.getElementById("myBalanceRequestsList");
+      if (!container) return;
+
+      const requests = await api("/api/my-balance-requests");
+
+      const html = requests.map(request => `
+        <div class="item">
+          <p><b>Solicitud:</b> #${request.id}</p>
+          <p><b>Monto:</b> $${formatMoney(request.amount)}</p>
+          <p><b>Banco:</b> ${safeText(request.bank)}</p>
+          <p><b>Referencia:</b> ${safeText(request.reference)}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(request.status))}</span></p>
+          <p><b>Respuesta:</b> ${safeText(request.admin_response || "Sin respuesta todavía")}</p>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No tienes solicitudes de saldo todavía.";
+    }
+
+    function getBalanceRequestStatusText(status) {
+      const statuses = {
+        pendiente: "Pendiente de revisión",
+        aprobado: "Aprobado",
+        rechazado: "Rechazado"
+      };
+
+      return statuses[status] || status;
+    }
+
+    async function loadAdminBalanceRequests() {
+      const container = document.getElementById("adminBalanceRequestsList");
+      if (!container) return;
+
+      const requests = await api("/api/admin/balance-requests");
+
+      const html = requests.map(request => `
+        <div class="item">
+          <p><b>Solicitud:</b> #${request.id}</p>
+          <p><b>Usuario ID:</b> ${request.user_id}</p>
+          <p><b>Cliente:</b> ${safeText(request.customer_name)} - ${safeText(request.customer_email)}</p>
+          <p><b>Monto:</b> $${formatMoney(request.amount)}</p>
+          <p><b>Banco:</b> ${safeText(request.bank)}</p>
+          <p><b>Referencia / clave:</b> ${safeText(request.reference)}</p>
+          <p><b>Titular:</b> ${safeText(request.account_holder)}</p>
+          <p><b>Comprobante / nota:</b> ${safeText(request.proof || "No enviado")}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(request.status))}</span></p>
+          <textarea id="balance-response-${request.id}" placeholder="Respuesta para el cliente">${safeText(request.admin_response || "")}</textarea>
+          <div class="button-row">
+            <button onclick="updateBalanceRequestStatus(${request.id}, 'aprobado')" ${request.status === "aprobado" ? "disabled" : ""}>Aprobar y sumar saldo</button>
+            <button onclick="updateBalanceRequestStatus(${request.id}, 'rechazado')" ${request.status === "aprobado" ? "disabled" : ""}>Rechazar</button>
+          </div>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No hay solicitudes de saldo.";
+    }
+
+    async function updateBalanceRequestStatus(requestId, status) {
+      try {
+        const response = document.getElementById("balance-response-" + requestId).value;
+
+        const data = await api("/api/admin/balance-requests/" + requestId + "/status", {
+          method: "PATCH",
+          body: JSON.stringify({
+            status,
+            admin_response: response
           })
         });
 
