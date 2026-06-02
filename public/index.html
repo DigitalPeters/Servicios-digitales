@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Servicios Digitales Peters</title>
+
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #111827;
+      --primary2: #374151;
+      --border: #e5e7eb;
+      --success: #047857;
+      --danger: #dc2626;
+      --warning: #92400e;
+      --chip: #eef2ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1180px;
+      margin: auto;
+    }
+
+    h1 {
+      font-size: 38px;
+      margin: 0 0 18px;
+      letter-spacing: -1px;
+    }
+
+    h2, h3 {
+      margin-top: 0;
+    }
+
+    .card {
+      background: var(--card);
+      padding: 22px;
+      border-radius: 18px;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      border: 1px solid rgba(0,0,0,0.03);
+    }
+
+    input, textarea, select, button {
+      width: 100%;
+      padding: 13px;
+      margin-top: 8px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+      font-size: 15px;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+      background: white;
+    }
+
+    textarea {
+      min-height: 75px;
+      resize: vertical;
+    }
+
+    button {
+      background: var(--primary);
+      color: white;
+      border: 0;
+      cursor: pointer;
+      font-weight: 600;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background: var(--primary2);
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .three-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .item {
+      border: 1px solid var(--border);
+      padding: 14px;
+      border-radius: 14px;
+      margin-bottom: 12px;
+      background: #fafafa;
+    }
+
+    .status {
+      font-weight: bold;
+      color: var(--warning);
+    }
+
+    .success {
+      color: green;
+      font-weight: bold;
+    }
+
+    .error {
+      color: red;
+      font-weight: bold;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 15px;
+    }
+
+    .brand-subtitle {
+      color: var(--muted);
+      margin-top: -10px;
+      margin-bottom: 18px;
+    }
+
+    .account-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .account-box {
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .account-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+
+    .account-value {
+      margin-top: 5px;
+      font-size: 17px;
+      font-weight: bold;
+      overflow-wrap: anywhere;
+    }
+
+    .clean-category {
+      background: var(--primary);
+      color: white;
+      padding: 12px 14px;
+      border-radius: 14px;
+      margin: 20px 0 12px;
+      font-weight: bold;
+      letter-spacing: .2px;
+    }
+
+    .product-card {
+      border: 1px solid var(--border);
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    .product-summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .product-summary h3 {
+      margin: 0;
+      font-size: 19px;
+    }
+
+    .product-price {
+      font-weight: bold;
+      color: var(--text);
+      white-space: nowrap;
+      font-size: 18px;
+    }
+
+    .product-details {
+      display: none;
+      margin-top: 14px;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+
+    .product-details.open {
+      display: block;
+    }
+
+    .stock-ok {
+      color: var(--success);
+      font-weight: bold;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .stock-out {
+      color: var(--danger);
+      font-weight: bold;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .product-description {
+      color: #444;
+      margin: 8px 0;
+      line-height: 1.35;
+    }
+
+    .small-text {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .field-label {
+      display: block;
+      font-weight: bold;
+      margin-top: 8px;
+      margin-bottom: 0;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 6px 0 10px;
+    }
+
+    .checkbox-row input {
+      width: auto;
+      margin: 0;
+    }
+
+    .chip {
+      display: inline-block;
+      background: var(--chip);
+      border-radius: 999px;
+      padding: 5px 9px;
+      margin: 3px 4px 3px 0;
+      font-size: 13px;
+      color: #3730a3;
+      font-weight: 600;
+    }
+
+    .admin-title {
+      background: #111827;
+      color: white;
+      padding: 13px 16px;
+      border-radius: 14px;
+      margin-bottom: 16px;
+    }
+
+    .danger-btn {
+      background: #dc2626;
+    }
+
+    .danger-btn:hover {
+      background: #b91c1c;
+    }
+
+    .muted-btn {
+      background: #4b5563;
+    }
+
+    .order-data {
+      background: #fff;
+      border: 1px dashed #d1d5db;
+      border-radius: 10px;
+      padding: 10px;
+      margin: 8px 0;
+    }
+
+    @media (max-width: 850px) {
+      body {
+        padding: 14px;
+      }
+
+      h1 {
+        font-size: 30px;
+      }
+
+      .row, .three-row, .account-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .card {
+        padding: 18px;
+      }
+
+      .product-summary {
+        align-items: flex-start;
+      }
+
+      .product-price {
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Servicios Digitales Peters</h1>
+    <p class="brand-subtitle">Plataforma de trámites y servicios digitales.</p>
+
+    <div id="message"></div>
+
+    <div id="authSection" class="row">
+      <div class="card">
+        <h2>Iniciar sesión</h2>
+        <input id="loginEmail" placeholder="Correo" />
+        <input id="loginPassword" type="password" placeholder="Contraseña" />
+        <button onclick="login()">Entrar</button>
+      </div>
+
+      <div class="card">
+        <h2>Crear cuenta</h2>
+        <input id="registerName" placeholder="Nombre" />
+        <input id="registerEmail" placeholder="Correo" />
+        <input id="registerPassword" type="password" placeholder="Contraseña" />
+        <button onclick="register()">Registrarme</button>
+      </div>
+    </div>
+
+    <div id="appSection" class="hidden">
+      <div class="card">
+        <div class="topbar">
+          <h2>Mi cuenta</h2>
+          <button style="max-width:180px" onclick="logout()">Cerrar sesión</button>
+        </div>
+
+        <div class="account-grid">
+          <div class="account-box">
+            <div class="account-label">Nombre</div>
+            <div class="account-value" id="userName"></div>
+          </div>
+
+          <div class="account-box">
+            <div class="account-label">Correo</div>
+            <div class="account-value" id="userEmail"></div>
+          </div>
+
+          <div class="account-box">
+            <div class="account-label">Rol</div>
+            <div class="account-value" id="userRole"></div>
+          </div>
+
+          <div class="account-box">
+            <div class="account-label">Saldo</div>
+            <div class="account-value">$<span id="userBalance"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <h2>Productos</h2>
+          <p class="small-text">Selecciona un producto para ver los datos que debes ingresar.</p>
+          <div id="productsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Mis pedidos</h2>
+          <div id="myOrdersList"></div>
+        </div>
+      </div>
+
+      <div id="adminSection" class="hidden">
+        <div class="admin-title">
+          <h2 style="margin:0">Panel de administrador</h2>
+        </div>
+
+        <div class="row">
+          <div class="card">
+            <h2>Crear producto</h2>
+
+            <label class="field-label">Nombre del producto</label>
+            <input id="productName" placeholder="Ejemplo: Acta de Nacimiento" />
+
+            <label class="field-label">Descripción</label>
+            <textarea id="productDescription" placeholder="Descripción que verá el cliente"></textarea>
+
+            <label class="field-label">Precio</label>
+            <input id="productPrice" type="number" step="0.01" placeholder="Precio" />
+
+            <label class="field-label">Categoría</label>
+            <input id="productCategory" placeholder="Ejemplo: Actas, CSF, IMSS" />
+
+            <label class="field-label">Datos requeridos</label>
+            <textarea id="productRequiredFields" placeholder="Escribe separados por coma. Ejemplo: curp, nombre completo, nss"></textarea>
+            <p class="small-text">Puedes poner cualquier dato que ocupe el trámite.</p>
+
+            <label class="field-label">¿Cuándo descontar saldo?</label>
+            <select id="productChargeMode">
+              <option value="on_purchase">Descontar al comprar</option>
+              <option value="on_success">Descontar cuando el admin marque Éxito</option>
+            </select>
+
+            <label class="field-label">Stock</label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="productStockEnabled" />
+              Activar stock para este producto
+            </label>
+
+            <input id="productStock" type="number" min="0" value="0" placeholder="Cantidad disponible" />
+
+            <button onclick="createProduct()">Crear producto</button>
+          </div>
+
+          <div class="card">
+            <h2>Agregar saldo</h2>
+            <input id="balanceUserId" type="number" placeholder="ID del usuario" />
+            <input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" />
+            <input id="balanceNote" placeholder="Nota" />
+            <button onclick="addBalance()">Agregar saldo</button>
+
+            <hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb">
+
+            <h2>Usuarios</h2>
+            <div id="usersList"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Productos creados</h2>
+          <div id="adminProductsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Pedidos</h2>
+          <div id="adminOrdersList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let token = localStorage.getItem("token");
+    let currentUser = null;
+
+    function showMessage(text, type = "success") {
+      document.getElementById("message").innerHTML =
+        `<p class="${type}">${safeText(text)}</p>`;
+    }
+
+    function safeText(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function parseJsonArray(value) {
+      try {
+        if (Array.isArray(value)) return value;
+        const parsed = JSON.parse(value || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function parseJsonObject(value) {
+      try {
+        if (typeof value === "object" && value !== null) return value;
+        const parsed = JSON.parse(value || "{}");
+        return typeof parsed === "object" && parsed !== null ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function normalizeFieldName(name) {
+      return String(name || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/ñ/g, "n")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    }
+
+    function fieldLabel(field) {
+      const labels = {
+        curp: "CURP",
+        rfc: "RFC",
+        idcif: "IDCIF",
+        nss: "NSS",
+        nombre_completo: "Nombre completo",
+        correo: "Correo",
+        telefono: "Teléfono",
+        fecha_nacimiento: "Fecha de nacimiento"
+      };
+
+      return labels[field] || String(field).replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    function getChargeModeText(mode) {
+      if (mode === "on_success") {
+        return "Se descuenta cuando el admin marque Éxito";
+      }
+
+      return "Se descuenta al comprar";
+    }
+
+    function getStatusText(status) {
+      const statuses = {
+        accion_en_espera: "Acción en espera",
+        en_proceso: "En proceso",
+        exito: "Éxito",
+        rechazado: "Rechazado"
+      };
+
+      return statuses[status] || status;
+    }
+
+    function formatMoney(value) {
+      return Number(value || 0).toFixed(2);
+    }
+
+    async function api(path, options = {}) {
+      const headers = options.headers || {};
+
+      if (token) {
+        headers.Authorization = "Bearer " + token;
+      }
+
+      if (!(options.body instanceof FormData)) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const response = await fetch(path, {
+        ...options,
+        headers
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error");
+      }
+
+      return data;
+    }
+
+    async function register() {
+      try {
+        const data = await api("/api/register", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("registerName").value,
+            email: document.getElementById("registerEmail").value,
+            password: document.getElementById("registerPassword").value
+          })
+        });
+
+        token = data.token;
+        localStorage.setItem("token", token);
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function login() {
+      try {
+        const data = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({
+            email: document.getElementById("loginEmail").value,
+            password: document.getElementById("loginPassword").value
+          })
+        });
+
+        token = data.token;
+        localStorage.setItem("token", token);
+        showMessage("Sesión iniciada");
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem("token");
+      token = null;
+      currentUser = null;
+      document.getElementById("authSection").classList.remove("hidden");
+      document.getElementById("appSection").classList.add("hidden");
+      showMessage("Sesión cerrada");
+    }
+
+    async function loadApp() {
+      if (!token) return;
+
+      try {
+        currentUser = await api("/api/me");
+
+        document.getElementById("authSection").classList.add("hidden");
+        document.getElementById("appSection").classList.remove("hidden");
+
+        document.getElementById("userName").textContent = currentUser.name;
+        document.getElementById("userEmail").textContent = currentUser.email;
+        document.getElementById("userRole").textContent = currentUser.role;
+        document.getElementById("userBalance").textContent = formatMoney(currentUser.balance);
+
+        await loadProducts();
+        await loadMyOrders();
+
+        if (currentUser.role === "admin") {
+          document.getElementById("adminSection").classList.remove("hidden");
+          await loadUsers();
+          await loadAdminProducts();
+          await loadAdminOrders();
+        } else {
+          document.getElementById("adminSection").classList.add("hidden");
+        }
+      } catch (error) {
+        console.error(error);
+        logout();
+      }
+    }
+
+    async function loadProducts() {
+      const products = await api("/api/products");
+
+      const categories = {};
+
+      products.forEach(product => {
+        const category = product.category || "Otros";
+
+        if (!categories[category]) {
+          categories[category] = [];
+        }
+
+        categories[category].push(product);
+      });
+
+      let html = "";
+
+      Object.keys(categories).forEach(category => {
+        html += `<div class="clean-category">${safeText(category)}</div>`;
+
+        html += categories[category].map(product => {
+          const stockEnabled = Number(product.stock_enabled || 0) === 1;
+          const stock = Number(product.stock || 0);
+          const soldOut = stockEnabled && stock <= 0;
+
+          return `
+            <div class="product-card">
+              <div class="product-summary" onclick="toggleProduct(${product.id})">
+                <div>
+                  <h3>${safeText(product.name)}</h3>
+                  ${stockEnabled ? `
+                    <div class="${soldOut ? "stock-out" : "stock-ok"}">
+                      ${soldOut ? "Agotado" : "Disponible"}
+                    </div>
+                  ` : ""}
+                </div>
+
+                <div class="product-price">$${formatMoney(product.price)}</div>
+              </div>
+
+              <div id="product-details-${product.id}" class="product-details">
+                <p class="product-description">${safeText(product.description || "")}</p>
+                <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
+
+                ${renderProductInputs(product)}
+
+                <button onclick="buyProduct(${product.id})" ${soldOut ? "disabled" : ""}>
+                  ${soldOut ? "Sin stock" : "Comprar"}
+                </button>
+              </div>
+            </div>
+          `;
+        }).join("");
+      });
+
+      document.getElementById("productsList").innerHTML =
+        html || "No hay productos todavía.";
+    }
+
+    function toggleProduct(productId) {
+      const details = document.getElementById("product-details-" + productId);
+
+      if (!details) return;
+
+      const isOpen = details.classList.contains("open");
+
+      document.querySelectorAll(".product-details").forEach(item => {
+        item.classList.remove("open");
+      });
+
+      if (!isOpen) {
+        details.classList.add("open");
+      }
+    }
+
+    function renderProductInputs(product) {
+      const fields = parseJsonArray(product.required_fields);
+
+      if (fields.length === 0) {
+        return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;
+      }
+
+      return fields.map(field => `
+        <label class="field-label">${safeText(fieldLabel(field))}</label>
+        <input
+          id="field-${product.id}-${field}"
+          placeholder="Ingresa ${safeText(fieldLabel(field))}"
+        />
+      `).join("");
+    }
+
+    async function buyProduct(productId) {
+      try {
+        const products = await api("/api/products");
+        const product = products.find(p => Number(p.id) === Number(productId));
+
+        if (!product) {
+          throw new Error("Producto no encontrado");
+        }
+
+        const fields = parseJsonArray(product.required_fields);
+        const orderData = {};
+
+        fields.forEach(field => {
+          const input = document.getElementById(`field-${productId}-${field}`);
+          orderData[field] = input ? input.value.trim() : "";
+        });
+
+        const data = await api("/api/buy/" + productId, {
+          method: "POST",
+          body: JSON.stringify({
+            order_data: orderData
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadMyOrders() {
+      const orders = await api("/api/my-orders");
+
+      const html = orders.map(order => {
+        const orderData = parseJsonObject(order.order_data);
+
+        return `
+          <div class="item">
+            <p><b>Pedido:</b> #${order.id}</p>
+            <p><b>Producto:</b> ${safeText(order.product_name)}</p>
+            <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
+            <p><b>Estado:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
+            ${renderOrderData(orderData)}
+            <p><b>Respuesta:</b> ${safeText(order.admin_response || "Sin respuesta todavía")}</p>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("myOrdersList").innerHTML =
+        html || "No tienes pedidos todavía.";
+    }
+
+    function renderOrderData(orderData) {
+      const entries = Object.entries(orderData || {});
+
+      if (entries.length === 0) return "";
+
+      return `
+        <div class="order-data">
+          <b>Datos enviados:</b>
+          ${entries.map(([key, value]) => `
+            <p style="margin:5px 0"><b>${safeText(fieldLabel(key))}:</b> ${safeText(value)}</p>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    function getRequiredFieldsFromInput(id) {
+      return document.getElementById(id).value
+        .split(",")
+        .map(value => normalizeFieldName(value))
+        .filter(value => value.length > 0);
+    }
+
+    async function createProduct() {
+      try {
+        const requiredFields = getRequiredFieldsFromInput("productRequiredFields");
+
+        const data = await api("/api/admin/create-product", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("productName").value,
+            description: document.getElementById("productDescription").value,
+            price: document.getElementById("productPrice").value,
+            category: document.getElementById("productCategory").value,
+            required_fields: requiredFields,
+            charge_mode: document.getElementById("productChargeMode").value,
+            stock_enabled: document.getElementById("productStockEnabled").checked,
+            stock: document.getElementById("productStock").value
+          })
+        });
+
+        document.getElementById("productName").value = "";
+        document.getElementById("productDescription").value = "";
+        document.getElementById("productPrice").value = "";
+        document.getElementById("productCategory").value = "";
+        document.getElementById("productRequiredFields").value = "";
+        document.getElementById("productChargeMode").value = "on_purchase";
+        document.getElementById("productStockEnabled").checked = false;
+        document.getElementById("productStock").value = "0";
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function addBalance() {
+      try {
+        const data = await api("/api/admin/add-balance", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: Number(document.getElementById("balanceUserId").value),
+            amount: document.getElementById("balanceAmount").value,
+            note: document.getElementById("balanceNote").value
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadUsers() {
+      const users = await api("/api/admin/users");
+
+      const html = users.map(user => `
+        <div class="item">
+          <p><b>ID:</b> ${user.id}</p>
+          <p><b>Nombre:</b> ${safeText(user.name)}</p>
+          <p><b>Correo:</b> ${safeText(user.email)}</p>
+          <p><b>Rol:</b> ${safeText(user.role)}</p>
+          <p><b>Saldo:</b> $${formatMoney(user.balance)}</p>
+        </div>
+      `).join("");
+
+      document.getElementById("usersList").innerHTML = html || "No hay usuarios.";
+    }
+
+    async function loadAdminProducts() {
+      const products = await api("/api/products");
+
+      const html = products.map(product => {
+        const requiredFields = parseJsonArray(product.required_fields);
+        const stockEnabled = Number(product.stock_enabled || 0) === 1;
+
+        return `
+          <div class="item">
+            <h3>${safeText(product.name)}</h3>
+
+            <label class="field-label">Nombre</label>
+            <input id="editName-${product.id}" value="${safeText(product.name)}" />
+
+            <label class="field-label">Descripción</label>
+            <textarea id="editDescription-${product.id}">${safeText(product.description || "")}</textarea>
+
+            <label class="field-label">Precio</label>
+            <input id="editPrice-${product.id}" type="number" step="0.01" value="${product.price}" />
+
+            <label class="field-label">Categoría</label>
+            <input id="editCategory-${product.id}" value="${safeText(product.category || "Otros")}" />
+
+            <label class="field-label">Datos requeridos</label>
+            <textarea id="editRequiredFields-${product.id}">${safeText(requiredFields.join(", "))}</textarea>
+
+            <label class="field-label">¿Cuándo descontar saldo?</label>
+            <select id="editChargeMode-${product.id}">
+              <option value="on_purchase" ${product.charge_mode === "on_purchase" ? "selected" : ""}>Descontar al comprar</option>
+              <option value="on_success" ${product.charge_mode === "on_success" ? "selected" : ""}>Descontar cuando el admin marque Éxito</option>
+            </select>
+
+            <label class="field-label">Stock</label>
+            <label class="checkbox-row">
+              <input
+                type="checkbox"
+                id="editStockEnabled-${product.id}"
+                ${stockEnabled ? "checked" : ""}
+              />
+              Activar stock para este producto
+            </label>
+
+            <input
+              id="editStock-${product.id}"
+              type="number"
+              min="0"
+              value="${Number(product.stock || 0)}"
+              placeholder="Cantidad disponible"
+            />
+
+            <div class="three-row">
+              <button onclick="updateProduct(${product.id})">Guardar cambios</button>
+              <button class="danger-btn" onclick="deleteProduct(${product.id})">Eliminar</button>
+              <button class="muted-btn" onclick="toggleProduct(${product.id})">Ver como cliente</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("adminProductsList").innerHTML =
+        html || "No hay productos creados.";
+    }
+
+    async function updateProduct(productId) {
+      try {
+        const requiredFields = document.getElementById("editRequiredFields-" + productId).value
+          .split(",")
+          .map(value => normalizeFieldName(value))
+          .filter(value => value.length > 0);
+
+        const data = await api("/api/admin/products/" + productId, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: document.getElementById("editName-" + productId).value,
+            description: document.getElementById("editDescription-" + productId).value,
+            price: document.getElementById("editPrice-" + productId).value,
+            category: document.getElementById("editCategory-" + productId).value,
+            required_fields: requiredFields,
+            charge_mode: document.getElementById("editChargeMode-" + productId).value,
+            stock_enabled: document.getElementById("editStockEnabled-" + productId).checked,
+            stock: document.getElementById("editStock-" + productId).value
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function deleteProduct(productId) {
+      if (!confirm("¿Seguro que quieres eliminar este producto?")) return;
+
+      try {
+        const data = await api("/api/admin/products/" + productId, {
+          method: "DELETE"
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadAdminOrders() {
+      const orders = await api("/api/admin/orders");
+
+      const html = orders.map(order => {
+        const orderData = parseJsonObject(order.order_data);
+
+        return `
+          <div class="item">
+            <p><b>Pedido:</b> #${order.id}</p>
+            <p><b>Cliente:</b> ${safeText(order.customer_name)}</p>
+            <p><b>Correo:</b> ${safeText(order.customer_email)}</p>
+            <p><b>Producto:</b> ${safeText(order.product_name)}</p>
+            <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
+            <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
+            <p><b>Cobrado:</b> ${Number(order.charged || 0) === 1 ? "Sí" : "No"}</p>
+            ${renderOrderData(orderData)}
+
+            <label class="field-label">Estado</label>
+            <select id="status-${order.id}">
+              <option value="accion_en_espera" ${order.status === "accion_en_espera" ? "selected" : ""}>Acción en espera</option>
+              <option value="en_proceso" ${order.status === "en_proceso" ? "selected" : ""}>En proceso</option>
+              <option value="exito" ${order.status === "exito" ? "selected" : ""}>Éxito</option>
+              <option value="rechazado" ${order.status === "rechazado" ? "selected" : ""}>Rechazado</option>
+            </select>
+
+            <label class="field-label">Respuesta para el cliente</label>
+            <textarea id="response-${order.id}" placeholder="Respuesta para el cliente">${safeText(order.admin_response || "")}</textarea>
+
+            <label class="checkbox-row">
+              <input type="checkbox" id="refund-${order.id}" />
+              Devolver saldo si se rechaza
+            </label>
+
+            <button onclick="updateOrderStatus(${order.id})">Actualizar pedido</button>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("adminOrdersList").innerHTML =
+        html || "No hay pedidos todavía.";
+    }
+
+    async function updateOrderStatus(orderId) {
+      try {
+        const status = document.getElementById("status-" + orderId).value;
+        const response = document.getElementById("response-" + orderId).value;
+        const refund = document.getElementById("refund-" + orderId).checked;
+
+        const data = await api("/api/admin/orders/" + orderId + "/status", {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: status,
+            response_message: response,
+            refund_if_rejected: refund
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    loadApp();
+  </script>
+</body>
+</html>

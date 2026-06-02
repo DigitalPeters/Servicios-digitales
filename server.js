@@ -1,0 +1,879 @@
+const express = require("express");
+const { Pool } = require("pg");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
+
+app.use(bodyParser.json({ limit: "10mb" }));
+app.use(cors());
+app.use(express.static("public"));
+
+// ===============================
+// NOTIFICACIONES POR CORREO CON RESEND
+// ===============================
+// Variables necesarias en Render:
+// RESEND_API_KEY = tu API key de Resend
+// NOTIFY_EMAIL = correo donde quieres recibir los pedidos
+// FROM_EMAIL = correo remitente. Si no tienes dominio verificado, usa onboarding@resend.dev
+function getMailConfig() {
+  const apiKey = process.env.RESEND_API_KEY || "";
+  const notifyTo = process.env.NOTIFY_EMAIL || process.env.ADMIN_EMAIL || process.env.EMAIL_USER || "";
+  const fromEmail = process.env.FROM_EMAIL || "onboarding@resend.dev";
+
+  return { apiKey, notifyTo, fromEmail };
+}
+
+function isMailConfigured() {
+  const { apiKey, notifyTo, fromEmail } = getMailConfig();
+  return Boolean(apiKey && notifyTo && fromEmail);
+}
+
+function formatOrderData(orderData) {
+  const data = safeJsonObject(orderData);
+  const entries = Object.entries(data);
+
+  if (entries.length === 0) {
+    return "Sin datos adicionales";
+  }
+
+  return entries
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
+}
+
+async function sendNewOrderEmail({ orderId, customerName, customerEmail, productName, amount, orderData }) {
+  try {
+    if (!isMailConfigured()) {
+      console.log("Correo NO enviado: faltan variables RESEND_API_KEY, NOTIFY_EMAIL o FROM_EMAIL.");
+      return;
+    }
+
+    const { apiKey, notifyTo, fromEmail } = getMailConfig();
+
+    const subject = `Nuevo pedido #${orderId} - ${productName}`;
+    const text = `
+Nuevo pedido recibido en Servicios Digitales Peters
+
+Pedido: #${orderId}
+Cliente: ${customerName || "Cliente"}
+Correo cliente: ${customerEmail || "Sin correo"}
+Producto: ${productName}
+Monto: $${Number(amount || 0).toFixed(2)}
+
+Datos del trámite:
+${formatOrderData(orderData)}
+
+Entra al panel de administrador para revisar el pedido.
+    `.trim();
+
+    console.log(`Intentando enviar correo con Resend desde ${fromEmail} hacia ${notifyTo}`);
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: `Servicios Digitales Peters <${fromEmail}>`,
+        to: [notifyTo],
+        subject,
+        text
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error("Error enviando correo con Resend:", JSON.stringify(result));
+      return;
+    }
+
+    console.log(`Correo enviado correctamente con Resend para pedido #${orderId} a ${notifyTo}`);
+  } catch (error) {
+    console.error("Error enviando correo de nuevo pedido:", error.message);
+  }
+}
+
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
+
+function safeJsonArray(value) {
+  try {
+    if (Array.isArray(value)) return value;
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeJsonObject(value) {
+  try {
+    if (typeof value === "object" && value !== null) return value;
+    const parsed = JSON.parse(value || "{}");
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeFieldName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ñ/g, "n")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function generateToken(user) {
+  return jwt.sign(
+    {
+      id: user.id,
+      role: user.role
+    },
+    SECRET,
+    {
+      expiresIn: "24h"
+    }
+  );
+}
+
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Token faltante" });
+  }
+
+  try {
+    req.user = jwt.verify(token, SECRET);
+    next();
+  } catch {
+    return res.status(403).json({ error: "Token inválido" });
+  }
+}
+
+function adminMiddleware(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ error: "Admin requerido" });
+  }
+
+  next();
+}
+
+async function initDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      email TEXT UNIQUE,
+      password TEXT,
+      role TEXT DEFAULT 'user',
+      balance NUMERIC DEFAULT 0
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      price NUMERIC,
+      category TEXT DEFAULT 'Otros',
+      required_fields TEXT DEFAULT '[]',
+      charge_mode TEXT DEFAULT 'on_purchase',
+      active INTEGER DEFAULT 1,
+      stock_enabled INTEGER DEFAULT 0,
+      stock INTEGER DEFAULT 0
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      product_id INTEGER REFERENCES products(id),
+      amount NUMERIC,
+      order_data TEXT DEFAULT '{}',
+      status TEXT DEFAULT 'accion_en_espera',
+      admin_response TEXT DEFAULT '',
+      charged INTEGER DEFAULT 0,
+      refunded INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Otros'`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS required_fields TEXT DEFAULT '[]'`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS charge_mode TEXT DEFAULT 'on_purchase'`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_enabled INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0`);
+
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_data TEXT DEFAULT '{}'`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accion_en_espera'`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS charged INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+
+  await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
+  await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
+  await pool.query(`UPDATE products SET active = 1 WHERE active IS NULL`);
+  await pool.query(`UPDATE products SET category = 'Otros' WHERE category IS NULL`);
+  await pool.query(`UPDATE products SET required_fields = '[]' WHERE required_fields IS NULL`);
+  await pool.query(`UPDATE products SET charge_mode = 'on_purchase' WHERE charge_mode IS NULL`);
+  await pool.query(`UPDATE products SET stock_enabled = 0 WHERE stock_enabled IS NULL`);
+  await pool.query(`UPDATE products SET stock = 0 WHERE stock IS NULL`);
+  await pool.query(`UPDATE orders SET order_data = '{}' WHERE order_data IS NULL`);
+  await pool.query(`UPDATE orders SET status = 'accion_en_espera' WHERE status IS NULL`);
+  await pool.query(`UPDATE orders SET admin_response = '' WHERE admin_response IS NULL`);
+  await pool.query(`UPDATE orders SET charged = 0 WHERE charged IS NULL`);
+  await pool.query(`UPDATE orders SET refunded = 0 WHERE refunded IS NULL`);
+}
+
+// REGISTRO
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "Faltan datos" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role, balance)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, role, balance`,
+      [name.trim(), email.trim().toLowerCase(), hashedPassword, "user", 0]
+    );
+
+    const user = result.rows[0];
+    const token = generateToken(user);
+
+    res.json({
+      token,
+      message: "Usuario registrado con éxito"
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(400).json({ error: "El usuario ya existe o los datos son inválidos" });
+  }
+});
+
+// LOGIN
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const result = await pool.query(
+      `SELECT * FROM users WHERE email = $1`,
+      [String(email || "").trim().toLowerCase()]
+    );
+
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const match = await bcrypt.compare(password || "", user.password);
+
+    if (!match) {
+      return res.status(401).json({ error: "Contraseña incorrecta" });
+    }
+
+    const token = generateToken(user);
+
+    res.json({ token });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error iniciando sesión" });
+  }
+});
+
+// MI CUENTA
+app.get("/api/me", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, role, balance FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando usuario" });
+  }
+});
+
+// PRODUCTOS ACTIVOS
+app.get("/api/products", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, description, price, category, required_fields, charge_mode, active, stock_enabled, stock
+       FROM products
+       WHERE active = 1
+       ORDER BY category ASC, name ASC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando productos" });
+  }
+});
+
+// ADMIN: CREAR PRODUCTO
+app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { name, description, price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
+
+    if (!name || !price) {
+      return res.status(400).json({ error: "Nombre y precio son obligatorios" });
+    }
+
+    const priceNumber = Number(price);
+
+    if (priceNumber <= 0) {
+      return res.status(400).json({ error: "El precio debe ser mayor a 0" });
+    }
+
+    const validChargeModes = ["on_purchase", "on_success"];
+    const finalChargeMode = validChargeModes.includes(charge_mode) ? charge_mode : "on_purchase";
+
+    const cleanFields = safeJsonArray(required_fields)
+      .map(field => normalizeFieldName(field))
+      .filter(field => field.length > 0);
+
+    await pool.query(
+      `INSERT INTO products
+       (name, description, price, category, required_fields, charge_mode, active, stock_enabled, stock)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)`,
+      [
+        name.trim(),
+        description || "",
+        priceNumber,
+        category || "Otros",
+        JSON.stringify([...new Set(cleanFields)]),
+        finalChargeMode,
+        stock_enabled ? 1 : 0,
+        Math.max(0, Number(stock || 0))
+      ]
+    );
+
+    res.json({ message: "Producto creado correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error creando producto" });
+  }
+});
+
+// ADMIN: MODIFICAR PRODUCTO
+app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const productId = req.params.productId;
+    const { name, description, price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
+
+    if (!name || !price) {
+      return res.status(400).json({ error: "Nombre y precio son obligatorios" });
+    }
+
+    const priceNumber = Number(price);
+
+    if (priceNumber <= 0) {
+      return res.status(400).json({ error: "El precio debe ser mayor a 0" });
+    }
+
+    const validChargeModes = ["on_purchase", "on_success"];
+    const finalChargeMode = validChargeModes.includes(charge_mode) ? charge_mode : "on_purchase";
+
+    const cleanFields = safeJsonArray(required_fields)
+      .map(field => normalizeFieldName(field))
+      .filter(field => field.length > 0);
+
+    const result = await pool.query(
+      `UPDATE products
+       SET name = $1,
+           description = $2,
+           price = $3,
+           category = $4,
+           required_fields = $5,
+           charge_mode = $6,
+           stock_enabled = $7,
+           stock = $8
+       WHERE id = $9 AND active = 1`,
+      [
+        name.trim(),
+        description || "",
+        priceNumber,
+        category || "Otros",
+        JSON.stringify([...new Set(cleanFields)]),
+        finalChargeMode,
+        stock_enabled ? 1 : 0,
+        Math.max(0, Number(stock || 0)),
+        productId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Producto no encontrado" });
+    }
+
+    res.json({ message: "Producto actualizado correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error modificando producto" });
+  }
+});
+
+// ADMIN: ELIMINAR PRODUCTO
+app.delete("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const productId = req.params.productId;
+
+    const result = await pool.query(
+      `UPDATE products SET active = 0 WHERE id = $1 AND active = 1`,
+      [productId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Producto no encontrado" });
+    }
+
+    res.json({ message: "Producto eliminado correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error eliminando producto" });
+  }
+});
+
+// COMPRAR PRODUCTO
+app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const productId = req.params.productId;
+    const userId = req.user.id;
+    const orderData = safeJsonObject(req.body.order_data);
+
+    await client.query("BEGIN");
+
+    const productResult = await client.query(
+      `SELECT * FROM products WHERE id = $1 AND active = 1 FOR UPDATE`,
+      [productId]
+    );
+
+    const product = productResult.rows[0];
+
+    if (!product) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Producto no encontrado" });
+    }
+
+    if (Number(product.stock_enabled || 0) === 1 && Number(product.stock || 0) <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Producto agotado. No hay stock disponible." });
+    }
+
+    const requiredFields = safeJsonArray(product.required_fields);
+
+    for (const field of requiredFields) {
+      const value = orderData[field];
+
+      if (!value || String(value).trim() === "") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `Debes ingresar: ${field}` });
+      }
+    }
+
+    const userResult = await client.query(
+      `SELECT id, balance FROM users WHERE id = $1 FOR UPDATE`,
+      [userId]
+    );
+
+    const user = userResult.rows[0];
+
+    if (!user) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const price = Number(product.price);
+    const balance = Number(user.balance);
+    const chargeMode = product.charge_mode || "on_purchase";
+
+    if (chargeMode === "on_purchase" && balance < price) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y el producto cuesta $${price.toFixed(2)}`
+      });
+    }
+
+    const charged = chargeMode === "on_purchase" ? 1 : 0;
+
+    if (charged === 1) {
+      await client.query(
+        `UPDATE users SET balance = balance - $1 WHERE id = $2`,
+        [price, userId]
+      );
+    }
+
+    const orderInsertResult = await client.query(
+      `INSERT INTO orders
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
+        userId,
+        productId,
+        price,
+        JSON.stringify(orderData),
+        "accion_en_espera",
+        "",
+        charged,
+        0
+      ]
+    );
+
+    const newOrderId = orderInsertResult.rows[0].id;
+
+    if (Number(product.stock_enabled || 0) === 1) {
+      await client.query(
+        `UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`,
+        [productId]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    const customerResult = await pool.query(
+      `SELECT name, email FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    const customer = customerResult.rows[0] || {};
+
+    sendNewOrderEmail({
+      orderId: newOrderId,
+      customerName: customer.name || "Cliente",
+      customerEmail: customer.email || "Sin correo",
+      productName: product.name,
+      amount: price,
+      orderData
+    });
+
+    if (charged === 1) {
+      return res.json({
+        message: `Compra realizada correctamente. Se descontaron $${price.toFixed(2)} de tu saldo.`
+      });
+    }
+
+    return res.json({
+      message: "Pedido creado correctamente. El saldo se descontará cuando el admin marque Éxito."
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err.message);
+    res.status(500).json({ error: "Error creando pedido" });
+  } finally {
+    client.release();
+  }
+});
+
+// MIS PEDIDOS
+app.get("/api/my-orders", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+        orders.id,
+        orders.user_id,
+        orders.product_id,
+        orders.amount,
+        orders.order_data,
+        orders.status,
+        orders.admin_response,
+        orders.charged,
+        orders.refunded,
+        orders.created_at,
+        products.name AS product_name,
+        products.category AS product_category,
+        products.charge_mode AS charge_mode
+       FROM orders
+       JOIN products ON orders.product_id = products.id
+       WHERE orders.user_id = $1
+       ORDER BY orders.id DESC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando pedidos" });
+  }
+});
+
+// ADMIN: USUARIOS
+app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, role, balance FROM users ORDER BY id DESC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando usuarios" });
+  }
+});
+
+// ADMIN: AGREGAR SALDO
+app.post("/api/admin/add-balance", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { user_id, amount, note } = req.body;
+
+    if (!user_id || !amount) {
+      return res.status(400).json({ error: "ID de usuario y cantidad son obligatorios" });
+    }
+
+    const amountNumber = Number(amount);
+
+    if (amountNumber <= 0) {
+      return res.status(400).json({ error: "La cantidad debe ser mayor a 0" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
+      [amountNumber, user_id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    res.json({
+      message: `Saldo agregado correctamente${note ? ": " + note : ""}`
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error agregando saldo" });
+  }
+});
+
+// ADMIN: PEDIDOS
+app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+        orders.id,
+        orders.user_id,
+        orders.product_id,
+        orders.amount,
+        orders.order_data,
+        orders.status,
+        orders.admin_response,
+        orders.charged,
+        orders.refunded,
+        orders.created_at,
+        users.name AS customer_name,
+        users.email AS customer_email,
+        products.name AS product_name,
+        products.category AS product_category,
+        products.charge_mode AS charge_mode
+       FROM orders
+       JOIN users ON orders.user_id = users.id
+       JOIN products ON orders.product_id = products.id
+       ORDER BY orders.id DESC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando pedidos de admin" });
+  }
+});
+
+// ADMIN: ACTUALIZAR PEDIDO
+app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const orderId = req.params.orderId;
+    const { status, response_message, refund_if_rejected } = req.body;
+
+    const validStatuses = ["accion_en_espera", "en_proceso", "exito", "rechazado"];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Estado inválido" });
+    }
+
+    await client.query("BEGIN");
+
+    const orderResult = await client.query(
+      `SELECT
+        orders.*,
+        products.charge_mode AS charge_mode
+       FROM orders
+       JOIN products ON orders.product_id = products.id
+       WHERE orders.id = $1
+       FOR UPDATE`,
+      [orderId]
+    );
+
+    const order = orderResult.rows[0];
+
+    if (!order) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Pedido no encontrado" });
+    }
+
+    const userResult = await client.query(
+      `SELECT id, balance FROM users WHERE id = $1 FOR UPDATE`,
+      [order.user_id]
+    );
+
+    const user = userResult.rows[0];
+
+    if (!user) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const amount = Number(order.amount);
+    const charged = Number(order.charged || 0);
+    const refunded = Number(order.refunded || 0);
+    const balance = Number(user.balance);
+
+    const shouldChargeOnSuccess =
+      status === "exito" &&
+      charged === 0;
+
+    if (shouldChargeOnSuccess && balance < amount) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: `No se puede marcar Éxito. El cliente no tiene saldo suficiente. Saldo: $${balance.toFixed(2)}, costo: $${amount.toFixed(2)}`
+      });
+    }
+
+    const shouldRefund =
+      status === "rechazado" &&
+      refund_if_rejected === true &&
+      charged === 1 &&
+      refunded === 0;
+
+    if (shouldChargeOnSuccess) {
+      await client.query(
+        `UPDATE users SET balance = balance - $1 WHERE id = $2`,
+        [amount, order.user_id]
+      );
+
+      await client.query(
+        `UPDATE orders SET charged = 1 WHERE id = $1`,
+        [orderId]
+      );
+    }
+
+    if (shouldRefund) {
+      await client.query(
+        `UPDATE users SET balance = balance + $1 WHERE id = $2`,
+        [amount, order.user_id]
+      );
+
+      await client.query(
+        `UPDATE orders SET refunded = 1 WHERE id = $1`,
+        [orderId]
+      );
+    }
+
+    await client.query(
+      `UPDATE orders SET status = $1, admin_response = $2 WHERE id = $3`,
+      [status, response_message || "", orderId]
+    );
+
+    await client.query("COMMIT");
+
+    if (shouldChargeOnSuccess) {
+      return res.json({
+        message: `Pedido actualizado correctamente. Se descontaron $${amount.toFixed(2)} del saldo del cliente.`
+      });
+    }
+
+    if (shouldRefund) {
+      return res.json({
+        message: `Pedido actualizado correctamente. Se devolvieron $${amount.toFixed(2)} al cliente.`
+      });
+    }
+
+    res.json({ message: "Pedido actualizado correctamente" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando pedido" });
+  } finally {
+    client.release();
+  }
+});
+
+
+// ADMIN: PROBAR CORREO DE NOTIFICACIÓN
+app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await sendNewOrderEmail({
+      orderId: "PRUEBA",
+      customerName: "Prueba Admin",
+      customerEmail: "prueba@correo.com",
+      productName: "Correo de prueba",
+      amount: 0,
+      orderData: {
+        mensaje: "Si recibes este correo, Resend está funcionando correctamente."
+      }
+    });
+
+    res.json({ message: "Prueba de correo ejecutada con Resend. Revisa tu bandeja y los Logs de Render." });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error probando correo" });
+  }
+});
+
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error("Error iniciando base de datos:", err.message);
+    process.exit(1);
+  });
