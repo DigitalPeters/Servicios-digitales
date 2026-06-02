@@ -1,0 +1,6 @@
+node_modules
+.env
+database.sqlite
+database_danada.sqlite
+tienda
+*.sqlite
