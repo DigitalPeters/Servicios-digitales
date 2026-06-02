@@ -4,442 +4,203 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Servicios Digitales Peters</title>
-
   <style>
+    :root{
+      --primary:#17134f;
+      --primary2:#2b1f70;
+      --bg:#f4f6fb;
+      --card:#ffffff;
+      --text:#111827;
+      --muted:#6b7280;
+      --line:#e5e7eb;
+      --success:#008b2f;
+      --danger:#dc2626;
+      --warning:#b45309;
+      --shadow:0 14px 35px rgba(17,24,39,.10);
+      --radius:22px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);font-size:16px}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer;border:0;border-radius:14px;padding:13px 18px;background:var(--primary);color:white;font-weight:800;transition:.15s}
+    button:hover{transform:translateY(-1px);opacity:.95}
+    input,select,textarea{width:100%;padding:14px 16px;border:1px solid #d1d5db;border-radius:14px;background:white;margin:8px 0 14px;outline:none}
+    input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(23,19,79,.10)}
+    label{font-weight:800;color:#374151;display:block;margin-top:8px}
+    h1,h2,h3{margin:0 0 14px;color:var(--text)}
+    .hidden{display:none!important}
+    .message{font-weight:800;margin:14px 0}.success{color:green}.error{color:red}.muted{color:var(--muted)}
 
-:root{
-  --navy:#15134d;
-  --navy2:#0f123d;
-  --accent:#6d28d9;
-  --green:#078a5a;
-  --orange:#f59e0b;
-  --red:#dc2626;
-  --bg:#f4f6fb;
-  --card:#ffffff;
-  --text:#17172a;
-  --muted:#6b7280;
-  --line:#e5e7eb;
-  --shadow:0 18px 45px rgba(17,24,39,.10);
-  --radius:22px;
-}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{
-  margin:0;
-  font-family:Inter,Arial,Helvetica,sans-serif;
-  background:var(--bg);
-  color:var(--text);
-  font-size:16px;
-}
-body::before{
-  content:'';
-  position:fixed;
-  inset:0 0 auto 0;
-  height:180px;
-  background:linear-gradient(135deg,var(--navy),#201a68 55%,#3b1d84);
-  z-index:-1;
-}
-.container{width:min(1240px,calc(100% - 32px));margin:0 auto;padding:28px 0 60px}
-h1{margin:0 0 18px;color:#fff;font-size:38px;letter-spacing:-.04em;font-weight:900}
-#message{font-size:18px;font-weight:800;margin:8px 0 18px;color:#16a34a}
-.hidden{display:none!important}.danger{color:var(--red)!important}.success{color:#047857!important}
-.card{
-  background:var(--card);
-  border:1px solid rgba(229,231,235,.85);
-  border-radius:var(--radius);
-  padding:26px;
-  margin-bottom:22px;
-  box-shadow:var(--shadow);
-}
-.card h2{margin:0 0 16px;font-size:25px;letter-spacing:-.03em;color:#1f2937}.card h3{margin:14px 0 10px;color:#1f2937}
-.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
-.topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px}
-input,textarea,select{
-  width:100%;padding:15px 16px;margin:9px 0 14px;border:1px solid #d1d5db;border-radius:14px;background:#fff;color:#111827;font-size:16px;outline:none;transition:.15s;
-}
-textarea{min-height:92px;resize:vertical}input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(109,40,217,.12)}
-button{
-  width:100%;border:0;border-radius:15px;background:var(--navy);color:white;padding:15px 18px;margin:8px 0;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 10px 18px rgba(21,19,77,.18);transition:.15s;
-}
-button:hover{transform:translateY(-1px);filter:brightness(1.04)}button:active{transform:translateY(0)}
-button:disabled{opacity:.55;cursor:not-allowed}.green-btn{background:var(--green)!important}.orange-btn{background:var(--orange)!important;color:#111827!important}.danger-btn{background:var(--red)!important}.secondary-btn{background:#eef2ff!important;color:var(--navy)!important;box-shadow:none;border:1px solid #c7d2fe!important}
-.small-text{color:var(--muted);font-size:14px;line-height:1.45}.field-label{display:block;margin:6px 0 0;font-weight:800;color:#374151}.checkbox-row{display:flex;gap:10px;align-items:center;color:#374151;font-weight:700}.checkbox-row input{width:auto;margin:0}
-.quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.quick-actions button{margin:0}
-.account-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:12px}
-.account-box{background:#f8fafc;border:1px solid #e5e7eb;border-radius:18px;padding:18px}.account-label{text-transform:uppercase;font-size:12px;font-weight:900;color:#6b7280;letter-spacing:.05em}.account-value{font-size:20px;font-weight:900;margin-top:8px;word-break:break-word;color:#111827}
-.badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:#eef2ff;color:var(--navy);padding:7px 12px;margin:4px 6px 4px 0;font-size:13px;font-weight:800}.status{display:inline-block;border-radius:999px;padding:6px 12px;font-weight:900;background:#f3f4f6}.status-waiting{color:#92400e;background:#fef3c7}.status-success{color:#047857;background:#d1fae5}.status-rejected{color:#b91c1c;background:#fee2e2}
-.product-card,.order-card,.admin-product-card,.balance-request-card,.report-card{border:1px solid #e5e7eb;background:#fff;border-radius:18px;padding:18px;margin:14px 0;box-shadow:0 8px 20px rgba(17,24,39,.06)}
-.product-head,.admin-product-head{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer}.product-title,.admin-product-title{font-size:21px;font-weight:900}.product-category{display:inline-block;margin:0 0 10px;padding:8px 12px;border-radius:12px;background:var(--navy);color:#fff;font-weight:800}.product-body,.admin-product-body{display:none;margin-top:16px}.product-card.open .product-body,.admin-product-card.open .admin-product-body{display:block}.price{font-size:20px;font-weight:900}.charge-note{color:#4b5563;font-weight:700}.out-stock{opacity:.65;background:#f9fafb}.category-title{background:var(--navy);color:white;border-radius:15px;padding:13px 16px;margin:22px 0 10px;font-weight:900}.filters{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin:10px 0 18px}.inline-actions{display:flex;gap:10px;flex-wrap:wrap}.inline-actions button{width:auto;min-width:150px}.rejected-toggle{display:flex;justify-content:flex-end;margin-bottom:10px}
-.recharge-card,.account-report-card{margin-top:18px;background:#ffffff;border:1px solid #dbeafe;border-radius:20px;padding:18px;box-shadow:0 10px 30px rgba(15,23,42,.08)}.recharge-title,.report-title{display:flex;justify-content:space-between;gap:12px;align-items:center}.panel-close-btn{width:auto;background:#374151!important;padding:10px 16px;box-shadow:none}.balance-alert{border:1px solid #99f6e4;background:#ecfdf5;color:#065f46;border-radius:16px;padding:16px;margin:15px 0}.bank-box{border:1px dashed #94a3b8;background:#f8fafc;border-radius:16px;padding:16px;margin:12px 0}.copy-btn{width:auto;background:#111827!important;padding:10px 14px;margin:4px 0;box-shadow:none}.form-panel{padding-top:8px}.mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.admin-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.admin-title h2{color:#fff}
-/* Dashboard look for admin */
-body.admin-mode .container{width:min(1320px,calc(100% - 32px));padding-left:92px}body.admin-mode::after{content:'☷\A⌂\A▦\A▣\A●';white-space:pre;position:fixed;left:0;top:0;bottom:0;width:76px;background:var(--navy);color:#fff;display:flex;flex-direction:column;align-items:center;gap:42px;padding-top:95px;font-size:28px;text-align:center;line-height:2.6;z-index:10;border-radius:0 18px 18px 0}body.admin-mode h1{position:relative;padding:18px 26px;border-radius:22px;background:rgba(255,255,255,.12);backdrop-filter:blur(8px);display:inline-flex;align-items:center;gap:12px}body.admin-mode #appSection>.card:first-child{display:grid;grid-template-columns:1fr auto;align-items:start}body.admin-mode .account-grid{grid-template-columns:repeat(4,1fr)}body.admin-mode #adminSection{display:block!important}body.admin-mode #adminSection>.row{grid-template-columns:1.15fr .85fr}body.admin-mode #adminSection>.card,body.admin-mode #adminSection>.row>.card{border-radius:22px}
-/* Client look */
-body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.user-mode #clientSection{display:grid;grid-template-columns:1fr;gap:6px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:26px 0 12px}.section-title h2{margin:0;color:#111827}.section-title .hint{color:var(--muted);font-size:14px}
-/* login */
-#authSection{margin-top:18px}.login-card{position:relative;overflow:hidden}.login-card::before{content:'';position:absolute;left:0;right:0;bottom:0;height:105px;background:var(--navy);z-index:0}.login-card>*{position:relative;z-index:1}.login-card h2{margin-top:20px;text-align:center}.login-card button{border-radius:999px}.login-card input{background:#eef4ff;border-width:0 0 1px 0;border-radius:0}.login-card .avatar{width:86px;height:86px;margin:-4px auto 10px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:42px;box-shadow:0 12px 35px rgba(21,19,77,.25)}
-@media(max-width:850px){
-  body::before{height:150px}.container{width:calc(100% - 22px);padding:18px 0 40px}h1{font-size:32px}.row,.grid,.filters,.mini-grid,.account-grid{grid-template-columns:1fr}.card{padding:18px;border-radius:20px}.quick-actions{grid-template-columns:1fr}.topbar{align-items:flex-start}.topbar button{max-width:none!important}.inline-actions button{width:100%}body.admin-mode .container{padding-left:0}body.admin-mode::after{display:none}body.admin-mode #appSection>.card:first-child{display:block}body.admin-mode .account-grid{grid-template-columns:1fr}body.admin-mode #adminSection>.row{grid-template-columns:1fr}.admin-title h2{color:#111827}.product-head,.admin-product-head{align-items:flex-start;flex-direction:column}.account-value{font-size:18px}
-}
+    .auth-wrap{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;padding:48px;background:linear-gradient(135deg,var(--primary),#3b1f84 45%,#f5f6fb 45%)}
+    .auth-hero{color:white;padding:30px}.auth-hero h1{color:white;font-size:54px;line-height:1}.auth-hero p{font-size:20px;opacity:.9;max-width:520px}
+    .auth-card{background:white;border-radius:28px;padding:34px;box-shadow:var(--shadow)}
+    .auth-grid{display:grid;gap:24px}.auth-card button{width:100%;margin-top:8px}
 
-</style>
-<!-- Diseño dashboard profesional aplicado: saldo/reporte ocultos hasta click -->
+    .app-shell{min-height:100vh;display:grid;grid-template-columns:285px 1fr;background:var(--bg)}
+    .sidebar{position:sticky;top:0;height:100vh;background:var(--primary);color:white;padding:22px 18px;overflow:auto}
+    .brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.brand-logo{width:56px;height:56px;border-radius:50%;background:white;color:var(--primary);display:grid;place-items:center;font-size:28px;font-weight:900}.brand-title{font-size:20px;font-weight:900;line-height:1.2}.brand-email{font-size:13px;opacity:.75;word-break:break-word}
+    .nav-btn{width:100%;display:flex;align-items:center;gap:14px;background:transparent;color:white;text-align:left;margin:6px 0;padding:15px 16px;border-radius:18px;font-weight:800}.nav-btn.active,.nav-btn:hover{background:white;color:var(--primary);transform:none}.nav-icon{width:24px;text-align:center}.sidebar-footer{margin-top:30px}.logout-btn{width:100%;background:#ef4444}
+    .main{padding:22px 28px 40px;min-width:0}.topbar{height:76px;background:white;border-radius:0 0 22px 22px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 18px;margin:-22px -28px 28px}.searchbox{max-width:430px;display:flex;align-items:center;gap:10px;border:1px solid #d1d5db;border-radius:16px;padding:0 14px;background:white}.searchbox input{border:0;margin:0;box-shadow:none}.top-actions{display:flex;align-items:center;gap:14px}.pill{padding:10px 18px;border-radius:12px;background:var(--success);color:white;font-weight:900}.user-chip{display:flex;align-items:center;gap:10px;font-weight:800}.avatar{width:42px;height:42px;border-radius:50%;background:#f1eef4;color:var(--primary);display:grid;place-items:center;font-weight:900}
+    .view-title{font-size:30px;font-weight:900;margin-bottom:22px}.dashboard-grid{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:22px;margin-bottom:26px}.stat-card{background:white;border-radius:20px;padding:22px;box-shadow:var(--shadow);display:flex;align-items:center;gap:18px}.stat-icon{width:64px;height:64px;border-radius:14px;background:var(--primary);color:white;display:grid;place-items:center;font-size:28px;font-weight:900}.stat-label{color:#555;font-size:20px;font-weight:800}.stat-value{font-size:30px;font-weight:900;color:var(--primary)}
+    .card{background:white;border-radius:var(--radius);padding:24px;box-shadow:var(--shadow);margin-bottom:24px}.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.section-row{display:grid;grid-template-columns:1fr 1fr;gap:22px}.info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.info-box{border:1px solid var(--line);background:#fafbff;border-radius:18px;padding:16px}.info-box b{display:block;color:#6b7280;font-size:13px;text-transform:uppercase;margin-bottom:8px}.info-box span{font-size:21px;font-weight:900;word-break:break-word}.actions-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.secondary{background:#4b5563}.green{background:#07865f}.danger{background:#dc2626}.small-btn{padding:10px 12px;font-size:14px}.copy-btn{background:#111827}
+    .clean-category{background:var(--primary);color:white;border-radius:16px;padding:15px 18px;font-size:20px;font-weight:900;margin:20px 0 12px}.product-card,.order-card,.admin-list-item{background:#fff;border:1px solid var(--line);border-radius:18px;padding:18px;margin:12px 0;box-shadow:0 6px 18px rgba(17,24,39,.06)}.product-card h3{font-size:22px}.product-meta{display:flex;gap:10px;flex-wrap:wrap}.tag{display:inline-flex;border-radius:999px;background:#eef2ff;color:var(--primary);padding:6px 10px;font-weight:800;font-size:13px}.required-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0}.buy-form{margin-top:12px}.product-card details summary,.admin-product-card summary{font-weight:900;cursor:pointer;padding:12px;border-radius:14px;background:#f8fafc}
+    .admin-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.table-like{overflow:auto}.empty{padding:22px;text-align:center;color:#6b7280;border:1px dashed #d1d5db;border-radius:18px;background:#fafafa}.alert{border-radius:18px;padding:16px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}.bank-data{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.bank-item{background:#f8fafc;border:1px solid var(--line);padding:16px;border-radius:18px}.bank-item b{display:block;color:#6b7280;margin-bottom:6px}.status-pending{color:#b45309;font-weight:900}.status-success,.status-exito{color:green;font-weight:900}.status-rejected,.status-rechazado{color:red;font-weight:900}
+    @media(max-width:920px){.app-shell{grid-template-columns:1fr}.sidebar{position:relative;height:auto;border-radius:0 0 24px 24px}.main{padding:16px}.topbar{margin:0 0 20px;border-radius:20px;flex-wrap:wrap;height:auto}.dashboard-grid,.section-row,.info-grid{grid-template-columns:1fr}.auth-wrap{grid-template-columns:1fr;padding:24px}.auth-hero h1{font-size:38px}.bank-data{grid-template-columns:1fr}}
+  </style>
 </head>
-
 <body>
-  <div class="container">
-    <h1>Servicios Digitales Peters</h1>
-    <p class="brand-subtitle">Plataforma de trámites y servicios digitales.</p>
-
-    <div id="message"></div>
-
-    <div id="authSection" class="row">
-      <div class="card">
-        <div class="avatar">👤</div>
+  <div id="authSection" class="auth-wrap">
+    <div class="auth-hero">
+      <h1>Servicios Digitales Peters</h1>
+      <p>Plataforma de trámites y servicios digitales con saldo, pedidos y atención a fallas.</p>
+      <p id="message" class="message"></p>
+    </div>
+    <div class="auth-grid">
+      <div class="auth-card">
         <h2>Iniciar sesión</h2>
-        <input id="loginEmail" placeholder="Correo" />
+        <input id="loginEmail" type="email" placeholder="Correo" />
         <input id="loginPassword" type="password" placeholder="Contraseña" />
-        <button onclick="login()">Entrar</button>
+        <button onclick="login()">Iniciar sesión</button>
       </div>
-
-      <div class="card">
+      <div class="auth-card">
         <h2>Crear cuenta</h2>
         <input id="registerName" placeholder="Nombre" />
-        <input id="registerEmail" placeholder="Correo" />
+        <input id="registerEmail" type="email" placeholder="Correo" />
         <input id="registerPassword" type="password" placeholder="Contraseña" />
         <button onclick="register()">Registrarme</button>
       </div>
     </div>
-
-    <div id="appSection" class="hidden">
-      <div class="dashboard-shell" id="dashboardShell">
-        <aside class="dashboard-sidebar">
-          <div class="brand-box">
-            <div class="brand-logo">P</div>
-            <div>
-              <div class="brand-title">Servicios Digitales Peters</div>
-              <div class="brand-subtitle" id="sideEmail">Panel de control</div>
-            </div>
-          </div>
-          <nav class="side-menu">
-            <button class="side-btn active" data-view="dashboard" onclick="showDashView('dashboard')"><span class="side-icon">◷</span> Dashboard</button>
-            <button class="side-btn" data-view="account" onclick="showDashView('account')"><span class="side-icon">👤</span> Mi cuenta</button>
-            <button class="side-btn" data-view="store" onclick="showDashView('store')"><span class="side-icon">🛒</span> Tienda</button>
-            <button class="side-btn only-user-menu" data-view="balance" onclick="showDashView('balance')"><span class="side-icon">💳</span> Cargar saldo</button>
-            <button class="side-btn only-user-menu" data-view="report" onclick="showDashView('report')"><span class="side-icon">⚠</span> Reportar falla</button>
-            <button class="side-btn only-admin-menu" data-view="adminProducts" onclick="showDashView('adminProducts')"><span class="side-icon">Ⓟ</span> Productos</button>
-            <button class="side-btn only-admin-menu" data-view="adminOrders" onclick="showDashView('adminOrders')"><span class="side-icon">▤</span> Pedidos</button>
-            <button class="side-btn only-admin-menu" data-view="adminBalance" onclick="showDashView('adminBalance')"><span class="side-icon">💲</span> Solicitudes saldo</button>
-            <button class="side-btn only-admin-menu" data-view="adminReports" onclick="showDashView('adminReports')"><span class="side-icon">⚙</span> Reportes</button>
-            <button class="side-btn only-admin-menu" data-view="adminUsers" onclick="showDashView('adminUsers')"><span class="side-icon">👥</span> Usuarios</button>
-          </nav>
-        </aside>
-        <main class="dashboard-main">
-          <div class="dash-topbar">
-            <div class="top-search"><span style="font-size:22px">🔎</span><input id="globalSearch" placeholder="Buscar..." oninput="dashboardSearch(this.value)" /></div>
-            <span class="top-pill">Abierto</span>
-            <button style="width:auto;margin:0" onclick="showDashView('store')">🏠 Tienda</button>
-            <div class="top-user"><span class="top-avatar">👤</span><span id="topUserName">Usuario</span></div>
-          </div>
-          <section id="viewDashboard" class="dash-view active">
-            <div class="dash-grid">
-              <div class="metric-card"><div class="metric-icon">👤</div><div><div class="metric-label">Usuarios</div><div class="metric-value" id="statUsers">0</div></div></div>
-              <div class="metric-card"><div class="metric-icon">Ⓟ</div><div><div class="metric-label">Productos</div><div class="metric-value" id="statProducts">0</div></div></div>
-              <div class="metric-card"><div class="metric-icon">▤</div><div><div class="metric-label">Pedidos</div><div class="metric-value" id="statOrders">0</div></div></div>
-            </div>
-            <div class="dashboard-row">
-              <div class="dashboard-card"><div class="section-title-row"><h2>Accesos rápidos</h2><span class="pill-status">Online</span></div><div class="admin-actions-bar"><button onclick="showDashView('store')">Ir a tienda</button><button onclick="showDashView('account')">Mi cuenta</button><button class="only-user-menu" onclick="showDashView('balance')">Cargar saldo</button><button class="only-user-menu" onclick="showDashView('report')">Reportar falla</button><button class="only-admin-menu" onclick="showDashView('adminProducts')">Administrar productos</button><button class="only-admin-menu" onclick="showDashView('adminOrders')">Ver pedidos</button></div></div>
-              <div class="dashboard-card"><h2>Resumen</h2><p class="small-text">Usa el menú lateral para abrir solo la opción que necesites. Las secciones de saldo y reportes permanecen ocultas hasta que entras en ellas.</p></div>
-            </div>
-          </section>
-          <section id="viewAccount" class="dash-view">
-      <div class="card">
-        <div class="topbar">
-          <h2>Mi cuenta</h2>
-          <button style="max-width:180px" onclick="logout()">Cerrar sesión</button>
-        </div>
-
-        <div class="account-grid">
-          <div class="account-box">
-            <div class="account-label">Nombre</div>
-            <div class="account-value" id="userName"></div>
-          </div>
-
-          <div class="account-box">
-            <div class="account-label">Correo</div>
-            <div class="account-value" id="userEmail"></div>
-          </div>
-
-          <div class="account-box">
-            <div class="account-label">Rol</div>
-            <div class="account-value" id="userRole"></div>
-          </div>
-
-          <div class="account-box">
-            <div class="account-label">Saldo</div>
-            <div class="account-value">$<span id="userBalance"></span></div>
-          </div>
-        </div>
-
-        <div class="quick-actions">
-          <button class="green-btn" onclick="openClientPanel('rechargeCard')">+ Cargar saldo</button>
-          <button class="orange-btn" onclick="openClientPanel('accountReportCard')">Reportar falla</button>
-        </div>
-
-        <div id="rechargeCard" class="recharge-card hidden">
-          <div class="recharge-title">
-            <div>
-              <h2>Recargar saldo</h2>
-              <p class="small-text" style="margin-bottom:0">Solicita que revisemos tu transferencia y agreguemos saldo a tu cuenta.</p>
-            </div>
-            <button class="panel-close-btn" onclick="closeClientPanel('rechargeCard')">Cerrar</button>
-          </div>
-
-          <div id="balanceDetailsPanel" class="collapsible-panel open">
-          <div class="balance-alert" style="background:#ecfeff;border-color:#67e8f9;color:#164e63">
-            <b>Datos para transferencia:</b><br>
-            <b>Banco:</b> Mercado Pago<br>
-            <b>Titular:</b> Pedro Garcia Diaz<br>
-            <b>CLABE:</b> <span class="copy-row"><code id="bankClabe">722969020555596471</code><button type="button" class="copy-mini-btn" onclick="copyText('bankClabe')">Copiar CLABE</button></span>
-            <b>Concepto:</b> <span class="copy-row"><code id="bankConcept">ropa o comida</code><button type="button" class="copy-mini-btn" onclick="copyText('bankConcept')">Copiar concepto</button></span>
-          </div>
-
-          <div class="balance-alert">
-            El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa el pago y aprueba la carga.
-          </div>
-
-          <div id="balanceRequestForm" class="balance-form">
-            <label class="field-label">Monto transferido</label>
-            <input id="rechargeAmount" type="number" step="0.01" min="1" placeholder="Ejemplo: 100" />
-
-            <label class="field-label">Banco desde donde enviaste</label>
-            <input id="rechargeBank" placeholder="Ejemplo: BBVA, Banorte, Nu, Mercado Pago" />
-
-            <label class="field-label">Referencia / clave de rastreo</label>
-            <input id="rechargeReference" placeholder="Referencia o clave de rastreo" />
-
-            <label class="field-label">Nombre del titular que envió</label>
-            <input id="rechargeHolder" placeholder="Nombre completo del titular" />
-
-            <label class="field-label">Comprobante o nota opcional</label>
-            <input id="rechargeProof" placeholder="Liga de comprobante, folio o nota" />
-
-            <button onclick="sendBalanceRequest()">Enviar solicitud de saldo</button>
-          </div>
-
-          <h3>Mis solicitudes de saldo</h3>
-          <div id="myBalanceRequestsList"></div>
-          </div>
-        </div>
-
-        <div id="accountReportCard" class="recharge-card hidden">
-          <div class="recharge-title">
-            <div>
-              <h2>Reportar problema de cuenta</h2>
-              <p class="small-text" style="margin-bottom:0">Envíanos el correo de la cuenta y explica la falla. El administrador revisará y dará el veredicto final.</p>
-            </div>
-            <button class="panel-close-btn" onclick="closeClientPanel('accountReportCard')">Cerrar</button>
-          </div>
-
-          <div id="accountReportForm" class="hidden">
-            <label class="field-label">Correo con falla</label>
-            <input id="reportEmail" type="email" placeholder="correo@ejemplo.com" />
-
-            <label class="field-label">Tipo de falla</label>
-            <select id="reportIssueType">
-              <option value="contraseña_incorrecta">Contraseña incorrecta</option>
-              <option value="codigo_de_viaje">Código de viaje</option>
-              <option value="codigo_de_acceso_disney">Código de acceso Disney</option>
-              <option value="codigo_de_hbo">Código de HBO</option>
-              <option value="otro">Otro</option>
-            </select>
-
-            <label class="field-label">Explicación de la falla</label>
-            <textarea id="reportDescription" placeholder="Explica qué problema tiene la cuenta"></textarea>
-
-            <button onclick="sendAccountReport()">Enviar reporte</button>
-          </div>
-
-          <h3>Mis reportes</h3>
-          <div id="myAccountReportsList"></div>
-        </div>
-
-      </div>
-      </section>
-
-      <section id="viewStore" class="dash-view compact-products">
-      <div class="row">
-        <div class="card">
-          <h2>Productos</h2>
-          <p class="small-text">Selecciona un producto para ver los datos que debes ingresar.</p>
-          <div id="productsList"></div>
-        </div>
-
-        <div class="card">
-          <h2>Mis pedidos</h2>
-          <div id="myOrdersList"></div>
-        </div>
-      </div>
-
-      </section>
-
-      <div id="adminSection" class="hidden">
-        <div class="admin-title">
-          <h2 style="margin:0">Panel de administrador</h2>
-        </div>
-
-        <section id="viewAdminProducts" class="dash-view">
-        <div class="dashboard-card">
-          <div class="section-title-row"><h2>Productos</h2><button style="width:auto" onclick="toggleCreateProductBox()">+ Agregar producto</button></div>
-          <div id="createProductBox" class="hidden">
-            <h2>Crear producto</h2>
-
-            <label class="field-label">Nombre del producto</label>
-            <input id="productName" placeholder="Ejemplo: Acta de Nacimiento" />
-
-            <label class="field-label">Descripción</label>
-            <textarea id="productDescription" placeholder="Descripción que verá el cliente"></textarea>
-
-            <label class="field-label">Precio</label>
-            <input id="productPrice" type="number" step="0.01" placeholder="Precio" />
-
-            <label class="field-label">Categoría</label>
-            <input id="productCategory" placeholder="Ejemplo: Actas, CSF, IMSS" />
-
-            <label class="field-label">Datos requeridos</label>
-            <textarea id="productRequiredFields" placeholder="Escribe separados por coma. Ejemplo: curp, nombre completo, nss"></textarea>
-            <p class="small-text">Puedes poner cualquier dato que ocupe el trámite.</p>
-
-            <label class="field-label">¿Cuándo descontar saldo?</label>
-            <select id="productChargeMode">
-              <option value="on_purchase">Descontar al comprar</option>
-              <option value="on_success">Descontar cuando el admin marque Éxito</option>
-            </select>
-
-            <label class="field-label">Stock</label>
-            <label class="checkbox-row">
-              <input type="checkbox" id="productStockEnabled" />
-              Activar stock para este producto
-            </label>
-
-            <input id="productStock" type="number" min="0" value="0" placeholder="Cantidad disponible" />
-
-            <button onclick="createProduct()">Crear producto</button>
-          </div>
-          <hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb">
-          <h2>Productos creados</h2>
-          <div id="adminProductsList"></div>
-        </div>
-        </section>
-
-        <section id="viewAdminUsers" class="dash-view">
-          <div class="dashboard-card">
-            <h2>Agregar saldo manual / Usuarios</h2>
-            <input id="balanceUserId" type="number" placeholder="ID del usuario" />
-            <input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" />
-            <input id="balanceNote" placeholder="Nota" />
-            <button onclick="addBalance()">Agregar saldo</button>
-
-            <hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb">
-
-            <h2>Usuarios</h2>
-            <div id="usersList"></div>
-          </div>
-        </section>
-
-        <section id="viewAdminBalance" class="dash-view">
-        <div class="dashboard-card">
-          <h2>Solicitudes de carga de saldo</h2>
-          <p class="small-text">Revisa tu banco antes de aprobar. Al aprobar, el saldo se suma automáticamente al cliente.</p>
-          <div id="adminBalanceRequestsList"></div>
-        </div>
-        </section>
-
-        <section id="viewAdminReports" class="dash-view">
-        <div class="dashboard-card">
-          <h2>Reportes de cuenta</h2>
-          <p class="small-text">El cliente solo reporta la falla. El veredicto final lo decides tú como admin.</p>
-          <div id="adminAccountReportsList"></div>
-        </div>
-        </section>
-
-        <section id="viewAdminOrders" class="dash-view">
-        <div class="dashboard-card">
-          <h2>Pedidos</h2>
-          <div id="adminOrdersList"></div>
-        </div>
-        </section>
-      </div>
-        </main>
-      </div>
-    </div>
   </div>
 
-  <script>
+  <div id="appSection" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">P</div>
+        <div><div class="brand-title">Servicios Digitales Peters</div><div id="topUserEmail" class="brand-email"></div></div>
+      </div>
+      <button class="nav-btn active" data-view="dashboard" onclick="showView('dashboard')"><span class="nav-icon">◷</span>Dashboard</button>
+      <button class="nav-btn" data-view="account" onclick="showView('account')"><span class="nav-icon">👤</span>Mi cuenta</button>
+      <button class="nav-btn" data-view="store" onclick="showView('store')"><span class="nav-icon">🛒</span>Tienda</button>
+      <button class="nav-btn" data-view="recharge" onclick="showView('recharge')"><span class="nav-icon">💳</span>Cargar saldo</button>
+      <button class="nav-btn" data-view="client-report" onclick="showView('client-report')"><span class="nav-icon">⚠</span>Reportar falla</button>
+      <button class="nav-btn admin-only hidden" data-view="admin-products" onclick="showView('admin-products')"><span class="nav-icon">Ⓟ</span>Productos</button>
+      <button class="nav-btn admin-only hidden" data-view="admin-orders" onclick="showView('admin-orders')"><span class="nav-icon">▤</span>Pedidos</button>
+      <button class="nav-btn admin-only hidden" data-view="admin-users" onclick="showView('admin-users')"><span class="nav-icon">👥</span>Usuarios</button>
+      <button class="nav-btn admin-only hidden" data-view="admin-balances" onclick="showView('admin-balances')"><span class="nav-icon">💵</span>Saldos</button>
+      <button class="nav-btn admin-only hidden" data-view="admin-reports" onclick="showView('admin-reports')"><span class="nav-icon">🛠</span>Reportes</button>
+      <div class="sidebar-footer"><button class="logout-btn" onclick="logout()">Cerrar sesión</button></div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="searchbox"><b>🔎</b><input id="globalSearch" placeholder="Buscar producto..." oninput="filterProducts()" /></div>
+        <div class="top-actions"><span class="pill">Abierto</span><button class="secondary" onclick="window.print()">Instalar</button><div class="user-chip"><span class="avatar">●</span><span id="topUserName">Usuario</span></div></div>
+      </div>
+      <div id="welcomeText" class="message success"></div>
+
+      <section id="view-dashboard" class="view">
+        <div class="view-title">Dashboard</div>
+        <div class="dashboard-grid">
+          <div class="stat-card"><div class="stat-icon">👥</div><div><div class="stat-label">Usuarios</div><div id="statUsers" class="stat-value">0</div></div></div>
+          <div class="stat-card"><div class="stat-icon">P</div><div><div class="stat-label">Productos</div><div id="statProducts" class="stat-value">0</div></div></div>
+          <div class="stat-card"><div class="stat-icon">▤</div><div><div class="stat-label">Pedidos</div><div id="statOrders" class="stat-value">0</div></div></div>
+          <div class="stat-card"><div class="stat-icon">💳</div><div><div class="stat-label">Saldos</div><div id="statBalances" class="stat-value">0</div></div></div>
+          <div class="stat-card"><div class="stat-icon">⚠</div><div><div class="stat-label">Reportes</div><div id="statReports" class="stat-value">0</div></div></div>
+          <div class="stat-card"><div class="stat-icon">✓</div><div><div class="stat-label">Estado</div><div class="stat-value" style="color:green">Online</div></div></div>
+        </div>
+        <div class="section-row">
+          <div class="card"><h2>Accesos rápidos</h2><div class="actions-row"><button onclick="showView('store')">Ir a tienda</button><button class="green" onclick="showView('recharge')">Cargar saldo</button><button class="secondary" onclick="showView('client-report')">Reportar falla</button></div></div>
+          <div class="card"><h2>Últimos pedidos</h2><div id="dashboardOrdersHint" class="muted">Entra a Pedidos para revisar el detalle completo.</div></div>
+        </div>
+      </section>
+
+      <section id="view-account" class="view hidden">
+        <div class="view-title">Mi cuenta</div>
+        <div class="card">
+          <div class="card-header"><h2>Datos de cuenta</h2><button class="secondary" onclick="logout()">Cerrar sesión</button></div>
+          <div class="info-grid" id="accountInfo">
+            <div class="info-box"><b>Nombre</b><span id="userName"></span></div>
+            <div class="info-box"><b>Correo</b><span id="userEmail"></span></div>
+            <div class="info-box"><b>Rol</b><span id="userRole"></span></div>
+            <div class="info-box"><b>Saldo</b><span id="userBalance"></span></div>
+          </div>
+        </div>
+        <div class="card"><h2>Mis solicitudes de saldo</h2><div id="balanceRequestsList"></div></div>
+        <div class="card"><h2>Mis reportes de falla</h2><div id="accountReportsList"></div></div>
+      </section>
+
+      <section id="view-store" class="view hidden">
+        <div class="view-title">Tienda</div>
+        <div class="card">
+          <div class="card-header"><h2>Productos</h2><div class="actions-row"><input id="productSearch" placeholder="Buscar por nombre o categoría" oninput="filterProducts()" /></div></div>
+          <div id="productsList"></div>
+        </div>
+        <div class="card"><h2>Mis pedidos</h2><div id="myOrdersList"></div></div>
+      </section>
+
+      <section id="view-recharge" class="view hidden">
+        <div class="view-title">Cargar saldo</div>
+        <div class="card">
+          <h2>Datos para transferencia</h2>
+          <p class="muted">Realiza tu transferencia y envía los datos para que el administrador revise y apruebe tu saldo.</p>
+          <div class="bank-data">
+            <div class="bank-item"><b>Banco / plataforma</b><span>Mercado Pago</span></div>
+            <div class="bank-item"><b>Beneficiario</b><span>Pedro Garcia Diaz</span></div>
+            <div class="bank-item"><b>CLABE</b><span id="bankClabe">722969020555596471</span><br><button class="small-btn copy-btn" onclick="copyText('722969020555596471')">Copiar CLABE</button></div>
+            <div class="bank-item"><b>Concepto</b><span>ropa o comida</span><br><button class="small-btn copy-btn" onclick="copyText('ropa o comida')">Copiar concepto</button></div>
+          </div>
+          <div class="alert" style="margin-top:16px">El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa y aprueba la carga.</div>
+        </div>
+        <div class="card">
+          <h2>Enviar datos de transferencia</h2>
+          <label>Monto transferido</label><input id="balanceAmount" type="number" min="1" step="0.01" placeholder="Ejemplo: 100" />
+          <label>Banco o app desde donde enviaste</label><input id="balanceBank" placeholder="Ejemplo: BBVA, Mercado Pago, Nu" />
+          <label>Referencia / clave de rastreo</label><input id="balanceReference" placeholder="Referencia o clave de rastreo" />
+          <label>Fecha de transferencia</label><input id="balanceDate" type="date" />
+          <label>Comentario opcional</label><textarea id="balanceComment" placeholder="Escribe algún detalle de tu transferencia"></textarea>
+          <button class="green" onclick="requestBalance()">Enviar solicitud de saldo</button>
+        </div>
+      </section>
+
+      <section id="view-client-report" class="view hidden">
+        <div class="view-title">Reportar falla</div>
+        <div class="card">
+          <h2>Enviar reporte</h2>
+          <label>Correo de la cuenta con falla</label><input id="accountReportEmail" type="email" placeholder="correo@ejemplo.com" />
+          <label>Tipo de falla</label>
+          <select id="accountReportType">
+            <option value="contraseña incorrecta">Contraseña incorrecta</option>
+            <option value="codigo de viaje">Código de viaje</option>
+            <option value="codigo de acceso disney">Código de acceso Disney</option>
+            <option value="codigo de hbo">Código de HBO</option>
+            <option value="otro">Otro</option>
+          </select>
+          <label>Explicación del problema</label><textarea id="accountReportDescription" placeholder="Explica qué ocurre y qué producto/pedido es"></textarea>
+          <button onclick="sendAccountReport()">Enviar reporte</button>
+        </div>
+      </section>
+
+      <section id="adminSection" class="hidden">
+        <section id="view-admin-products" class="view hidden">
+          <div class="view-title">Administrar productos</div>
+          <div class="card"><h2>Crear producto</h2>
+            <div class="section-row"><div><input id="productTitle" placeholder="Título del producto" /><input id="productCategory" placeholder="Categoría" /><input id="productDescription" placeholder="Descripción" /><input id="productPrice" type="number" step="0.01" placeholder="Precio" /></div><div><input id="productRequiredFields" placeholder="Datos requeridos separados por coma" /><select id="productChargeMode"><option value="immediate">Cobrar al comprar</option><option value="on_success">Cobrar hasta marcar Éxito</option></select><select id="productStockEnabled"><option value="0">Sin stock</option><option value="1">Usar stock</option></select><input id="productStock" type="number" placeholder="Stock" /></div></div>
+            <button onclick="createProduct()">Crear producto</button>
+          </div>
+          <div class="card"><h2>Productos creados</h2><div id="adminProductsList"></div></div>
+        </section>
+        <section id="view-admin-orders" class="view hidden"><div class="view-title">Pedidos</div><div class="card"><div class="card-header"><h2>Pedidos activos</h2><button class="secondary" onclick="toggleRejectedOrders()">Ver / ocultar rechazados</button></div><div id="adminOrdersList"></div></div></section>
+        <section id="view-admin-users" class="view hidden"><div class="view-title">Usuarios</div><div class="card"><h2>Usuarios registrados</h2><div id="usersList"></div></div></section>
+        <section id="view-admin-balances" class="view hidden"><div class="view-title">Solicitudes de saldo</div><div class="card"><h2>Solicitudes pendientes</h2><div id="adminBalanceRequestsList"></div></div></section>
+        <section id="view-admin-reports" class="view hidden"><div class="view-title">Reportes de falla</div><div class="card"><h2>Reportes recibidos</h2><div id="adminAccountReportsList"></div></div></section>
+      </section>
+    </main>
+  </div>
+
+<script>
     let token = localStorage.getItem("token");
     let currentUser = null;
     let showRejectedAdminOrders = false;
-
-
-    function showDashView(view) {
-      const map = {
-        dashboard: 'viewDashboard', account: 'viewAccount', store: 'viewStore',
-        balance: 'viewAccount', report: 'viewAccount',
-        adminProducts: 'viewAdminProducts', adminOrders: 'viewAdminOrders', adminBalance: 'viewAdminBalance', adminReports: 'viewAdminReports', adminUsers: 'viewAdminUsers'
-      };
-      document.body.classList.remove('client-panel-open');
-      document.querySelectorAll('.dash-view').forEach(el => el.classList.remove('active'));
-      const target = document.getElementById(map[view] || 'viewDashboard');
-      if (target) target.classList.add('active');
-      if (view === 'balance') {
-        document.body.classList.add('client-panel-open');
-        const recharge = document.getElementById('rechargeCard');
-        const report = document.getElementById('accountReportCard');
-        const form = document.getElementById('balanceRequestForm');
-        if (recharge) recharge.classList.remove('client-collapsed');
-        if (form) form.classList.remove('hidden');
-        if (report) report.classList.add('client-collapsed');
-      }
-      if (view === 'report') {
-        document.body.classList.add('client-panel-open');
-        const recharge = document.getElementById('rechargeCard');
-        const report = document.getElementById('accountReportCard');
-        const form = document.getElementById('accountReportForm');
-        if (report) report.classList.remove('client-collapsed');
-        if (form) form.classList.remove('hidden');
-        if (recharge) recharge.classList.add('client-collapsed');
-      }
-      document.querySelectorAll('.side-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function setupDashboardAfterLogin() {
-      if (!currentUser) return;
-      document.body.classList.toggle('is-admin', currentUser.role === 'admin');
-      document.getElementById('topUserName').textContent = currentUser.name || currentUser.email || 'Usuario';
-      document.getElementById('sideEmail').textContent = currentUser.email || 'Panel de control';
-      showDashView(currentUser.role === 'admin' ? 'dashboard' : 'store');
-      setTimeout(updateDashboardStats, 400);
-    }
-
-    function updateDashboardStats() {
-      const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-      set('statProducts', document.querySelectorAll('#productsList .product-card, #productsList .product-item, #productsList > div').length || 0);
-      set('statOrders', document.querySelectorAll('#myOrdersList > div, #adminOrdersList > div, #adminOrdersList tr').length || 0);
-      set('statUsers', document.querySelectorAll('#usersList > div, #usersList tr').length || (currentUser ? 1 : 0));
-    }
-
-    function dashboardSearch(q) {
-      q = String(q || '').toLowerCase().trim();
-      const zones = ['#productsList > div', '#adminProductsList > div', '#adminOrdersList > div', '#myOrdersList > div'];
-      zones.forEach(selector => document.querySelectorAll(selector).forEach(el => {
-        el.style.display = (!q || el.textContent.toLowerCase().includes(q)) ? '' : 'none';
-      }));
-    }
-
-    function toggleCreateProductBox() {
-      const box = document.getElementById('createProductBox');
-      if (box) box.classList.toggle('hidden');
-    }
 
     function openClientPanel(panelId) {
       const recharge = document.getElementById("rechargeCard");
@@ -628,6 +389,41 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
       showMessage("Sesión cerrada");
     }
 
+
+
+    function showView(viewName) {
+      document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+      const view = document.getElementById('view-' + viewName);
+      if (view) view.classList.remove('hidden');
+      document.querySelectorAll('[data-view]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-view') === viewName);
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function updateDashboardCounts() {
+      const productCards = document.querySelectorAll('#productsList .product-card').length;
+      const orderCards = document.querySelectorAll('#myOrdersList .order-card, #adminOrdersList .order-card').length;
+      const userRows = document.querySelectorAll('#usersList .admin-list-item').length;
+      const balanceRows = document.querySelectorAll('#adminBalanceRequestsList .order-card, #balanceRequestsList .order-card').length;
+      const reportRows = document.querySelectorAll('#adminAccountReportsList .order-card, #accountReportsList .order-card').length;
+      const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+      set('statProducts', productCards);
+      set('statOrders', orderCards);
+      set('statUsers', currentUser && currentUser.role === 'admin' ? userRows : 1);
+      set('statBalances', balanceRows);
+      set('statReports', reportRows);
+    }
+
+    function updateNavForRole() {
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin));
+      const adminName = document.getElementById('topUserName');
+      if (adminName && currentUser) adminName.textContent = currentUser.role === 'admin' ? 'Admin' : currentUser.name;
+      const topEmail = document.getElementById('topUserEmail');
+      if (topEmail && currentUser) topEmail.textContent = currentUser.email;
+    }
+
     async function loadApp() {
       if (!token) return;
 
@@ -641,13 +437,14 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
         document.getElementById("userEmail").textContent = currentUser.email;
         document.getElementById("userRole").textContent = currentUser.role;
         document.getElementById("userBalance").textContent = formatMoney(currentUser.balance);
-        setupDashboardAfterLogin();
 
         await loadProducts();
         await loadMyOrders();
         await loadMyBalanceRequests();
         await loadMyAccountReports();
 
+        updateNavForRole();
+        showView("dashboard");
         if (currentUser.role === "admin") {
           document.getElementById("adminSection").classList.remove("hidden");
           await loadUsers();
@@ -655,10 +452,11 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
           await loadAdminOrders();
           await loadAdminBalanceRequests();
           await loadAdminAccountReports();
+          updateDashboardCounts();
         } else {
           document.getElementById("adminSection").classList.add("hidden");
+          updateDashboardCounts();
         }
-        updateDashboardStats();
       } catch (error) {
         console.error(error);
         logout();
@@ -1353,7 +1151,6 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
     }
 
     loadApp();
-    setInterval(updateDashboardStats, 3000);
   </script>
 </body>
 </html>
