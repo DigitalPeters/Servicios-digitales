@@ -102,6 +102,61 @@ Entra al panel de administrador para revisar el pedido.
 }
 
 
+async function sendBalanceRequestEmail({ requestId, customerName, customerEmail, amount, bank, reference, accountHolder, proof }) {
+  try {
+    if (!isMailConfigured()) {
+      console.log("Correo NO enviado: faltan variables RESEND_API_KEY, NOTIFY_EMAIL o FROM_EMAIL.");
+      return;
+    }
+
+    const { apiKey, notifyTo, fromEmail } = getMailConfig();
+
+    const subject = `Nueva solicitud de saldo #${requestId} - $${Number(amount || 0).toFixed(2)}`;
+    const text = `
+Nueva solicitud de carga de saldo en Servicios Digitales Peters
+
+Solicitud: #${requestId}
+Cliente: ${customerName || "Cliente"}
+Correo cliente: ${customerEmail || "Sin correo"}
+Monto solicitado: $${Number(amount || 0).toFixed(2)}
+Banco: ${bank || "Sin banco"}
+Referencia / clave de rastreo: ${reference || "Sin referencia"}
+Titular: ${accountHolder || "Sin titular"}
+Comprobante / nota: ${proof || "No enviado"}
+
+Revisa tu app bancaria. Si el pago sí llegó, entra al panel admin y aprueba la solicitud para sumar el saldo.
+    `.trim();
+
+    console.log(`Intentando enviar correo de solicitud de saldo con Resend desde ${fromEmail} hacia ${notifyTo}`);
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: `Servicios Digitales Peters <${fromEmail}>`,
+        to: [notifyTo],
+        subject,
+        text
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error("Error enviando correo de solicitud de saldo con Resend:", JSON.stringify(result));
+      return;
+    }
+
+    console.log(`Correo de solicitud de saldo enviado correctamente con Resend para solicitud #${requestId}`);
+  } catch (error) {
+    console.error("Error enviando correo de solicitud de saldo:", error.message);
+  }
+}
+
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
@@ -222,6 +277,23 @@ async function initDatabase() {
     )
   `);
 
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS balance_requests (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      amount NUMERIC NOT NULL,
+      bank TEXT DEFAULT '',
+      reference TEXT DEFAULT '',
+      account_holder TEXT DEFAULT '',
+      proof TEXT DEFAULT '',
+      status TEXT DEFAULT 'pendiente',
+      admin_response TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      reviewed_at TIMESTAMP
+    )
+  `);
+
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
 
@@ -240,6 +312,16 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
 
+
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS bank TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS reference TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS account_holder TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS proof TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendiente'`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
+
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE products SET active = 1 WHERE active IS NULL`);
@@ -253,6 +335,13 @@ async function initDatabase() {
   await pool.query(`UPDATE orders SET admin_response = '' WHERE admin_response IS NULL`);
   await pool.query(`UPDATE orders SET charged = 0 WHERE charged IS NULL`);
   await pool.query(`UPDATE orders SET refunded = 0 WHERE refunded IS NULL`);
+
+  await pool.query(`UPDATE balance_requests SET bank = '' WHERE bank IS NULL`);
+  await pool.query(`UPDATE balance_requests SET reference = '' WHERE reference IS NULL`);
+  await pool.query(`UPDATE balance_requests SET account_holder = '' WHERE account_holder IS NULL`);
+  await pool.query(`UPDATE balance_requests SET proof = '' WHERE proof IS NULL`);
+  await pool.query(`UPDATE balance_requests SET status = 'pendiente' WHERE status IS NULL`);
+  await pool.query(`UPDATE balance_requests SET admin_response = '' WHERE admin_response IS NULL`);
 }
 
 // REGISTRO
@@ -688,6 +777,187 @@ app.post("/api/admin/add-balance", authMiddleware, adminMiddleware, async (req, 
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error agregando saldo" });
+  }
+});
+
+
+// USUARIO: SOLICITAR CARGA DE SALDO
+app.post("/api/balance-requests", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { amount, bank, reference, account_holder, proof } = req.body;
+
+    const amountNumber = Number(amount);
+
+    if (!amountNumber || amountNumber <= 0) {
+      return res.status(400).json({ error: "El monto debe ser mayor a 0" });
+    }
+
+    if (!bank || !reference || !account_holder) {
+      return res.status(400).json({ error: "Banco, referencia y titular son obligatorios" });
+    }
+
+    const insertResult = await pool.query(
+      `INSERT INTO balance_requests
+       (user_id, amount, bank, reference, account_holder, proof, status, admin_response)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', '')
+       RETURNING id`,
+      [
+        userId,
+        amountNumber,
+        String(bank).trim(),
+        String(reference).trim(),
+        String(account_holder).trim(),
+        String(proof || '').trim()
+      ]
+    );
+
+    const requestId = insertResult.rows[0].id;
+
+    const customerResult = await pool.query(
+      `SELECT name, email FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    const customer = customerResult.rows[0] || {};
+
+    sendBalanceRequestEmail({
+      requestId,
+      customerName: customer.name || "Cliente",
+      customerEmail: customer.email || "Sin correo",
+      amount: amountNumber,
+      bank,
+      reference,
+      accountHolder: account_holder,
+      proof: proof || ""
+    });
+
+    res.json({
+      message: "Solicitud enviada. El administrador revisará tu transferencia y aprobará el saldo si el pago llegó."
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error enviando solicitud de saldo" });
+  }
+});
+
+// USUARIO: MIS SOLICITUDES DE SALDO
+app.get("/api/my-balance-requests", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, amount, bank, reference, account_holder, proof, status, admin_response, created_at, reviewed_at
+       FROM balance_requests
+       WHERE user_id = $1
+       ORDER BY id DESC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando solicitudes de saldo" });
+  }
+});
+
+// ADMIN: SOLICITUDES DE SALDO
+app.get("/api/admin/balance-requests", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+        balance_requests.id,
+        balance_requests.user_id,
+        balance_requests.amount,
+        balance_requests.bank,
+        balance_requests.reference,
+        balance_requests.account_holder,
+        balance_requests.proof,
+        balance_requests.status,
+        balance_requests.admin_response,
+        balance_requests.created_at,
+        balance_requests.reviewed_at,
+        users.name AS customer_name,
+        users.email AS customer_email
+       FROM balance_requests
+       JOIN users ON balance_requests.user_id = users.id
+       ORDER BY balance_requests.id DESC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando solicitudes de saldo" });
+  }
+});
+
+// ADMIN: APROBAR O RECHAZAR SOLICITUD DE SALDO
+app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const requestId = req.params.requestId;
+    const { status, admin_response } = req.body;
+
+    const validStatuses = ["pendiente", "aprobado", "rechazado"];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Estado inválido" });
+    }
+
+    await client.query("BEGIN");
+
+    const requestResult = await client.query(
+      `SELECT * FROM balance_requests WHERE id = $1 FOR UPDATE`,
+      [requestId]
+    );
+
+    const request = requestResult.rows[0];
+
+    if (!request) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Solicitud no encontrada" });
+    }
+
+    if (request.status === "aprobado" && status === "aprobado") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Esta solicitud ya fue aprobada antes" });
+    }
+
+    if (request.status === "aprobado" && status !== "aprobado") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No se puede cambiar una solicitud ya aprobada para evitar movimientos duplicados" });
+    }
+
+    if (status === "aprobado") {
+      await client.query(
+        `UPDATE users SET balance = balance + $1 WHERE id = $2`,
+        [request.amount, request.user_id]
+      );
+    }
+
+    await client.query(
+      `UPDATE balance_requests
+       SET status = $1, admin_response = $2, reviewed_at = NOW()
+       WHERE id = $3`,
+      [status, admin_response || "", requestId]
+    );
+
+    await client.query("COMMIT");
+
+    if (status === "aprobado") {
+      return res.json({ message: `Solicitud aprobada. Se agregaron $${Number(request.amount).toFixed(2)} al cliente.` });
+    }
+
+    if (status === "rechazado") {
+      return res.json({ message: "Solicitud rechazada correctamente." });
+    }
+
+    res.json({ message: "Solicitud actualizada correctamente." });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando solicitud de saldo" });
+  } finally {
+    client.release();
   }
 });
 

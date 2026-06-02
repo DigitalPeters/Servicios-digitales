@@ -206,45 +206,6 @@
       font-size: 19px;
     }
 
-
-    .recharge-card {
-      margin-top: 18px;
-      border: 2px solid #111827;
-      background: linear-gradient(180deg, #ffffff, #f9fafb);
-    }
-
-    .recharge-title {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .recharge-title h2 {
-      margin: 0;
-    }
-
-    .recharge-button {
-      background: #047857;
-      max-width: 240px;
-      font-size: 16px;
-    }
-
-    .recharge-button:hover {
-      background: #065f46;
-    }
-
-    .balance-alert {
-      background: #ecfdf5;
-      border: 1px solid #a7f3d0;
-      color: #065f46;
-      border-radius: 12px;
-      padding: 12px;
-      margin: 12px 0;
-      font-size: 14px;
-    }
-
     .product-price {
       font-weight: bold;
       color: var(--text);
@@ -367,46 +328,7 @@
         align-items: flex-start;
       }
 
-  
-    .recharge-card {
-      margin-top: 18px;
-      border: 2px solid #111827;
-      background: linear-gradient(180deg, #ffffff, #f9fafb);
-    }
-
-    .recharge-title {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .recharge-title h2 {
-      margin: 0;
-    }
-
-    .recharge-button {
-      background: #047857;
-      max-width: 240px;
-      font-size: 16px;
-    }
-
-    .recharge-button:hover {
-      background: #065f46;
-    }
-
-    .balance-alert {
-      background: #ecfdf5;
-      border: 1px solid #a7f3d0;
-      color: #065f46;
-      border-radius: 12px;
-      padding: 12px;
-      margin: 12px 0;
-      font-size: 14px;
-    }
-
-    .product-price {
+      .product-price {
         font-size: 16px;
       }
     }
@@ -466,18 +388,12 @@
           </div>
         </div>
 
-        <div id="rechargeCard" class="recharge-card">
-          <div class="recharge-title">
-            <div>
-              <h2>Recargar saldo</h2>
-              <p class="small-text" style="margin-bottom:0">Solicita que revisemos tu transferencia y agreguemos saldo a tu cuenta.</p>
-            </div>
-            <button class="recharge-button" onclick="toggleBalanceRequestForm()">+ Cargar saldo</button>
+        <div style="margin-top:18px; border-top:1px solid #e5e7eb; padding-top:18px;">
+          <div class="topbar">
+            <h2 style="margin:0">Cargar saldo</h2>
+            <button style="max-width:180px" onclick="toggleBalanceRequestForm()">Cargar saldo</button>
           </div>
-
-          <div class="balance-alert">
-            El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa el pago y aprueba la carga.
-          </div>
+          <p class="small-text">Envía tu solicitud después de hacer la transferencia. El saldo se agrega cuando el administrador confirme que el pago llegó.</p>
 
           <div id="balanceRequestForm" class="hidden">
             <label class="field-label">Monto transferido</label>
