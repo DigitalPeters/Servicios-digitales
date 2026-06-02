@@ -157,6 +157,60 @@ Revisa tu app bancaria. Si el pago sí llegó, entra al panel admin y aprueba la
 }
 
 
+async function sendAccountReportEmail({ reportId, customerName, customerEmail, email, description }) {
+  try {
+    if (!isMailConfigured()) {
+      console.log("Correo NO enviado: faltan variables RESEND_API_KEY, NOTIFY_EMAIL o FROM_EMAIL.");
+      return;
+    }
+
+    const { apiKey, notifyTo, fromEmail } = getMailConfig();
+
+    const subject = `Nuevo reporte de cuenta #${reportId}`;
+    const text = `
+Nuevo reporte de cuenta en Servicios Digitales Peters
+
+Reporte: #${reportId}
+Cliente: ${customerName || "Cliente"}
+Correo cliente: ${customerEmail || "Sin correo"}
+Correo con falla: ${email || "Sin correo reportado"}
+
+Explicación de la falla:
+${description || "Sin explicación"}
+
+El cliente no eligió el tipo de problema. Entra al panel admin y da el veredicto final: Resuelto, Reemplazo o Reembolso.
+    `.trim();
+
+    console.log(`Intentando enviar correo de reporte con Resend desde ${fromEmail} hacia ${notifyTo}`);
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: `Servicios Digitales Peters <${fromEmail}>`,
+        to: [notifyTo],
+        subject,
+        text
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error("Error enviando correo de reporte con Resend:", JSON.stringify(result));
+      return;
+    }
+
+    console.log(`Correo de reporte enviado correctamente con Resend para reporte #${reportId}`);
+  } catch (error) {
+    console.error("Error enviando correo de reporte:", error.message);
+  }
+}
+
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
@@ -294,6 +348,20 @@ async function initDatabase() {
     )
   `);
 
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS account_reports (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      email TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT DEFAULT 'pendiente',
+      admin_response TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      reviewed_at TIMESTAMP
+    )
+  `);
+
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
 
@@ -322,6 +390,13 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
 
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendiente'`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
+
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE products SET active = 1 WHERE active IS NULL`);
@@ -342,6 +417,11 @@ async function initDatabase() {
   await pool.query(`UPDATE balance_requests SET proof = '' WHERE proof IS NULL`);
   await pool.query(`UPDATE balance_requests SET status = 'pendiente' WHERE status IS NULL`);
   await pool.query(`UPDATE balance_requests SET admin_response = '' WHERE admin_response IS NULL`);
+
+  await pool.query(`UPDATE account_reports SET email = '' WHERE email IS NULL`);
+  await pool.query(`UPDATE account_reports SET description = '' WHERE description IS NULL`);
+  await pool.query(`UPDATE account_reports SET status = 'pendiente' WHERE status IS NULL`);
+  await pool.query(`UPDATE account_reports SET admin_response = '' WHERE admin_response IS NULL`);
 }
 
 // REGISTRO
@@ -958,6 +1038,126 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
     res.status(500).json({ error: "Error actualizando solicitud de saldo" });
   } finally {
     client.release();
+  }
+});
+
+
+// USUARIO: REPORTAR PROBLEMA DE CUENTA
+app.post("/api/account-reports", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { email, description } = req.body;
+
+    if (!email || !description) {
+      return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
+    }
+
+    const insertResult = await pool.query(
+      `INSERT INTO account_reports
+       (user_id, email, description, status, admin_response)
+       VALUES ($1, $2, $3, 'pendiente', '')
+       RETURNING id`,
+      [userId, String(email).trim(), String(description).trim()]
+    );
+
+    const reportId = insertResult.rows[0].id;
+
+    const customerResult = await pool.query(
+      `SELECT name, email FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    const customer = customerResult.rows[0] || {};
+
+    sendAccountReportEmail({
+      reportId,
+      customerName: customer.name || "Cliente",
+      customerEmail: customer.email || "Sin correo",
+      email,
+      description
+    });
+
+    res.json({
+      message: "Reporte enviado. El administrador revisará la falla y dará el veredicto final."
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error enviando reporte de cuenta" });
+  }
+});
+
+// USUARIO: MIS REPORTES DE CUENTA
+app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, email, description, status, admin_response, created_at, reviewed_at
+       FROM account_reports
+       WHERE user_id = $1
+       ORDER BY id DESC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando reportes de cuenta" });
+  }
+});
+
+// ADMIN: REPORTES DE CUENTA
+app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+        account_reports.id,
+        account_reports.user_id,
+        account_reports.email,
+        account_reports.description,
+        account_reports.status,
+        account_reports.admin_response,
+        account_reports.created_at,
+        account_reports.reviewed_at,
+        users.name AS customer_name,
+        users.email AS customer_email
+       FROM account_reports
+       JOIN users ON account_reports.user_id = users.id
+       ORDER BY account_reports.id DESC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando reportes de cuenta" });
+  }
+});
+
+// ADMIN: DAR VEREDICTO A REPORTE DE CUENTA
+app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = req.params.reportId;
+    const { status, admin_response } = req.body;
+
+    const validStatuses = ["pendiente", "resuelto", "reemplazo", "reembolso"];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Veredicto inválido" });
+    }
+
+    const result = await pool.query(
+      `UPDATE account_reports
+       SET status = $1, admin_response = $2, reviewed_at = NOW()
+       WHERE id = $3`,
+      [status, admin_response || "", reportId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    res.json({ message: "Veredicto guardado correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando reporte de cuenta" });
   }
 });
 

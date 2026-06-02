@@ -206,6 +206,45 @@
       font-size: 19px;
     }
 
+
+    .recharge-card {
+      margin-top: 18px;
+      border: 2px solid #111827;
+      background: linear-gradient(180deg, #ffffff, #f9fafb);
+    }
+
+    .recharge-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .recharge-title h2 {
+      margin: 0;
+    }
+
+    .recharge-button {
+      background: #047857;
+      max-width: 240px;
+      font-size: 16px;
+    }
+
+    .recharge-button:hover {
+      background: #065f46;
+    }
+
+    .balance-alert {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
     .product-price {
       font-weight: bold;
       color: var(--text);
@@ -328,7 +367,46 @@
         align-items: flex-start;
       }
 
-      .product-price {
+  
+    .recharge-card {
+      margin-top: 18px;
+      border: 2px solid #111827;
+      background: linear-gradient(180deg, #ffffff, #f9fafb);
+    }
+
+    .recharge-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .recharge-title h2 {
+      margin: 0;
+    }
+
+    .recharge-button {
+      background: #047857;
+      max-width: 240px;
+      font-size: 16px;
+    }
+
+    .recharge-button:hover {
+      background: #065f46;
+    }
+
+    .balance-alert {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
+    .product-price {
         font-size: 16px;
       }
     }
@@ -388,12 +466,27 @@
           </div>
         </div>
 
-        <div style="margin-top:18px; border-top:1px solid #e5e7eb; padding-top:18px;">
-          <div class="topbar">
-            <h2 style="margin:0">Cargar saldo</h2>
-            <button style="max-width:180px" onclick="toggleBalanceRequestForm()">Cargar saldo</button>
+        <div id="rechargeCard" class="recharge-card">
+          <div class="recharge-title">
+            <div>
+              <h2>Recargar saldo</h2>
+              <p class="small-text" style="margin-bottom:0">Solicita que revisemos tu transferencia y agreguemos saldo a tu cuenta.</p>
+            </div>
+            <button class="recharge-button" onclick="toggleBalanceRequestForm()">+ Cargar saldo</button>
           </div>
-          <p class="small-text">Envía tu solicitud después de hacer la transferencia. El saldo se agrega cuando el administrador confirme que el pago llegó.</p>
+
+
+          <div class="balance-alert" style="background:#ecfeff;border-color:#67e8f9;color:#164e63">
+            <b>Datos para transferencia:</b><br>
+            <b>Banco:</b> Mercado Pago<br>
+            <b>Titular:</b> Pedro Garcia Diaz<br>
+            <b>CLABE:</b> 722969020555596471<br>
+            <b>Concepto:</b> ropa o comida
+          </div>
+
+          <div class="balance-alert">
+            El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa el pago y aprueba la carga.
+          </div>
 
           <div id="balanceRequestForm" class="hidden">
             <label class="field-label">Monto transferido</label>
@@ -417,6 +510,30 @@
           <h3>Mis solicitudes de saldo</h3>
           <div id="myBalanceRequestsList"></div>
         </div>
+
+        <div id="accountReportCard" class="recharge-card">
+          <div class="recharge-title">
+            <div>
+              <h2>Reportar problema de cuenta</h2>
+              <p class="small-text" style="margin-bottom:0">Envíanos el correo de la cuenta y explica la falla. El administrador revisará y dará el veredicto final.</p>
+            </div>
+            <button class="recharge-button" onclick="toggleAccountReportForm()">Reportar falla</button>
+          </div>
+
+          <div id="accountReportForm" class="hidden">
+            <label class="field-label">Correo con falla</label>
+            <input id="reportEmail" type="email" placeholder="correo@ejemplo.com" />
+
+            <label class="field-label">Explicación de la falla</label>
+            <textarea id="reportDescription" placeholder="Explica qué problema tiene la cuenta"></textarea>
+
+            <button onclick="sendAccountReport()">Enviar reporte</button>
+          </div>
+
+          <h3>Mis reportes</h3>
+          <div id="myAccountReportsList"></div>
+        </div>
+
       </div>
 
       <div class="row">
@@ -492,6 +609,14 @@
           <h2>Solicitudes de carga de saldo</h2>
           <p class="small-text">Revisa tu banco antes de aprobar. Al aprobar, el saldo se suma automáticamente al cliente.</p>
           <div id="adminBalanceRequestsList"></div>
+        </div>
+
+
+
+        <div class="card">
+          <h2>Reportes de cuenta</h2>
+          <p class="small-text">El cliente solo reporta la falla. El veredicto final lo decides tú como admin.</p>
+          <div id="adminAccountReportsList"></div>
         </div>
 
         <div class="card">
@@ -684,6 +809,7 @@
         await loadProducts();
         await loadMyOrders();
         await loadMyBalanceRequests();
+        await loadMyAccountReports();
 
         if (currentUser.role === "admin") {
           document.getElementById("adminSection").classList.remove("hidden");
@@ -691,6 +817,7 @@
           await loadAdminProducts();
           await loadAdminOrders();
           await loadAdminBalanceRequests();
+          await loadAdminAccountReports();
         } else {
           document.getElementById("adminSection").classList.add("hidden");
         }
@@ -1018,6 +1145,112 @@
             status,
             admin_response: response
           })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+
+    function toggleAccountReportForm() {
+      const form = document.getElementById("accountReportForm");
+      if (form) form.classList.toggle("hidden");
+    }
+
+    function getAccountReportStatusText(status) {
+      const statuses = {
+        pendiente: "Pendiente de revisión",
+        resuelto: "Resuelto",
+        reemplazo: "Reemplazo",
+        reembolso: "Reembolso"
+      };
+
+      return statuses[status] || status;
+    }
+
+    async function sendAccountReport() {
+      try {
+        const data = await api("/api/account-reports", {
+          method: "POST",
+          body: JSON.stringify({
+            email: document.getElementById("reportEmail").value,
+            description: document.getElementById("reportDescription").value
+          })
+        });
+
+        document.getElementById("reportEmail").value = "";
+        document.getElementById("reportDescription").value = "";
+        document.getElementById("accountReportForm").classList.add("hidden");
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadMyAccountReports() {
+      const container = document.getElementById("myAccountReportsList");
+      if (!container) return;
+
+      const reports = await api("/api/my-account-reports");
+
+      const html = reports.map(report => `
+        <div class="item">
+          <p><b>Reporte:</b> #${report.id}</p>
+          <p><b>Correo reportado:</b> ${safeText(report.email)}</p>
+          <p><b>Falla:</b> ${safeText(report.description)}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
+          <p><b>Respuesta admin:</b> ${safeText(report.admin_response || "Sin respuesta todavía")}</p>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No tienes reportes todavía.";
+    }
+
+    async function loadAdminAccountReports() {
+      const container = document.getElementById("adminAccountReportsList");
+      if (!container) return;
+
+      const reports = await api("/api/admin/account-reports");
+
+      const html = reports.map(report => `
+        <div class="item">
+          <p><b>Reporte:</b> #${report.id}</p>
+          <p><b>Usuario ID:</b> ${report.user_id}</p>
+          <p><b>Cliente:</b> ${safeText(report.customer_name)} - ${safeText(report.customer_email)}</p>
+          <p><b>Correo con falla:</b> ${safeText(report.email)}</p>
+          <p><b>Explicación:</b> ${safeText(report.description)}</p>
+          <p><b>Veredicto actual:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
+
+          <label class="field-label">Veredicto del admin</label>
+          <select id="report-status-${report.id}">
+            <option value="pendiente" ${report.status === "pendiente" ? "selected" : ""}>Pendiente</option>
+            <option value="resuelto" ${report.status === "resuelto" ? "selected" : ""}>Resuelto</option>
+            <option value="reemplazo" ${report.status === "reemplazo" ? "selected" : ""}>Reemplazo</option>
+            <option value="reembolso" ${report.status === "reembolso" ? "selected" : ""}>Reembolso</option>
+          </select>
+
+          <textarea id="report-response-${report.id}" placeholder="Respuesta para el cliente">${safeText(report.admin_response || "")}</textarea>
+
+          <button onclick="updateAccountReportStatus(${report.id})">Guardar veredicto</button>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No hay reportes de cuenta.";
+    }
+
+    async function updateAccountReportStatus(reportId) {
+      try {
+        const status = document.getElementById("report-status-" + reportId).value;
+        const admin_response = document.getElementById("report-response-" + reportId).value;
+
+        const data = await api("/api/admin/account-reports/" + reportId + "/status", {
+          method: "PATCH",
+          body: JSON.stringify({ status, admin_response })
         });
 
         showMessage(data.message);
