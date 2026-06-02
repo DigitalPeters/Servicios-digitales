@@ -157,7 +157,7 @@ Revisa tu app bancaria. Si el pago sí llegó, entra al panel admin y aprueba la
 }
 
 
-async function sendAccountReportEmail({ reportId, customerName, customerEmail, email, description }) {
+async function sendAccountReportEmail({ reportId, customerName, customerEmail, email, issueType, description }) {
   try {
     if (!isMailConfigured()) {
       console.log("Correo NO enviado: faltan variables RESEND_API_KEY, NOTIFY_EMAIL o FROM_EMAIL.");
@@ -174,11 +174,12 @@ Reporte: #${reportId}
 Cliente: ${customerName || "Cliente"}
 Correo cliente: ${customerEmail || "Sin correo"}
 Correo con falla: ${email || "Sin correo reportado"}
+Tipo de falla: ${issueType || "Sin tipo"}
 
 Explicación de la falla:
 ${description || "Sin explicación"}
 
-El cliente no eligió el tipo de problema. Entra al panel admin y da el veredicto final: Resuelto, Reemplazo o Reembolso.
+Entra al panel admin, revisa la explicación y da el veredicto final: Resuelto, Reemplazo o Reembolso.
     `.trim();
 
     console.log(`Intentando enviar correo de reporte con Resend desde ${fromEmail} hacia ${notifyTo}`);
@@ -354,6 +355,7 @@ async function initDatabase() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id),
       email TEXT NOT NULL,
+      issue_type TEXT DEFAULT 'otro',
       description TEXT NOT NULL,
       status TEXT DEFAULT 'pendiente',
       admin_response TEXT DEFAULT '',
@@ -391,6 +393,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
 
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS issue_type TEXT DEFAULT 'otro'`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendiente'`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
@@ -419,6 +422,7 @@ async function initDatabase() {
   await pool.query(`UPDATE balance_requests SET admin_response = '' WHERE admin_response IS NULL`);
 
   await pool.query(`UPDATE account_reports SET email = '' WHERE email IS NULL`);
+  await pool.query(`UPDATE account_reports SET issue_type = 'otro' WHERE issue_type IS NULL`);
   await pool.query(`UPDATE account_reports SET description = '' WHERE description IS NULL`);
   await pool.query(`UPDATE account_reports SET status = 'pendiente' WHERE status IS NULL`);
   await pool.query(`UPDATE account_reports SET admin_response = '' WHERE admin_response IS NULL`);
@@ -1046,7 +1050,7 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 app.post("/api/account-reports", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { email, description } = req.body;
+    const { email, issue_type, description } = req.body;
 
     if (!email || !description) {
       return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
@@ -1054,10 +1058,10 @@ app.post("/api/account-reports", authMiddleware, async (req, res) => {
 
     const insertResult = await pool.query(
       `INSERT INTO account_reports
-       (user_id, email, description, status, admin_response)
-       VALUES ($1, $2, $3, 'pendiente', '')
+       (user_id, email, issue_type, description, status, admin_response)
+       VALUES ($1, $2, $3, $4, 'pendiente', '')
        RETURNING id`,
-      [userId, String(email).trim(), String(description).trim()]
+      [userId, String(email).trim(), String(issue_type || "otro").trim(), String(description).trim()]
     );
 
     const reportId = insertResult.rows[0].id;
@@ -1074,6 +1078,7 @@ app.post("/api/account-reports", authMiddleware, async (req, res) => {
       customerName: customer.name || "Cliente",
       customerEmail: customer.email || "Sin correo",
       email,
+      issueType: issue_type || "otro",
       description
     });
 
@@ -1090,7 +1095,7 @@ app.post("/api/account-reports", authMiddleware, async (req, res) => {
 app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, email, description, status, admin_response, created_at, reviewed_at
+      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at
        FROM account_reports
        WHERE user_id = $1
        ORDER BY id DESC`,
@@ -1112,6 +1117,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.id,
         account_reports.user_id,
         account_reports.email,
+        account_reports.issue_type,
         account_reports.description,
         account_reports.status,
         account_reports.admin_response,

@@ -410,6 +410,37 @@
         font-size: 16px;
       }
     }
+  
+.admin-product-details, .admin-order-details, .collapsible-panel {
+  display: none;
+}
+.admin-product-details.open, .admin-order-details.open, .collapsible-panel.open {
+  display: block;
+}
+.admin-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.admin-summary-row h3 {
+  margin: 0;
+}
+.small-action-btn {
+  background: #eef2ff;
+  color: #1f2937;
+  border: 1px solid #c7d2fe;
+}
+.hidden-rejected-note {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #7c2d12;
+  padding: 10px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
   </style>
 </head>
 
@@ -475,7 +506,7 @@
             <button class="recharge-button" onclick="toggleBalanceRequestForm()">+ Cargar saldo</button>
           </div>
 
-
+          <div id="balanceDetailsPanel" class="collapsible-panel">
           <div class="balance-alert" style="background:#ecfeff;border-color:#67e8f9;color:#164e63">
             <b>Datos para transferencia:</b><br>
             <b>Banco:</b> Mercado Pago<br>
@@ -509,6 +540,7 @@
 
           <h3>Mis solicitudes de saldo</h3>
           <div id="myBalanceRequestsList"></div>
+          </div>
         </div>
 
         <div id="accountReportCard" class="recharge-card">
@@ -523,6 +555,15 @@
           <div id="accountReportForm" class="hidden">
             <label class="field-label">Correo con falla</label>
             <input id="reportEmail" type="email" placeholder="correo@ejemplo.com" />
+
+            <label class="field-label">Tipo de falla</label>
+            <select id="reportIssueType">
+              <option value="contraseña_incorrecta">Contraseña incorrecta</option>
+              <option value="codigo_de_viaje">Código de viaje</option>
+              <option value="codigo_de_acceso_disney">Código de acceso Disney</option>
+              <option value="codigo_de_hbo">Código de HBO</option>
+              <option value="otro">Otro</option>
+            </select>
 
             <label class="field-label">Explicación de la falla</label>
             <textarea id="reportDescription" placeholder="Explica qué problema tiene la cuenta"></textarea>
@@ -635,6 +676,7 @@
   <script>
     let token = localStorage.getItem("token");
     let currentUser = null;
+    let showRejectedAdminOrders = false;
 
     function showMessage(text, type = "success") {
       document.getElementById("message").innerHTML =
@@ -1046,8 +1088,8 @@
     }
 
     function toggleBalanceRequestForm() {
-      const form = document.getElementById("balanceRequestForm");
-      form.classList.toggle("hidden");
+      const panel = document.getElementById("balanceDetailsPanel");
+      if (panel) panel.classList.toggle("open");
     }
 
     async function sendBalanceRequest() {
@@ -1177,11 +1219,13 @@
           method: "POST",
           body: JSON.stringify({
             email: document.getElementById("reportEmail").value,
+            issue_type: document.getElementById("reportIssueType").value,
             description: document.getElementById("reportDescription").value
           })
         });
 
         document.getElementById("reportEmail").value = "";
+        document.getElementById("reportIssueType").value = "contraseña_incorrecta";
         document.getElementById("reportDescription").value = "";
         document.getElementById("accountReportForm").classList.add("hidden");
 
@@ -1190,6 +1234,28 @@
       } catch (error) {
         showMessage(error.message, "error");
       }
+    }
+
+
+    function getIssueTypeText(type) {
+      const labels = {
+        contraseña_incorrecta: "Contraseña incorrecta",
+        codigo_de_viaje: "Código de viaje",
+        codigo_de_acceso_disney: "Código de acceso Disney",
+        codigo_de_hbo: "Código de HBO",
+        otro: "Otro"
+      };
+      return labels[type] || type || "Sin tipo";
+    }
+
+    function toggleElementOpen(id) {
+      const element = document.getElementById(id);
+      if (element) element.classList.toggle("open");
+    }
+
+    function toggleRejectedAdminOrders() {
+      showRejectedAdminOrders = !showRejectedAdminOrders;
+      loadAdminOrders();
     }
 
     async function loadMyAccountReports() {
@@ -1202,7 +1268,8 @@
         <div class="item">
           <p><b>Reporte:</b> #${report.id}</p>
           <p><b>Correo reportado:</b> ${safeText(report.email)}</p>
-          <p><b>Falla:</b> ${safeText(report.description)}</p>
+          <p><b>Tipo de falla:</b> ${safeText(getIssueTypeText(report.issue_type))}</p>
+          <p><b>Explicación:</b> ${safeText(report.description)}</p>
           <p><b>Estado:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
           <p><b>Respuesta admin:</b> ${safeText(report.admin_response || "Sin respuesta todavía")}</p>
         </div>
@@ -1282,54 +1349,66 @@
       const html = products.map(product => {
         const requiredFields = parseJsonArray(product.required_fields);
         const stockEnabled = Number(product.stock_enabled || 0) === 1;
+        const soldOut = stockEnabled && Number(product.stock || 0) <= 0;
 
         return `
           <div class="item">
-            <h3>${safeText(product.name)}</h3>
+            <div class="admin-summary-row" onclick="toggleElementOpen('admin-product-edit-${product.id}')">
+              <div>
+                <h3>${safeText(product.name)}</h3>
+                <p class="small-text" style="margin:4px 0 0">
+                  ${safeText(product.category || "Otros")} · $${formatMoney(product.price)}
+                  ${stockEnabled ? ` · Stock: ${Number(product.stock || 0)}${soldOut ? " · Agotado" : ""}` : ""}
+                </p>
+              </div>
+              <button class="small-action-btn" type="button">Modificar</button>
+            </div>
 
-            <label class="field-label">Nombre</label>
-            <input id="editName-${product.id}" value="${safeText(product.name)}" />
+            <div id="admin-product-edit-${product.id}" class="admin-product-details">
+              <label class="field-label">Nombre</label>
+              <input id="editName-${product.id}" value="${safeText(product.name)}" />
 
-            <label class="field-label">Descripción</label>
-            <textarea id="editDescription-${product.id}">${safeText(product.description || "")}</textarea>
+              <label class="field-label">Descripción</label>
+              <textarea id="editDescription-${product.id}">${safeText(product.description || "")}</textarea>
 
-            <label class="field-label">Precio</label>
-            <input id="editPrice-${product.id}" type="number" step="0.01" value="${product.price}" />
+              <label class="field-label">Precio</label>
+              <input id="editPrice-${product.id}" type="number" step="0.01" value="${product.price}" />
 
-            <label class="field-label">Categoría</label>
-            <input id="editCategory-${product.id}" value="${safeText(product.category || "Otros")}" />
+              <label class="field-label">Categoría</label>
+              <input id="editCategory-${product.id}" value="${safeText(product.category || "Otros")}" />
 
-            <label class="field-label">Datos requeridos</label>
-            <textarea id="editRequiredFields-${product.id}">${safeText(requiredFields.join(", "))}</textarea>
+              <label class="field-label">Datos requeridos</label>
+              <textarea id="editRequiredFields-${product.id}">${safeText(requiredFields.join(", "))}</textarea>
 
-            <label class="field-label">¿Cuándo descontar saldo?</label>
-            <select id="editChargeMode-${product.id}">
-              <option value="on_purchase" ${product.charge_mode === "on_purchase" ? "selected" : ""}>Descontar al comprar</option>
-              <option value="on_success" ${product.charge_mode === "on_success" ? "selected" : ""}>Descontar cuando el admin marque Éxito</option>
-            </select>
+              <label class="field-label">¿Cuándo descontar saldo?</label>
+              <select id="editChargeMode-${product.id}">
+                <option value="on_purchase" ${product.charge_mode === "on_purchase" ? "selected" : ""}>Descontar al comprar</option>
+                <option value="on_success" ${product.charge_mode === "on_success" ? "selected" : ""}>Descontar cuando el admin marque Éxito</option>
+              </select>
 
-            <label class="field-label">Stock</label>
-            <label class="checkbox-row">
+              <label class="field-label">Stock</label>
+              <label class="checkbox-row">
+                <input
+                  type="checkbox"
+                  id="editStockEnabled-${product.id}"
+                  ${stockEnabled ? "checked" : ""}
+                />
+                Activar stock para este producto
+              </label>
+
               <input
-                type="checkbox"
-                id="editStockEnabled-${product.id}"
-                ${stockEnabled ? "checked" : ""}
+                id="editStock-${product.id}"
+                type="number"
+                min="0"
+                value="${Number(product.stock || 0)}"
+                placeholder="Cantidad disponible"
               />
-              Activar stock para este producto
-            </label>
 
-            <input
-              id="editStock-${product.id}"
-              type="number"
-              min="0"
-              value="${Number(product.stock || 0)}"
-              placeholder="Cantidad disponible"
-            />
-
-            <div class="three-row">
-              <button onclick="updateProduct(${product.id})">Guardar cambios</button>
-              <button class="danger-btn" onclick="deleteProduct(${product.id})">Eliminar</button>
-              <button class="muted-btn" onclick="toggleProduct(${product.id})">Ver como cliente</button>
+              <div class="three-row">
+                <button onclick="updateProduct(${product.id})">Guardar cambios</button>
+                <button class="danger-btn" onclick="deleteProduct(${product.id})">Eliminar</button>
+                <button class="muted-btn" onclick="toggleProduct(${product.id})">Ver como cliente</button>
+              </div>
             </div>
           </div>
         `;
@@ -1384,38 +1463,66 @@
 
     async function loadAdminOrders() {
       const orders = await api("/api/admin/orders");
+      const rejectedCount = orders.filter(order => order.status === "rechazado").length;
+      const visibleOrders = showRejectedAdminOrders
+        ? orders
+        : orders.filter(order => order.status !== "rechazado");
 
-      const html = orders.map(order => {
+      let html = "";
+
+      if (rejectedCount > 0) {
+        html += `
+          <div class="hidden-rejected-note">
+            Hay ${rejectedCount} pedido(s) rechazado(s) oculto(s).
+            <button class="small-action-btn" onclick="toggleRejectedAdminOrders()">
+              ${showRejectedAdminOrders ? "Ocultar rechazados" : "Mirar rechazados"}
+            </button>
+          </div>
+        `;
+      }
+
+      html += visibleOrders.map(order => {
         const orderData = parseJsonObject(order.order_data);
 
         return `
           <div class="item">
-            <p><b>Pedido:</b> #${order.id}</p>
-            <p><b>Cliente:</b> ${safeText(order.customer_name)}</p>
-            <p><b>Correo:</b> ${safeText(order.customer_email)}</p>
-            <p><b>Producto:</b> ${safeText(order.product_name)}</p>
-            <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
-            <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
-            <p><b>Cobrado:</b> ${Number(order.charged || 0) === 1 ? "Sí" : "No"}</p>
-            ${renderOrderData(orderData)}
+            <div class="admin-summary-row" onclick="toggleElementOpen('admin-order-details-${order.id}')">
+              <div>
+                <h3>Pedido #${order.id} · ${safeText(order.product_name)}</h3>
+                <p class="small-text" style="margin:4px 0 0">
+                  ${safeText(order.customer_name)} · $${formatMoney(order.amount)} · ${safeText(getStatusText(order.status))}
+                </p>
+              </div>
+              <button class="small-action-btn" type="button">Abrir</button>
+            </div>
 
-            <label class="field-label">Estado</label>
-            <select id="status-${order.id}">
-              <option value="accion_en_espera" ${order.status === "accion_en_espera" ? "selected" : ""}>Acción en espera</option>
-              <option value="en_proceso" ${order.status === "en_proceso" ? "selected" : ""}>En proceso</option>
-              <option value="exito" ${order.status === "exito" ? "selected" : ""}>Éxito</option>
-              <option value="rechazado" ${order.status === "rechazado" ? "selected" : ""}>Rechazado</option>
-            </select>
+            <div id="admin-order-details-${order.id}" class="admin-order-details">
+              <p><b>Cliente:</b> ${safeText(order.customer_name)}</p>
+              <p><b>Correo:</b> ${safeText(order.customer_email)}</p>
+              <p><b>Producto:</b> ${safeText(order.product_name)}</p>
+              <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
+              <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
+              <p><b>Cobrado:</b> ${Number(order.charged || 0) === 1 ? "Sí" : "No"}</p>
+              ${renderOrderData(orderData)}
 
-            <label class="field-label">Respuesta para el cliente</label>
-            <textarea id="response-${order.id}" placeholder="Respuesta para el cliente">${safeText(order.admin_response || "")}</textarea>
+              <label class="field-label">Estado</label>
+              <select id="status-${order.id}">
+                <option value="accion_en_espera" ${order.status === "accion_en_espera" ? "selected" : ""}>Acción en espera</option>
+                <option value="en_proceso" ${order.status === "en_proceso" ? "selected" : ""}>En proceso</option>
+                <option value="exito" ${order.status === "exito" ? "selected" : ""}>Éxito</option>
+                <option value="rechazado" ${order.status === "rechazado" ? "selected" : ""}>Rechazado</option>
+              </select>
 
-            <label class="checkbox-row">
-              <input type="checkbox" id="refund-${order.id}" />
-              Devolver saldo si se rechaza
-            </label>
+              <label class="field-label">Respuesta para el cliente</label>
+              <textarea id="response-${order.id}" placeholder="Respuesta para el cliente">${safeText(order.admin_response || "")}</textarea>
 
-            <button onclick="updateOrderStatus(${order.id})">Actualizar pedido</button>
+              <label class="checkbox-row">
+                <input type="checkbox" id="refund-${order.id}" />
+                Devolver saldo si se rechaza
+              </label>
+
+              <button onclick="updateOrderStatus(${order.id})">Actualizar pedido</button>
+            </div>
           </div>
         `;
       }).join("");
