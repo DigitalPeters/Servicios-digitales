@@ -111,6 +111,47 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
     </div>
 
     <div id="appSection" class="hidden">
+      <div class="dashboard-shell" id="dashboardShell">
+        <aside class="dashboard-sidebar">
+          <div class="brand-box">
+            <div class="brand-logo">P</div>
+            <div>
+              <div class="brand-title">Servicios Digitales Peters</div>
+              <div class="brand-subtitle" id="sideEmail">Panel de control</div>
+            </div>
+          </div>
+          <nav class="side-menu">
+            <button class="side-btn active" data-view="dashboard" onclick="showDashView('dashboard')"><span class="side-icon">◷</span> Dashboard</button>
+            <button class="side-btn" data-view="account" onclick="showDashView('account')"><span class="side-icon">👤</span> Mi cuenta</button>
+            <button class="side-btn" data-view="store" onclick="showDashView('store')"><span class="side-icon">🛒</span> Tienda</button>
+            <button class="side-btn only-user-menu" data-view="balance" onclick="showDashView('balance')"><span class="side-icon">💳</span> Cargar saldo</button>
+            <button class="side-btn only-user-menu" data-view="report" onclick="showDashView('report')"><span class="side-icon">⚠</span> Reportar falla</button>
+            <button class="side-btn only-admin-menu" data-view="adminProducts" onclick="showDashView('adminProducts')"><span class="side-icon">Ⓟ</span> Productos</button>
+            <button class="side-btn only-admin-menu" data-view="adminOrders" onclick="showDashView('adminOrders')"><span class="side-icon">▤</span> Pedidos</button>
+            <button class="side-btn only-admin-menu" data-view="adminBalance" onclick="showDashView('adminBalance')"><span class="side-icon">💲</span> Solicitudes saldo</button>
+            <button class="side-btn only-admin-menu" data-view="adminReports" onclick="showDashView('adminReports')"><span class="side-icon">⚙</span> Reportes</button>
+            <button class="side-btn only-admin-menu" data-view="adminUsers" onclick="showDashView('adminUsers')"><span class="side-icon">👥</span> Usuarios</button>
+          </nav>
+        </aside>
+        <main class="dashboard-main">
+          <div class="dash-topbar">
+            <div class="top-search"><span style="font-size:22px">🔎</span><input id="globalSearch" placeholder="Buscar..." oninput="dashboardSearch(this.value)" /></div>
+            <span class="top-pill">Abierto</span>
+            <button style="width:auto;margin:0" onclick="showDashView('store')">🏠 Tienda</button>
+            <div class="top-user"><span class="top-avatar">👤</span><span id="topUserName">Usuario</span></div>
+          </div>
+          <section id="viewDashboard" class="dash-view active">
+            <div class="dash-grid">
+              <div class="metric-card"><div class="metric-icon">👤</div><div><div class="metric-label">Usuarios</div><div class="metric-value" id="statUsers">0</div></div></div>
+              <div class="metric-card"><div class="metric-icon">Ⓟ</div><div><div class="metric-label">Productos</div><div class="metric-value" id="statProducts">0</div></div></div>
+              <div class="metric-card"><div class="metric-icon">▤</div><div><div class="metric-label">Pedidos</div><div class="metric-value" id="statOrders">0</div></div></div>
+            </div>
+            <div class="dashboard-row">
+              <div class="dashboard-card"><div class="section-title-row"><h2>Accesos rápidos</h2><span class="pill-status">Online</span></div><div class="admin-actions-bar"><button onclick="showDashView('store')">Ir a tienda</button><button onclick="showDashView('account')">Mi cuenta</button><button class="only-user-menu" onclick="showDashView('balance')">Cargar saldo</button><button class="only-user-menu" onclick="showDashView('report')">Reportar falla</button><button class="only-admin-menu" onclick="showDashView('adminProducts')">Administrar productos</button><button class="only-admin-menu" onclick="showDashView('adminOrders')">Ver pedidos</button></div></div>
+              <div class="dashboard-card"><h2>Resumen</h2><p class="small-text">Usa el menú lateral para abrir solo la opción que necesites. Las secciones de saldo y reportes permanecen ocultas hasta que entras en ellas.</p></div>
+            </div>
+          </section>
+          <section id="viewAccount" class="dash-view">
       <div class="card">
         <div class="topbar">
           <h2>Mi cuenta</h2>
@@ -223,7 +264,9 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
         </div>
 
       </div>
+      </section>
 
+      <section id="viewStore" class="dash-view compact-products">
       <div class="row">
         <div class="card">
           <h2>Productos</h2>
@@ -237,13 +280,17 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
         </div>
       </div>
 
+      </section>
+
       <div id="adminSection" class="hidden">
         <div class="admin-title">
           <h2 style="margin:0">Panel de administrador</h2>
         </div>
 
-        <div class="row">
-          <div class="card">
+        <section id="viewAdminProducts" class="dash-view">
+        <div class="dashboard-card">
+          <div class="section-title-row"><h2>Productos</h2><button style="width:auto" onclick="toggleCreateProductBox()">+ Agregar producto</button></div>
+          <div id="createProductBox" class="hidden">
             <h2>Crear producto</h2>
 
             <label class="field-label">Nombre del producto</label>
@@ -278,9 +325,15 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
 
             <button onclick="createProduct()">Crear producto</button>
           </div>
+          <hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb">
+          <h2>Productos creados</h2>
+          <div id="adminProductsList"></div>
+        </div>
+        </section>
 
-          <div class="card">
-            <h2>Agregar saldo</h2>
+        <section id="viewAdminUsers" class="dash-view">
+          <div class="dashboard-card">
+            <h2>Agregar saldo manual / Usuarios</h2>
             <input id="balanceUserId" type="number" placeholder="ID del usuario" />
             <input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" />
             <input id="balanceNote" placeholder="Nota" />
@@ -291,31 +344,32 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
             <h2>Usuarios</h2>
             <div id="usersList"></div>
           </div>
-        </div>
+        </section>
 
-        <div class="card">
+        <section id="viewAdminBalance" class="dash-view">
+        <div class="dashboard-card">
           <h2>Solicitudes de carga de saldo</h2>
           <p class="small-text">Revisa tu banco antes de aprobar. Al aprobar, el saldo se suma automáticamente al cliente.</p>
           <div id="adminBalanceRequestsList"></div>
         </div>
+        </section>
 
-
-
-        <div class="card">
+        <section id="viewAdminReports" class="dash-view">
+        <div class="dashboard-card">
           <h2>Reportes de cuenta</h2>
           <p class="small-text">El cliente solo reporta la falla. El veredicto final lo decides tú como admin.</p>
           <div id="adminAccountReportsList"></div>
         </div>
+        </section>
 
-        <div class="card">
-          <h2>Productos creados</h2>
-          <div id="adminProductsList"></div>
-        </div>
-
-        <div class="card">
+        <section id="viewAdminOrders" class="dash-view">
+        <div class="dashboard-card">
           <h2>Pedidos</h2>
           <div id="adminOrdersList"></div>
         </div>
+        </section>
+      </div>
+        </main>
       </div>
     </div>
   </div>
@@ -324,6 +378,68 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
     let token = localStorage.getItem("token");
     let currentUser = null;
     let showRejectedAdminOrders = false;
+
+
+    function showDashView(view) {
+      const map = {
+        dashboard: 'viewDashboard', account: 'viewAccount', store: 'viewStore',
+        balance: 'viewAccount', report: 'viewAccount',
+        adminProducts: 'viewAdminProducts', adminOrders: 'viewAdminOrders', adminBalance: 'viewAdminBalance', adminReports: 'viewAdminReports', adminUsers: 'viewAdminUsers'
+      };
+      document.body.classList.remove('client-panel-open');
+      document.querySelectorAll('.dash-view').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById(map[view] || 'viewDashboard');
+      if (target) target.classList.add('active');
+      if (view === 'balance') {
+        document.body.classList.add('client-panel-open');
+        const recharge = document.getElementById('rechargeCard');
+        const report = document.getElementById('accountReportCard');
+        const form = document.getElementById('balanceRequestForm');
+        if (recharge) recharge.classList.remove('client-collapsed');
+        if (form) form.classList.remove('hidden');
+        if (report) report.classList.add('client-collapsed');
+      }
+      if (view === 'report') {
+        document.body.classList.add('client-panel-open');
+        const recharge = document.getElementById('rechargeCard');
+        const report = document.getElementById('accountReportCard');
+        const form = document.getElementById('accountReportForm');
+        if (report) report.classList.remove('client-collapsed');
+        if (form) form.classList.remove('hidden');
+        if (recharge) recharge.classList.add('client-collapsed');
+      }
+      document.querySelectorAll('.side-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function setupDashboardAfterLogin() {
+      if (!currentUser) return;
+      document.body.classList.toggle('is-admin', currentUser.role === 'admin');
+      document.getElementById('topUserName').textContent = currentUser.name || currentUser.email || 'Usuario';
+      document.getElementById('sideEmail').textContent = currentUser.email || 'Panel de control';
+      showDashView(currentUser.role === 'admin' ? 'dashboard' : 'store');
+      setTimeout(updateDashboardStats, 400);
+    }
+
+    function updateDashboardStats() {
+      const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+      set('statProducts', document.querySelectorAll('#productsList .product-card, #productsList .product-item, #productsList > div').length || 0);
+      set('statOrders', document.querySelectorAll('#myOrdersList > div, #adminOrdersList > div, #adminOrdersList tr').length || 0);
+      set('statUsers', document.querySelectorAll('#usersList > div, #usersList tr').length || (currentUser ? 1 : 0));
+    }
+
+    function dashboardSearch(q) {
+      q = String(q || '').toLowerCase().trim();
+      const zones = ['#productsList > div', '#adminProductsList > div', '#adminOrdersList > div', '#myOrdersList > div'];
+      zones.forEach(selector => document.querySelectorAll(selector).forEach(el => {
+        el.style.display = (!q || el.textContent.toLowerCase().includes(q)) ? '' : 'none';
+      }));
+    }
+
+    function toggleCreateProductBox() {
+      const box = document.getElementById('createProductBox');
+      if (box) box.classList.toggle('hidden');
+    }
 
     function openClientPanel(panelId) {
       const recharge = document.getElementById("rechargeCard");
@@ -525,6 +641,7 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
         document.getElementById("userEmail").textContent = currentUser.email;
         document.getElementById("userRole").textContent = currentUser.role;
         document.getElementById("userBalance").textContent = formatMoney(currentUser.balance);
+        setupDashboardAfterLogin();
 
         await loadProducts();
         await loadMyOrders();
@@ -541,6 +658,7 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
         } else {
           document.getElementById("adminSection").classList.add("hidden");
         }
+        updateDashboardStats();
       } catch (error) {
         console.error(error);
         logout();
@@ -1235,6 +1353,7 @@ body.user-mode .container{max-width:1080px}body.user-mode h1{color:#fff}body.use
     }
 
     loadApp();
+    setInterval(updateDashboardStats, 3000);
   </script>
 </body>
 </html>
