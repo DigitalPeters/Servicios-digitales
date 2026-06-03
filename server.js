@@ -404,6 +404,8 @@ async function initDatabase() {
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_platform_account_id INTEGER`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_account_data TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_category_snapshot TEXT DEFAULT ''`);
 
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
@@ -453,6 +455,8 @@ async function initDatabase() {
   await pool.query(`UPDATE orders SET refunded = 0 WHERE refunded IS NULL`);
 
   await pool.query(`UPDATE orders SET delivered_account_data = '' WHERE delivered_account_data IS NULL`);
+  await pool.query(`UPDATE orders SET product_name_snapshot = '' WHERE product_name_snapshot IS NULL`);
+  await pool.query(`UPDATE orders SET product_category_snapshot = '' WHERE product_category_snapshot IS NULL`);
   await pool.query(`UPDATE platform_accounts SET status = 'available' WHERE status IS NULL OR status = ''`);
 
   await pool.query(`UPDATE balance_requests SET bank = '' WHERE bank IS NULL`);
@@ -831,8 +835,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         userId,
@@ -844,7 +848,9 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         charged,
         0,
         assignedAccount ? assignedAccount.id : null,
-        deliveredAccountData
+        deliveredAccountData,
+        product.name || productName,
+        product.category || productCategory
       ]
     );
 
@@ -1486,37 +1492,55 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
 
 
-// ADMIN: REPORTE DE VENTAS
+
+// ADMIN: REPORTE DE VENTAS (fecha local México)
 app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const requestedDate = String(req.query.date || "").trim();
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     const useDate = dateRegex.test(requestedDate) ? requestedDate : null;
 
-    const dateCondition = useDate
-      ? "DATE(orders.created_at) = $1"
-      : "DATE(orders.created_at) = CURRENT_DATE";
-    const params = useDate ? [useDate] : [];
+    const mexicoTodayResult = await pool.query(
+      `SELECT (timezone('America/Mexico_City', NOW()))::date::text AS today`
+    );
+    const selectedDate = useDate || mexicoTodayResult.rows[0].today;
+    const params = [selectedDate];
+
+    const saleProductNameExpr = `
+      COALESCE(
+        NULLIF(orders.product_name_snapshot, ''),
+        NULLIF(substring(orders.delivered_account_data from 'Producto: ([^\n\r]+)'), ''),
+        products.name
+      )
+    `;
+    const saleProductCategoryExpr = `
+      COALESCE(
+        NULLIF(orders.product_category_snapshot, ''),
+        products.category,
+        'Otros'
+      )
+    `;
+    const dateCondition = `(timezone('America/Mexico_City', orders.created_at))::date = $1::date`;
 
     const summaryResult = await pool.query(
-      `SELECT
-         COUNT(*)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+      `SELECT COUNT(*)::int AS total_orders,
+              COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
+       JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}`,
       params
     );
 
     const byUserResult = await pool.query(
-      `SELECT
-         users.id AS user_id,
-         users.name AS customer_name,
-         users.email AS customer_email,
-         COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+      `SELECT users.id AS user_id,
+              users.name AS customer_name,
+              users.email AS customer_email,
+              COUNT(orders.id)::int AS total_orders,
+              COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN users ON users.id = orders.user_id
+       JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}
        GROUP BY users.id, users.name, users.email
@@ -1525,31 +1549,29 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     const byProductResult = await pool.query(
-      `SELECT
-         products.id AS product_id,
-         products.name AS product_name,
-         products.category AS product_category,
-         COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+      `SELECT ${saleProductNameExpr} AS product_name,
+              ${saleProductCategoryExpr} AS product_category,
+              COUNT(orders.id)::int AS total_orders,
+              COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}
-       GROUP BY products.id, products.name, products.category
+       GROUP BY ${saleProductNameExpr}, ${saleProductCategoryExpr}
        ORDER BY total_sales DESC, total_orders DESC`,
       params
     );
 
     const detailsResult = await pool.query(
-      `SELECT
-         orders.id,
-         users.name AS customer_name,
-         users.email AS customer_email,
-         products.name AS product_name,
-         products.category AS product_category,
-         orders.amount,
-         orders.status,
-         orders.created_at
+      `SELECT orders.id,
+              users.name AS customer_name,
+              users.email AS customer_email,
+              ${saleProductNameExpr} AS product_name,
+              ${saleProductCategoryExpr} AS product_category,
+              orders.amount,
+              orders.status,
+              orders.created_at,
+              to_char(timezone('America/Mexico_City', orders.created_at), 'YYYY-MM-DD HH24:MI:SS') AS created_at_mx
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
@@ -1560,7 +1582,8 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     res.json({
-      date: useDate || null,
+      date: selectedDate,
+      timezone: "America/Mexico_City",
       summary: summaryResult.rows[0] || { total_orders: 0, total_sales: 0 },
       by_user: byUserResult.rows,
       by_product: byProductResult.rows,
