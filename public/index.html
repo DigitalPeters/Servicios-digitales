@@ -195,7 +195,81 @@ function renderMyOrders(){myOrdersList.innerHTML=myOrders.map(o=>{const data=par
 function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
 async function enviarSolicitudSaldo(){try{const nombre=(document.getElementById('saldoNombre')?.value||'').trim();const banco=(document.getElementById('saldoBanco')?.value||'').trim();const monto=(document.getElementById('saldoMonto')?.value||'').trim();if(!nombre||!banco||!monto)throw new Error('Nombre, banco y monto son obligatorios');let data;try{data=await api('/api/user/solicitud-saldo',{method:'POST',body:JSON.stringify({monto,banco,referencia:'No proporcionada',titular:nombre,comprobante:''})})}catch(err){data=await api('/api/balance-requests',{method:'POST',body:JSON.stringify({amount:monto,bank:banco,reference:'No proporcionada',account_holder:nombre,proof:''})})}showMessage(data.message||'Solicitud enviada');saldoNombre.value=saldoBanco.value=saldoMonto.value='';await loadBalanceRequests()}catch(e){showMessage(e.message,'error')}}
 async function enviarReporteCuenta(){try{const data=await api('/api/user/reporte-cuenta',{method:'POST',body:JSON.stringify({correo:reporteCorreo.value,tipo:reporteTipo.value,explicacion:reporteExplicacion.value})});showMessage(data.message||'Reporte enviado');reporteCorreo.value=reporteExplicacion.value=''}catch(e){showMessage(e.message,'error')}}
-async function loadBalanceRequests(){try{let requests=[];if(currentUser?.role==='admin'){requests=await api('/api/admin/balance-requests');const pending=requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');statBalanceRequests.textContent=pending.length;const box=document.getElementById('adminBalanceRequestsList');if(box){box.innerHTML=pending.length?pending.map(r=>`<div class="item"><p><b>Solicitud:</b> #${r.id}</p><p><b>Cliente:</b> ${safeText(r.customer_name||r.name||'Cliente')}</p><p><b>Correo:</b> ${safeText(r.customer_email||r.email||'')}</p><p><b>Nombre transferencia:</b> ${safeText(r.account_holder||'')}</p><p><b>Banco:</b> ${safeText(r.bank||'')}</p><p><b>Monto:</b> $${formatMoney(r.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p></div>`).join(''):'Sin solicitudes pendientes.'}}else{try{requests=await api('/api/my-balance-requests')}catch(_){requests=[]}const pending=requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');statBalanceRequests.textContent=pending.length}}catch(e){console.warn('No se pudieron cargar solicitudes de saldo',e);statBalanceRequests.textContent='0'}}
+function getBalanceRequestStatusText(status){
+  const statuses={
+    pendiente:"Pendiente",
+    aprobado:"Aprobado",
+    aprobada:"Aprobada",
+    rechazado:"Rechazado",
+    rechazada:"Rechazada"
+  };
+  return statuses[String(status||"").toLowerCase()] || status || "pendiente";
+}
+
+async function loadBalanceRequests(){
+  try{
+    let requests=[];
+    if(currentUser?.role==='admin'){
+      requests=await api('/api/admin/balance-requests');
+      const pending=requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
+      statBalanceRequests.textContent=pending.length;
+
+      const box=document.getElementById('adminBalanceRequestsList');
+      if(box){
+        box.innerHTML=pending.length?pending.map(r=>`
+          <div class="item">
+            <p><b>Solicitud:</b> #${r.id}</p>
+            <p><b>Cliente:</b> ${safeText(r.customer_name||r.name||'Cliente')}</p>
+            <p><b>Correo:</b> ${safeText(r.customer_email||r.email||'')}</p>
+            <p><b>Nombre transferencia:</b> ${safeText(r.account_holder||r.titular||'')}</p>
+            <p><b>Banco:</b> ${safeText(r.bank||r.banco||'')}</p>
+            <p><b>Monto:</b> $${formatMoney(r.amount||r.monto)}</p>
+            <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(r.status||'pendiente'))}</span></p>
+
+            <label class="field-label">Respuesta para el cliente</label>
+            <textarea id="balance-response-${r.id}" placeholder="Ejemplo: Saldo aprobado y agregado a tu cuenta.">${safeText(r.admin_response||'')}</textarea>
+
+            <div class="two-row">
+              <button class="green-btn" onclick="updateBalanceRequestStatus(${r.id}, 'aprobado')">
+                Aprobar y sumar saldo
+              </button>
+              <button class="danger-btn" onclick="updateBalanceRequestStatus(${r.id}, 'rechazado')">
+                Rechazar
+              </button>
+            </div>
+          </div>
+        `).join(''):'Sin solicitudes pendientes.';
+      }
+    }else{
+      try{requests=await api('/api/my-balance-requests')}catch(_){requests=[]}
+      const pending=requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
+      statBalanceRequests.textContent=pending.length;
+    }
+  }catch(e){
+    console.warn('No se pudieron cargar solicitudes de saldo',e);
+    statBalanceRequests.textContent='0';
+  }
+}
+
+async function updateBalanceRequestStatus(requestId,status){
+  try{
+    const response=document.getElementById('balance-response-'+requestId)?.value||'';
+    const data=await api('/api/admin/balance-requests/'+requestId+'/status',{
+      method:'PATCH',
+      body:JSON.stringify({
+        status:status,
+        admin_response:response
+      })
+    });
+    showMessage(data.message||'Solicitud de saldo actualizada');
+    await loadApp();
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),120);
+  }catch(e){
+    showMessage(e.message,'error');
+  }
+}
+
 function openBalanceRequests(){if(currentUser?.role==='admin'){showSection('admin');setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),80)}else{showSection('balance')}}
 function copyText(t){navigator.clipboard?.writeText(t);showMessage('Copiado')}
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
