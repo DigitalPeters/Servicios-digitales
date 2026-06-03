@@ -4,116 +4,1490 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Servicios Digitales Peters</title>
+
   <style>
-    :root{--navy:#15114f;--navy2:#211772;--bg:#f4f6fb;--card:#fff;--text:#0f172a;--muted:#64748b;--line:#e2e8f0;--green:#008f2d;--red:#ef4444;--orange:#f59e0b;--shadow:0 14px 32px rgba(15,23,42,.08);--radius:20px}
-    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
-    button,input,select,textarea{font:inherit} button{cursor:pointer;border:0}
-    .hidden{display:none!important}.small{font-size:13px;color:var(--muted)}.ok{color:var(--green);font-weight:900}.bad{color:var(--red);font-weight:900}.warn{color:var(--orange);font-weight:900}
-    .btn{border-radius:14px;padding:13px 18px;font-weight:900;background:var(--navy);color:white;display:inline-flex;gap:8px;align-items:center;justify-content:center}.btn.green{background:#078b5b}.btn.gray{background:#5b5b60}.btn.red{background:var(--red)}.btn.light{background:#eef2ff;color:var(--navy)}.btn.full{width:100%}
-    input,select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;padding:13px 14px;background:#f8fafc;outline:none} textarea{min-height:92px;resize:vertical} label{font-weight:900;color:#475569;font-size:14px;display:block;margin:14px 0 6px}
-    .toast{position:fixed;top:18px;right:18px;z-index:99;background:#111827;color:white;border-radius:14px;padding:14px 18px;box-shadow:var(--shadow);max-width:360px}.toast.error{background:#991b1b}.toast.ok{background:#065f46}
-    /* Login */
-    .auth-page{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;background:linear-gradient(160deg,#fff 0 48%,var(--navy) 48% 100%)}
-    .auth-card{width:min(720px,100%);background:#fff;border-radius:28px;padding:58px 52px;box-shadow:var(--shadow);position:relative;text-align:center}.auth-logo{width:132px;height:132px;border-radius:50%;background:var(--navy);color:white;font-size:76px;font-weight:900;display:grid;place-items:center;margin:-110px auto 28px}.auth-card h1{font-size:42px;margin:0 0 26px;color:#475569}.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}.auth-tabs button{border-radius:16px;padding:16px;font-weight:900;background:#eaf0fb;color:var(--navy)}.auth-tabs button.active{background:var(--navy);color:white}.auth-card .btn{margin-top:18px;font-size:20px}
-    /* App */
-    .app{display:grid;grid-template-columns:280px 1fr;min-height:100vh}.sidebar{background:var(--navy);color:white;padding:22px 18px;position:sticky;top:0;height:100vh;overflow:auto}.brand{display:flex;gap:14px;align-items:center;margin-bottom:30px}.brand-logo{width:58px;height:58px;border-radius:50%;background:white;color:var(--navy);display:grid;place-items:center;font-weight:900;font-size:28px}.brand h2{font-size:24px;line-height:1.05;margin:0}.brand p{margin:3px 0 0;color:#cbd5e1}.nav-btn{width:100%;display:flex;gap:14px;align-items:center;background:transparent;color:white;border-radius:18px;padding:16px 18px;margin:7px 0;font-weight:900;font-size:18px;text-align:left}.nav-btn.active{background:white;color:var(--navy)}.logout-side{margin-top:40px;width:100%;background:#ef4444;color:white;border-radius:16px;padding:15px;font-weight:900;font-size:18px}
-    .main{padding:0 24px 40px;overflow:hidden}.topbar{position:sticky;top:0;z-index:20;background:#fff;border-radius:0 0 20px 20px;box-shadow:var(--shadow);padding:12px 18px;margin-bottom:28px;display:flex;gap:16px;align-items:center;justify-content:space-between}.searchbox{max-width:430px;flex:1;display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:16px;padding:8px 12px}.searchbox b{background:var(--navy);color:white;border-radius:50%;width:42px;height:42px;display:grid;place-items:center}.searchbox input{border:0;background:transparent;padding:8px}.top-actions{display:flex;gap:14px;align-items:center}.status-open{background:var(--green);color:white;border-radius:12px;padding:12px 20px;font-weight:900}.user-pill{display:flex;gap:12px;align-items:center;font-weight:900}.avatar{width:48px;height:48px;border-radius:50%;background:#f1eef6;color:var(--navy);display:grid;place-items:center;font-weight:900}.mobile-head{display:none;background:var(--navy);color:white;padding:16px;align-items:center;justify-content:space-between}.hamb{font-size:38px;background:transparent;color:white}.page-title{font-size:34px;margin:18px 0 22px}.grid{display:grid;gap:22px}.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.card{background:white;border-radius:var(--radius);box-shadow:var(--shadow);padding:24px}.stat{display:flex;align-items:center;gap:18px;min-height:118px}.ico{width:72px;height:72px;border-radius:14px;background:var(--navy);color:white;display:grid;place-items:center;font-size:34px;font-weight:900}.stat h3{margin:0;color:#525252;font-size:22px}.stat .num{font-size:36px;color:var(--navy);font-weight:900;margin-top:10px}.two{grid-template-columns:1fr 1fr}.account-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.info-box{background:#f8fafc;border:1px solid var(--line);border-radius:16px;padding:16px}.info-box b{display:block;color:var(--muted);font-size:13px;margin-bottom:8px;text-transform:uppercase}.info-box span{font-weight:900;font-size:20px}.section{display:none}.section.active{display:block}.product-list{display:grid;gap:14px}.cat-title{background:#111827;color:white;border-radius:14px;padding:14px 18px;font-weight:900;margin:20px 0 12px}.product{border:1px solid var(--line);border-radius:16px;background:#fff;padding:18px}.product-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.price{font-weight:900;font-size:24px}.chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.chip{background:#eef2ff;color:var(--navy);border-radius:999px;padding:6px 10px;font-size:12px;font-weight:900}.buy-form{display:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.product.open .buy-form{display:block}.table-wrap{overflow:auto;border-radius:14px;border:1px solid var(--line)}table{width:100%;border-collapse:collapse;background:white;min-width:720px}th{background:#e5e7eb;text-align:left;color:#4b5563}th,td{padding:13px;border-bottom:1px solid #eef2f7;vertical-align:top}.response-box{white-space:pre-line;line-height:1.35;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px}.toolbar{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}.toolbar>*{max-width:260px}.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:80;display:none;align-items:center;justify-content:center;padding:20px}.modal.show{display:flex}.modal-card{background:white;border-radius:22px;padding:24px;width:min(680px,100%);max-height:90vh;overflow:auto}.close-x{float:right;background:#f1f5f9;color:#111;border-radius:10px;padding:8px 12px;font-weight:900}
-    @media(max-width:980px){.app{display:block}.sidebar{position:fixed;left:-320px;top:0;width:290px;z-index:60;transition:.2s}.sidebar.open{left:0}.mobile-head{display:flex}.main{padding:0 10px 26px}.topbar{position:relative;display:grid;margin:0 0 16px;border-radius:0 0 18px 18px}.top-actions{justify-content:space-around;flex-wrap:wrap}.stats{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}.account-grid{grid-template-columns:1fr}.page-title{font-size:28px}.card{padding:18px}.stat{min-height:150px;display:grid;grid-template-columns:78px 1fr}.auth-card{padding:42px 22px}.auth-card h1{font-size:30px}.auth-logo{width:110px;height:110px;font-size:62px;margin-top:-88px}.searchbox{max-width:100%}}
-  </style>
+    :root {
+      --navy: #17144f;
+      --navy-2: #21156a;
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e5e7eb;
+      --success: #078c32;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --shadow: 0 14px 35px rgba(15, 23, 42, .10);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .hidden { display: none !important; }
+
+    button, input, textarea, select { font-family: inherit; }
+
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 18px;
+      background: var(--navy);
+      color: white;
+      cursor: pointer;
+      font-weight: 800;
+      transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease;
+      box-shadow: 0 8px 18px rgba(23, 20, 79, .16);
+    }
+
+    button:hover { transform: translateY(-1px); opacity: .95; }
+    button:active { transform: translateY(0); }
+    button.secondary { background: #eef2ff; color: var(--navy); box-shadow: none; }
+    button.success { background: var(--success); }
+    button.danger { background: var(--danger); }
+    button.gray { background: #52525b; }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid #d9deea;
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 8px 0 12px;
+      font-size: 15px;
+      background: #f8fafc;
+      color: var(--text);
+      outline: none;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--navy);
+      box-shadow: 0 0 0 4px rgba(23, 20, 79, .08);
+      background: white;
+    }
+
+    textarea { min-height: 92px; resize: vertical; }
+    label { font-weight: 800; color: #475569; }
+
+    .login-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background:
+        linear-gradient(165deg, transparent 0 62%, var(--navy) 62% 100%),
+        linear-gradient(15deg, var(--navy) 0 18%, transparent 18% 100%),
+        #ffffff;
+    }
+
+    .login-card {
+      width: min(720px, 100%);
+      background: white;
+      border-radius: 28px;
+      padding: 70px 52px 42px;
+      box-shadow: var(--shadow);
+      position: relative;
+    }
+
+    .logo-circle {
+      width: 136px;
+      height: 136px;
+      border-radius: 50%;
+      background: var(--navy);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 70px;
+      font-weight: 900;
+      position: absolute;
+      left: 50%;
+      top: -68px;
+      transform: translateX(-50%);
+      box-shadow: 0 18px 34px rgba(23, 20, 79, .22);
+    }
+
+    .login-card h1 {
+      margin: 36px 0 24px;
+      text-align: center;
+      font-size: clamp(30px, 5vw, 44px);
+      color: #4b5563;
+      letter-spacing: -.03em;
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .tabs button { border-radius: 18px; font-size: 16px; }
+    .tabs button:not(.active) { background: #e9eefb; color: var(--navy); box-shadow: none; }
+
+    .login-card form button[type="submit"] { width: 100%; padding: 16px; font-size: 18px; border-radius: 18px; margin-top: 6px; }
+
+    .app-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--navy);
+      color: white;
+      padding: 22px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      box-shadow: 12px 0 35px rgba(23, 20, 79, .14);
+      z-index: 5;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 26px;
+    }
+
+    .brand .avatar {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: white;
+      color: var(--navy);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 34px;
+      flex: 0 0 auto;
+    }
+
+    .brand-title { font-size: 23px; line-height: 1.05; font-weight: 900; }
+    .brand-email { font-size: 13px; color: #dbeafe; overflow: hidden; text-overflow: ellipsis; }
+
+    .nav-btn {
+      width: 100%;
+      margin: 7px 0;
+      background: transparent;
+      color: white;
+      box-shadow: none;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      font-size: 16px;
+      text-align: left;
+    }
+
+    .nav-btn.active, .nav-btn:hover { background: white; color: var(--navy); transform: none; }
+    .logout-btn { width: 100%; margin-top: 26px; background: var(--danger); border-radius: 18px; }
+
+    .main {
+      padding: 18px 28px 42px;
+      overflow-x: hidden;
+    }
+
+    .topbar {
+      background: white;
+      border-radius: 0 0 22px 22px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: var(--shadow);
+      margin: -18px -28px 28px;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+
+    .mobile-menu { display: none; }
+    .searchbox { max-width: 430px; position: relative; flex: 1; }
+    .searchbox input { margin: 0; padding-left: 52px; background: white; }
+    .searchbox::before { content: "🔍"; position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 22px; z-index: 1; }
+
+    .topbar-spacer { flex: 1; }
+    .status-pill { background: var(--success); color: white; padding: 10px 17px; border-radius: 12px; font-weight: 900; }
+    .install-btn { background: #52525b; box-shadow: none; }
+
+    .page-title { font-size: clamp(30px, 4vw, 46px); margin: 0 0 22px; letter-spacing: -.04em; }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card, .card, .product, .order, .balance-card, .report-card, .admin-card {
+      background: white;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(226, 232, 240, .8);
+    }
+
+    .stat-card {
+      padding: 22px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      cursor: pointer;
+    }
+
+    .stat-icon {
+      width: 76px;
+      height: 76px;
+      border-radius: 16px;
+      background: var(--navy);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      flex: 0 0 auto;
+    }
+
+    .stat-label { color: #555; font-size: 20px; font-weight: 800; }
+    .stat-value { font-size: 34px; font-weight: 900; color: var(--navy); line-height: 1.1; }
+
+    .two-col { display: grid; grid-template-columns: 1.1fr .9fr; gap: 22px; }
+    .card { padding: 26px; margin-bottom: 22px; }
+    .card h2, .admin-card h2 { margin-top: 0; font-size: 26px; }
+    .muted { color: var(--muted); }
+
+    .chip-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+    .chip { padding: 8px 12px; border-radius: 999px; background: #eef2ff; color: var(--navy); font-weight: 800; font-size: 13px; }
+
+    .category-title {
+      background: var(--navy);
+      color: white;
+      padding: 14px 16px;
+      border-radius: 16px;
+      font-weight: 900;
+      margin: 18px 0 10px;
+    }
+
+    .product, .order, .balance-card, .report-card {
+      padding: 18px;
+      margin: 14px 0;
+    }
+
+    .product-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .product-title { font-size: 21px; font-weight: 900; }
+    .price { font-size: 19px; font-weight: 900; color: var(--navy); white-space: nowrap; }
+    .product-details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+    .req-tags { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0 14px; }
+    .req-tag { background: #eef2f7; border-radius: 999px; padding: 6px 10px; font-size: 13px; font-weight: 700; color: #475569; }
+
+    .account-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 14px;
+    }
+
+    .account-box {
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      padding: 16px;
+      border-radius: 16px;
+    }
+
+    .account-box b { display: block; color: #64748b; font-size: 13px; margin-bottom: 6px; text-transform: uppercase; }
+    .account-box span { font-weight: 900; font-size: 18px; }
+
+    .order p, .balance-card p, .report-card p { white-space: pre-line; }
+    .success-text { color: var(--success); font-weight: 900; }
+    .warning-text { color: var(--warning); font-weight: 900; }
+    .danger-text { color: var(--danger); font-weight: 900; }
+
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; }
+    th { background: #e5e7eb; text-align: left; color: #4b5563; }
+    th, td { padding: 12px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+
+    .admin-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 18px; }
+    .admin-card { padding: 22px; }
+    .button-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+    .empty { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 20px; border-radius: 16px; color: var(--muted); }
+
+    @media (max-width: 980px) {
+      .app-layout { grid-template-columns: 1fr; }
+      .sidebar {
+        position: relative;
+        height: auto;
+        border-radius: 0 0 22px 22px;
+        padding: 16px;
+      }
+      .brand { margin-bottom: 10px; }
+      .brand .avatar { width: 58px; height: 58px; font-size: 29px; }
+      .brand-title { font-size: 23px; }
+      .mobile-menu { display: block; margin-left: auto; background: transparent; font-size: 32px; padding: 4px 8px; box-shadow: none; }
+      .nav { display: none; margin-top: 12px; }
+      .nav.open { display: block; }
+      .logout-btn { margin-top: 10px; }
+      .main { padding: 14px 10px 34px; }
+      .topbar { margin: 0 0 20px; border-radius: 18px; flex-wrap: wrap; position: relative; }
+      .searchbox { min-width: 100%; max-width: none; }
+      .topbar-spacer { display: none; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .stat-card { padding: 16px; gap: 12px; min-height: 140px; align-items: center; }
+      .stat-icon { width: 68px; height: 68px; }
+      .stat-label { font-size: 18px; }
+      .stat-value { font-size: 30px; }
+      .two-col, .admin-grid { grid-template-columns: 1fr; }
+      .account-grid { grid-template-columns: 1fr; }
+      .card { padding: 18px; border-radius: 18px; }
+      .page-title { font-size: 34px; }
+    }
+
+    @media (max-width: 560px) {
+      .login-card { padding: 66px 22px 28px; }
+      .logo-circle { width: 112px; height: 112px; top: -56px; font-size: 58px; }
+      .tabs { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr 1fr; }
+      .stat-card { flex-direction: column; align-items: flex-start; }
+      .topbar button, .status-pill { padding: 9px 12px; font-size: 14px; }
+      .product-head { align-items: flex-start; }
+    }
+</style>
 </head>
+
 <body>
-  <div id="toast" class="toast hidden"></div>
-  <div id="authPage" class="auth-page">
-    <div class="auth-card">
-      <div class="auth-logo">P</div>
-      <h1>Servicios Digitales Peters</h1>
-      <div class="auth-tabs">
-        <button type="button" id="tabLogin" class="active" onclick="setAuthMode('login')">Iniciar sesión</button>
-        <button type="button" id="tabRegister" onclick="setAuthMode('register')">Crear cuenta</button>
+  <div class="container">
+    <h1>Servicios Digitales Peters</h1>
+    <p class="brand-subtitle">Plataforma de trámites y servicios digitales.</p>
+
+    <div id="message"></div>
+
+    <div id="authSection" class="row">
+      <div class="card">
+        <h2>Iniciar sesión</h2>
+        <input id="loginEmail" placeholder="Correo" />
+        <input id="loginPassword" type="password" placeholder="Contraseña" />
+        <button onclick="login()">Entrar</button>
       </div>
-      <div id="nameBox" class="hidden"><label>Nombre</label><input id="name" autocomplete="name" /></div>
-      <label>Correo</label><input id="email" type="email" autocomplete="email" />
-      <label>Contraseña</label><input id="password" type="password" autocomplete="current-password" />
-      <button type="button" class="btn full" id="authBtn" onclick="submitAuth()">Iniciar sesión</button>
+
+      <div class="card">
+        <h2>Crear cuenta</h2>
+        <input id="registerName" placeholder="Nombre" />
+        <input id="registerEmail" placeholder="Correo" />
+        <input id="registerPassword" type="password" placeholder="Contraseña" />
+        <button onclick="register()">Registrarme</button>
+      </div>
+    </div>
+
+    <div id="appSection" class="hidden">
+      <div class="card">
+        <div class="topbar">
+          <h2>Mi cuenta</h2>
+          <button style="max-width:180px" onclick="logout()">Cerrar sesión</button>
+        </div>
+
+        <div class="account-grid">
+          <div class="account-box">
+            <div class="account-label">Nombre</div>
+            <div class="account-value" id="userName"></div>
+          </div>
+
+          <div class="account-box">
+            <div class="account-label">Correo</div>
+            <div class="account-value" id="userEmail"></div>
+          </div>
+
+          <div class="account-box">
+            <div class="account-label">Rol</div>
+            <div class="account-value" id="userRole"></div>
+          </div>
+
+          <div class="account-box">
+            <div class="account-label">Saldo</div>
+            <div class="account-value">$<span id="userBalance"></span></div>
+          </div>
+        </div>
+
+        <div id="rechargeCard" class="recharge-card">
+          <div class="recharge-title">
+            <div>
+              <h2>Recargar saldo</h2>
+              <p class="small-text" style="margin-bottom:0">Solicita que revisemos tu transferencia y agreguemos saldo a tu cuenta.</p>
+            </div>
+            <button class="recharge-button" onclick="toggleBalanceRequestForm()">+ Cargar saldo</button>
+          </div>
+
+          <div id="balanceDetailsPanel" class="collapsible-panel">
+          <div class="balance-alert" style="background:#ecfeff;border-color:#67e8f9;color:#164e63">
+            <b>Datos para transferencia:</b><br>
+            <b>Banco:</b> Mercado Pago<br>
+            <b>Titular:</b> Pedro Garcia Diaz<br>
+            <b>CLABE:</b> 722969020555596471<br>
+            <b>Concepto:</b> ropa o comida
+          </div>
+
+          <div class="balance-alert">
+            El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa el pago y aprueba la carga.
+          </div>
+
+          <div id="balanceRequestForm" class="balance-form">
+            <label class="field-label">Monto transferido</label>
+            <input id="rechargeAmount" type="number" step="0.01" min="1" placeholder="Ejemplo: 100" />
+
+            <label class="field-label">Banco desde donde enviaste</label>
+            <input id="rechargeBank" placeholder="Ejemplo: BBVA, Banorte, Nu, Mercado Pago" />
+
+            <label class="field-label">Referencia / clave de rastreo</label>
+            <input id="rechargeReference" placeholder="Referencia o clave de rastreo" />
+
+            <label class="field-label">Nombre del titular que envió</label>
+            <input id="rechargeHolder" placeholder="Nombre completo del titular" />
+
+            <label class="field-label">Comprobante o nota opcional</label>
+            <input id="rechargeProof" placeholder="Liga de comprobante, folio o nota" />
+
+            <button onclick="sendBalanceRequest()">Enviar solicitud de saldo</button>
+          </div>
+
+          <h3>Mis solicitudes de saldo</h3>
+          <div id="myBalanceRequestsList"></div>
+          </div>
+        </div>
+
+        <div id="accountReportCard" class="recharge-card">
+          <div class="recharge-title">
+            <div>
+              <h2>Reportar problema de cuenta</h2>
+              <p class="small-text" style="margin-bottom:0">Envíanos el correo de la cuenta y explica la falla. El administrador revisará y dará el veredicto final.</p>
+            </div>
+            <button class="recharge-button" onclick="toggleAccountReportForm()">Reportar falla</button>
+          </div>
+
+          <div id="accountReportForm" class="hidden">
+            <label class="field-label">Correo con falla</label>
+            <input id="reportEmail" type="email" placeholder="correo@ejemplo.com" />
+
+            <label class="field-label">Tipo de falla</label>
+            <select id="reportIssueType">
+              <option value="contraseña_incorrecta">Contraseña incorrecta</option>
+              <option value="codigo_de_viaje">Código de viaje</option>
+              <option value="codigo_de_acceso_disney">Código de acceso Disney</option>
+              <option value="codigo_de_hbo">Código de HBO</option>
+              <option value="otro">Otro</option>
+            </select>
+
+            <label class="field-label">Explicación de la falla</label>
+            <textarea id="reportDescription" placeholder="Explica qué problema tiene la cuenta"></textarea>
+
+            <button onclick="sendAccountReport()">Enviar reporte</button>
+          </div>
+
+          <h3>Mis reportes</h3>
+          <div id="myAccountReportsList"></div>
+        </div>
+
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <h2>Productos</h2>
+          <p class="small-text">Selecciona un producto para ver los datos que debes ingresar.</p>
+          <div id="productsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Mis pedidos</h2>
+          <div id="myOrdersList"></div>
+        </div>
+      </div>
+
+      <div id="adminSection" class="hidden">
+        <div class="admin-title">
+          <h2 style="margin:0">Panel de administrador</h2>
+        </div>
+
+        <div class="row">
+          <div class="card">
+            <h2>Crear producto</h2>
+
+            <label class="field-label">Nombre del producto</label>
+            <input id="productName" placeholder="Ejemplo: Acta de Nacimiento" />
+
+            <label class="field-label">Descripción</label>
+            <textarea id="productDescription" placeholder="Descripción que verá el cliente"></textarea>
+
+            <label class="field-label">Precio</label>
+            <input id="productPrice" type="number" step="0.01" placeholder="Precio" />
+
+            <label class="field-label">Categoría</label>
+            <input id="productCategory" placeholder="Ejemplo: Actas, CSF, IMSS" />
+
+            <label class="field-label">Datos requeridos</label>
+            <textarea id="productRequiredFields" placeholder="Escribe separados por coma. Ejemplo: curp, nombre completo, nss"></textarea>
+            <p class="small-text">Puedes poner cualquier dato que ocupe el trámite.</p>
+
+            <label class="field-label">¿Cuándo descontar saldo?</label>
+            <select id="productChargeMode">
+              <option value="on_purchase">Descontar al comprar</option>
+              <option value="on_success">Descontar cuando el admin marque Éxito</option>
+            </select>
+
+            <label class="field-label">Stock</label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="productStockEnabled" />
+              Activar stock para este producto
+            </label>
+
+            <input id="productStock" type="number" min="0" value="0" placeholder="Cantidad disponible" />
+
+            <button onclick="createProduct()">Crear producto</button>
+          </div>
+
+          <div class="card">
+            <h2>Agregar saldo</h2>
+            <input id="balanceUserId" type="number" placeholder="ID del usuario" />
+            <input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" />
+            <input id="balanceNote" placeholder="Nota" />
+            <button onclick="addBalance()">Agregar saldo</button>
+
+            <hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb">
+
+            <h2>Usuarios</h2>
+            <div id="usersList"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Solicitudes de carga de saldo</h2>
+          <p class="small-text">Revisa tu banco antes de aprobar. Al aprobar, el saldo se suma automáticamente al cliente.</p>
+          <div id="adminBalanceRequestsList"></div>
+        </div>
+
+
+
+        <div class="card">
+          <h2>Reportes de cuenta</h2>
+          <p class="small-text">El cliente solo reporta la falla. El veredicto final lo decides tú como admin.</p>
+          <div id="adminAccountReportsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Productos creados</h2>
+          <div id="adminProductsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Pedidos</h2>
+          <div id="adminOrdersList"></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div id="app" class="hidden">
-    <div class="mobile-head"><div class="brand"><div class="brand-logo">P</div><div><h2>Servicios Digitales Peters</h2><p id="mobileEmail"></p></div></div><button class="hamb" onclick="toggleMenu()">☰</button></div>
-    <aside id="sidebar" class="sidebar">
-      <div class="brand"><div class="brand-logo">P</div><div><h2>Servicios<br>Digitales Peters</h2><p id="sideEmail"></p></div></div>
-      <button class="nav-btn active" data-section="dashboard" onclick="showSection('dashboard')">◴ Dashboard</button>
-      <button class="nav-btn" data-section="account" onclick="showSection('account')">👤 Mi cuenta</button>
-      <button class="nav-btn" data-section="shop" onclick="showSection('shop')">🛒 Tienda</button>
-      <button class="nav-btn" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
-      <button class="nav-btn" data-section="report" onclick="showSection('report')">⚠ Reportar falla</button>
-      <button id="adminNav" class="nav-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
-      <button type="button" class="logout-side" onclick="logout()">Cerrar sesión</button>
-    </aside>
-    <main class="main">
-      <div class="topbar">
-        <div class="searchbox"><b>⌕</b><input id="search" placeholder="Buscar producto..." oninput="renderProducts()" /></div>
-        <div class="top-actions"><span class="status-open">Abierto</span><button class="btn gray" onclick="installPWA()">Instalar</button><button class="btn light" onclick="showSection('shop')">🏠 Tienda</button><div class="user-pill"><span class="avatar" id="topAvatar">P</span><span id="topName">Usuario</span></div></div>
-      </div>
+  <script>
+    let token = localStorage.getItem("token");
+    let currentUser = null;
+    let showRejectedAdminOrders = false;
 
-      <section id="dashboard" class="section active">
-        <h1 class="page-title">Dashboard</h1>
-        <div class="grid stats">
-          <div class="card stat"><div class="ico">👥</div><div><h3>Usuarios</h3><div class="num" id="statUsers">0</div></div></div>
-          <div class="card stat"><div class="ico">P</div><div><h3>Productos</h3><div class="num" id="statProducts">0</div></div></div>
-          <div class="card stat"><div class="ico">▤</div><div><h3>Pedidos</h3><div class="num" id="statOrders">0</div></div></div>
-          <div class="card stat"><div class="ico">💳</div><div><h3>Saldo</h3><div class="num" id="statBalance">$0</div></div></div>
-          <div class="card stat"><div class="ico">⚠</div><div><h3>Reportes</h3><div class="num" id="statReports">0</div></div></div>
-          <div class="card stat"><div class="ico">✓</div><div><h3>Estado</h3><div class="num ok">Online</div></div></div>
+    function showMessage(text, type = "success") {
+      document.getElementById("message").innerHTML =
+        `<p class="${type}">${safeText(text)}</p>`;
+    }
+
+    function safeText(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function parseJsonArray(value) {
+      try {
+        if (Array.isArray(value)) return value;
+        const parsed = JSON.parse(value || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function parseJsonObject(value) {
+      try {
+        if (typeof value === "object" && value !== null) return value;
+        const parsed = JSON.parse(value || "{}");
+        return typeof parsed === "object" && parsed !== null ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function normalizeFieldName(name) {
+      return String(name || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/ñ/g, "n")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    }
+
+    function fieldLabel(field) {
+      const labels = {
+        curp: "CURP",
+        rfc: "RFC",
+        idcif: "IDCIF",
+        nss: "NSS",
+        nombre_completo: "Nombre completo",
+        correo: "Correo",
+        telefono: "Teléfono",
+        fecha_nacimiento: "Fecha de nacimiento"
+      };
+
+      return labels[field] || String(field).replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    function getChargeModeText(mode) {
+      if (mode === "on_success") {
+        return "Se descuenta cuando el admin marque Éxito";
+      }
+
+      return "Se descuenta al comprar";
+    }
+
+    function getStatusText(status) {
+      const statuses = {
+        accion_en_espera: "Acción en espera",
+        en_proceso: "En proceso",
+        exito: "Éxito",
+        rechazado: "Rechazado"
+      };
+
+      return statuses[status] || status;
+    }
+
+    function formatMoney(value) {
+      return Number(value || 0).toFixed(2);
+    }
+
+    async function api(path, options = {}) {
+      const headers = options.headers || {};
+
+      if (token) {
+        headers.Authorization = "Bearer " + token;
+      }
+
+      if (!(options.body instanceof FormData)) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const response = await fetch(path, {
+        ...options,
+        headers
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error");
+      }
+
+      return data;
+    }
+
+    async function register() {
+      try {
+        const data = await api("/api/register", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("registerName").value,
+            email: document.getElementById("registerEmail").value,
+            password: document.getElementById("registerPassword").value
+          })
+        });
+
+        token = data.token;
+        localStorage.setItem("token", token);
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function login() {
+      try {
+        const data = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({
+            email: document.getElementById("loginEmail").value,
+            password: document.getElementById("loginPassword").value
+          })
+        });
+
+        token = data.token;
+        localStorage.setItem("token", token);
+        showMessage("Sesión iniciada");
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem("token");
+      token = null;
+      currentUser = null;
+      document.getElementById("authSection").classList.remove("hidden");
+      document.getElementById("appSection").classList.add("hidden");
+      showMessage("Sesión cerrada");
+    }
+
+    async function loadApp() {
+      if (!token) return;
+
+      try {
+        currentUser = await api("/api/me");
+
+        document.getElementById("authSection").classList.add("hidden");
+        document.getElementById("appSection").classList.remove("hidden");
+
+        document.getElementById("userName").textContent = currentUser.name;
+        document.getElementById("userEmail").textContent = currentUser.email;
+        document.getElementById("userRole").textContent = currentUser.role;
+        document.getElementById("userBalance").textContent = formatMoney(currentUser.balance);
+
+        await loadProducts();
+        await loadMyOrders();
+        await loadMyBalanceRequests();
+        await loadMyAccountReports();
+
+        if (currentUser.role === "admin") {
+          document.getElementById("adminSection").classList.remove("hidden");
+          await loadUsers();
+          await loadAdminProducts();
+          await loadAdminOrders();
+          await loadAdminBalanceRequests();
+          await loadAdminAccountReports();
+        } else {
+          document.getElementById("adminSection").classList.add("hidden");
+        }
+      } catch (error) {
+        console.error(error);
+        logout();
+      }
+    }
+
+    async function loadProducts() {
+      const products = await api("/api/products");
+
+      const categories = {};
+
+      products.forEach(product => {
+        const category = product.category || "Otros";
+
+        if (!categories[category]) {
+          categories[category] = [];
+        }
+
+        categories[category].push(product);
+      });
+
+      let html = "";
+
+      Object.keys(categories).forEach(category => {
+        html += `<div class="clean-category">${safeText(category)}</div>`;
+
+        html += categories[category].map(product => {
+          const stockEnabled = Number(product.stock_enabled || 0) === 1;
+          const stock = Number(product.stock || 0);
+          const soldOut = stockEnabled && stock <= 0;
+
+          return `
+            <div class="product-card">
+              <div class="product-summary" onclick="toggleProduct(${product.id})">
+                <div>
+                  <h3>${safeText(product.name)}</h3>
+                  ${stockEnabled ? `
+                    <div class="${soldOut ? "stock-out" : "stock-ok"}">
+                      ${soldOut ? "Agotado" : "Disponible"}
+                    </div>
+                  ` : ""}
+                </div>
+
+                <div class="product-price">$${formatMoney(product.price)}</div>
+              </div>
+
+              <div id="product-details-${product.id}" class="product-details">
+                <p class="product-description">${safeText(product.description || "")}</p>
+                <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
+
+                ${renderProductInputs(product)}
+
+                <button onclick="buyProduct(${product.id})" ${soldOut ? "disabled" : ""}>
+                  ${soldOut ? "Sin stock" : "Comprar"}
+                </button>
+              </div>
+            </div>
+          `;
+        }).join("");
+      });
+
+      document.getElementById("productsList").innerHTML =
+        html || "No hay productos todavía.";
+    }
+
+    function toggleProduct(productId) {
+      const details = document.getElementById("product-details-" + productId);
+
+      if (!details) return;
+
+      const isOpen = details.classList.contains("open");
+
+      document.querySelectorAll(".product-details").forEach(item => {
+        item.classList.remove("open");
+      });
+
+      if (!isOpen) {
+        details.classList.add("open");
+      }
+    }
+
+    function renderProductInputs(product) {
+      const fields = parseJsonArray(product.required_fields);
+
+      if (fields.length === 0) {
+        return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;
+      }
+
+      return fields.map(field => `
+        <label class="field-label">${safeText(fieldLabel(field))}</label>
+        <input
+          id="field-${product.id}-${field}"
+          placeholder="Ingresa ${safeText(fieldLabel(field))}"
+        />
+      `).join("");
+    }
+
+    async function buyProduct(productId) {
+      try {
+        const products = await api("/api/products");
+        const product = products.find(p => Number(p.id) === Number(productId));
+
+        if (!product) {
+          throw new Error("Producto no encontrado");
+        }
+
+        const fields = parseJsonArray(product.required_fields);
+        const orderData = {};
+
+        fields.forEach(field => {
+          const input = document.getElementById(`field-${productId}-${field}`);
+          orderData[field] = input ? input.value.trim() : "";
+        });
+
+        const data = await api("/api/buy/" + productId, {
+          method: "POST",
+          body: JSON.stringify({
+            order_data: orderData
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadMyOrders() {
+      const orders = await api("/api/my-orders");
+
+      const html = orders.map(order => {
+        const orderData = parseJsonObject(order.order_data);
+
+        return `
+          <div class="item">
+            <p><b>Pedido:</b> #${order.id}</p>
+            <p><b>Producto:</b> ${safeText(order.product_name)}</p>
+            <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
+            <p><b>Estado:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
+            ${renderOrderData(orderData)}
+            <p><b>Respuesta:</b> ${safeText(order.admin_response || "Sin respuesta todavía")}</p>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("myOrdersList").innerHTML =
+        html || "No tienes pedidos todavía.";
+    }
+
+    function renderOrderData(orderData) {
+      const entries = Object.entries(orderData || {});
+
+      if (entries.length === 0) return "";
+
+      return `
+        <div class="order-data">
+          <b>Datos enviados:</b>
+          ${entries.map(([key, value]) => `
+            <p style="margin:5px 0"><b>${safeText(fieldLabel(key))}:</b> ${safeText(value)}</p>
+          `).join("")}
         </div>
-        <div class="grid two" style="margin-top:22px"><div class="card"><h2>Accesos rápidos</h2><div class="toolbar"><button class="btn" onclick="showSection('shop')">Ir a tienda</button><button class="btn green" onclick="showSection('balance')">Cargar saldo</button><button class="btn light" onclick="showSection('report')">Reportar falla</button></div></div><div class="card"><h2>Últimos pedidos</h2><div id="dashOrders" class="small">Cargando...</div></div></div>
-      </section>
+      `;
+    }
 
-      <section id="account" class="section"><h1 class="page-title">Mi cuenta</h1><div class="card"><div class="account-grid"><div class="info-box"><b>Nombre</b><span id="accName"></span></div><div class="info-box"><b>Correo</b><span id="accEmail"></span></div><div class="info-box"><b>Rol</b><span id="accRole"></span></div><div class="info-box"><b>Saldo</b><span id="accBalance"></span></div></div></div></section>
+    function getRequiredFieldsFromInput(id) {
+      return document.getElementById(id).value
+        .split(",")
+        .map(value => normalizeFieldName(value))
+        .filter(value => value.length > 0);
+    }
 
-      <section id="shop" class="section"><h1 class="page-title">Tienda</h1><div class="card"><p class="small">Selecciona un producto para abrir los datos requeridos y comprar.</p><div class="toolbar"><select id="categoryFilter" onchange="renderProducts()"><option value="">Todas las categorías</option></select></div><div id="productsBox" class="product-list"></div></div><div class="card" style="margin-top:22px"><h2>Mis pedidos</h2><div id="myOrdersBox"></div></div></section>
+    async function createProduct() {
+      try {
+        const requiredFields = getRequiredFieldsFromInput("productRequiredFields");
 
-      <section id="balance" class="section"><h1 class="page-title">Cargar saldo</h1><div class="card"><h2>Datos para transferencia</h2><div class="account-grid"><div class="info-box"><b>CLABE</b><span>722969020555596471</span></div><div class="info-box"><b>Banco</b><span>Mercado Pago</span></div><div class="info-box"><b>Titular</b><span>Pedro Garcia Diaz</span></div><div class="info-box"><b>Concepto</b><span>ropa o comida</span></div></div><div class="toolbar" style="margin-top:16px"><button class="btn light" onclick="copyText('722969020555596471')">Copiar CLABE</button><button class="btn light" onclick="copyText('ropa o comida')">Copiar concepto</button></div><hr><h2>Enviar datos de transferencia</h2><label>Monto depositado</label><input id="balAmount" type="number" min="1" placeholder="Ej. 100"><label>Referencia / folio</label><input id="balRef" placeholder="Folio o referencia"><label>Banco o app desde donde enviaste</label><input id="balBank" placeholder="Ej. Mercado Pago, BBVA"><label>Explicación</label><textarea id="balNote" placeholder="Escribe cualquier dato extra"></textarea><button class="btn green" onclick="sendBalanceRequest()">Enviar solicitud</button><p class="small">El saldo no se agrega automáticamente. El admin revisa y aprueba la carga.</p></div></section>
+        const data = await api("/api/admin/create-product", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("productName").value,
+            description: document.getElementById("productDescription").value,
+            price: document.getElementById("productPrice").value,
+            category: document.getElementById("productCategory").value,
+            required_fields: requiredFields,
+            charge_mode: document.getElementById("productChargeMode").value,
+            stock_enabled: document.getElementById("productStockEnabled").checked,
+            stock: document.getElementById("productStock").value
+          })
+        });
 
-      <section id="report" class="section"><h1 class="page-title">Reportar falla</h1><div class="card"><label>Correo de la cuenta con falla</label><input id="repEmail" placeholder="correo de la cuenta"><label>Tipo de falla</label><select id="repType"><option>Contraseña incorrecta</option><option>Código de viaje</option><option>Código de acceso Disney</option><option>Código de HBO</option><option>Otro</option></select><label>Explicación</label><textarea id="repText" placeholder="Explica qué problema tienes"></textarea><button class="btn" onclick="sendReport()">Enviar reporte</button></div></section>
+        document.getElementById("productName").value = "";
+        document.getElementById("productDescription").value = "";
+        document.getElementById("productPrice").value = "";
+        document.getElementById("productCategory").value = "";
+        document.getElementById("productRequiredFields").value = "";
+        document.getElementById("productChargeMode").value = "on_purchase";
+        document.getElementById("productStockEnabled").checked = false;
+        document.getElementById("productStock").value = "0";
 
-      <section id="admin" class="section"><h1 class="page-title">Admin</h1><div class="grid two"><div class="card"><h2>Usuarios</h2><div id="adminUsers"></div></div><div class="card"><h2>Crear producto</h2><label>Nombre</label><input id="pName"><label>Precio</label><input id="pPrice" type="number"><label>Categoría</label><input id="pCat" placeholder="Plataformas"><label>Datos requeridos separados por coma</label><input id="pFields" placeholder="correo, nombre"><label>Descripción</label><textarea id="pDesc"></textarea><label>Tipo de cobro</label><select id="pCharge"><option value="on_purchase">Se descuenta al comprar</option><option value="on_success">Se descuenta cuando sea éxito</option></select><label><input id="pStockEnabled" type="checkbox" style="width:auto"> Usar stock</label><label>Stock</label><input id="pStock" type="number" value="0"><button class="btn" onclick="createProduct()">Crear producto</button></div></div><div class="card" style="margin-top:22px"><h2>Pedidos</h2><div id="adminOrders"></div></div></section>
-    </main>
-  </div>
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
 
-<script>
-let token=localStorage.getItem('token')||'';let me=null;let products=[];let myOrders=[];let adminUsers=[];let adminOrders=[];let deferredPrompt=null;let authMode='login';
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e});
-function toast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(type==='error'?'error':type==='ok'?'ok':'');setTimeout(()=>t.classList.add('hidden'),3500)}
-function money(n){return '$'+Number(n||0).toFixed(2)}
-function api(path,opts={}){return fetch(path,{...opts,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...(opts.headers||{})}}).then(async r=>{const text=await r.text();let data={};try{data=text?JSON.parse(text):{}}catch(e){data={error:text||'Respuesta inválida'}}if(!r.ok)throw new Error(data.error||'Error');return data})}
-function setAuthMode(mode){authMode=mode;document.getElementById('nameBox').classList.toggle('hidden',mode==='login');document.getElementById('tabLogin').classList.toggle('active',mode==='login');document.getElementById('tabRegister').classList.toggle('active',mode==='register');document.getElementById('authBtn').textContent=mode==='login'?'Iniciar sesión':'Crear cuenta'}
-async function submitAuth(){try{const email=document.getElementById('email').value.trim();const password=document.getElementById('password').value;const body={email,password};let url='/api/login';if(authMode==='register'){body.name=document.getElementById('name').value.trim();url='/api/register'}const res=await api(url,{method:'POST',body:JSON.stringify(body)});token=res.token;localStorage.setItem('token',token);toast('Sesión iniciada','ok');await start()}catch(e){toast(e.message,'error')}}
-function logout(){localStorage.removeItem('token');token='';location.reload()}
-function toggleMenu(){document.getElementById('sidebar').classList.toggle('open')}
-function showSection(id){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===id));document.getElementById('sidebar').classList.remove('open');if(id==='shop'){renderProducts();renderMyOrders()}if(id==='admin')renderAdmin()}
-async function start(){if(!token){document.getElementById('authPage').classList.remove('hidden');document.getElementById('app').classList.add('hidden');return}try{me=await api('/api/me');document.getElementById('authPage').classList.add('hidden');document.getElementById('app').classList.remove('hidden');paintMe();await loadAll();}catch(e){localStorage.removeItem('token');token='';toast('Inicia sesión de nuevo','error');start()}}
-function paintMe(){const name=me.name||'Usuario';document.getElementById('topName').textContent=name;document.getElementById('topAvatar').textContent=(name[0]||'P').toUpperCase();document.getElementById('sideEmail').textContent=me.email||'';document.getElementById('mobileEmail').textContent=me.email||'';document.getElementById('accName').textContent=name;document.getElementById('accEmail').textContent=me.email||'';document.getElementById('accRole').textContent=me.role||'user';document.getElementById('accBalance').textContent=money(me.balance);document.getElementById('statBalance').textContent=money(me.balance);document.getElementById('adminNav').classList.toggle('hidden',me.role!=='admin')}
-async function loadAll(){products=await api('/api/products').catch(()=>[]);myOrders=await api('/api/my-orders').catch(()=>[]);if(me.role==='admin'){adminUsers=await api('/api/admin/users').catch(()=>[]);adminOrders=await api('/api/admin/orders').catch(()=>[])}updateStats();renderProducts();renderMyOrders();renderAdmin()}
-function updateStats(){document.getElementById('statProducts').textContent=products.length;document.getElementById('statOrders').textContent=(me.role==='admin'?adminOrders.length:myOrders.length);document.getElementById('statUsers').textContent=me.role==='admin'?adminUsers.length:1;document.getElementById('statReports').textContent='0';const last=(me.role==='admin'?adminOrders:myOrders).slice(0,3);document.getElementById('dashOrders').innerHTML=last.length?last.map(o=>`#${o.id} - ${o.product_name||o.name||'Producto'} <b>${o.status||''}</b><br>`).join(''):'Sin pedidos';}
-function reqFields(p){let f=p.required_fields||[];if(typeof f==='string'){try{f=JSON.parse(f)}catch(e){f=f.split(',')}}return Array.isArray(f)?f.filter(Boolean):[]}
-function renderProducts(){const box=document.getElementById('productsBox');const q=(document.getElementById('search').value||'').toLowerCase();const cf=document.getElementById('categoryFilter');const cats=[...new Set(products.map(p=>p.category||'Otros'))];cf.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option ${cf.value===c?'selected':''}>${c}</option>`).join('');const chosen=cf.value;let list=products.filter(p=>(!q||String(p.name).toLowerCase().includes(q)||String(p.category||'').toLowerCase().includes(q))&&(!chosen||(p.category||'Otros')===chosen));if(!list.length){box.innerHTML='<p class="small">No hay productos disponibles.</p>';return}const groups={};list.forEach(p=>{const c=p.category||'Otros';(groups[c]=groups[c]||[]).push(p)});box.innerHTML=Object.entries(groups).map(([cat,items])=>`<div class="cat-title">${cat}</div>`+items.map(productHtml).join('')).join('')}
-function productHtml(p){const fields=reqFields(p);const stock=p.stock_enabled?`<span class="chip">Stock: ${p.stock}</span>`:'';return `<div class="product" id="prod${p.id}"><div class="product-head"><div><h2>${p.name}</h2><p class="small">${p.description||''}</p><div class="chips"><span class="chip">${p.charge_mode==='on_success'?'Cobro al éxito':'Cobro al comprar'}</span>${stock}</div></div><div class="price">${money(p.price)}</div></div><button class="btn full" onclick="toggleProduct(${p.id})">Comprar</button><div class="buy-form">${fields.length?fields.map(f=>`<label>${f}</label><input data-field="${f}" placeholder="Ingresa ${f}">`).join(''):'<p class="small">Este producto no requiere datos.</p>'}<button class="btn green full" onclick="buy(${p.id})">Confirmar compra</button></div></div>`}
-function toggleProduct(id){document.getElementById('prod'+id).classList.toggle('open')}
-async function buy(id){try{const card=document.getElementById('prod'+id);const order_data={};card.querySelectorAll('[data-field]').forEach(i=>order_data[i.dataset.field]=i.value.trim());const r=await api('/api/buy/'+id,{method:'POST',body:JSON.stringify({order_data})});toast(r.message||'Compra realizada','ok');me=await api('/api/me');paintMe();await loadAll();showSection('shop')}catch(e){toast(e.message,'error')}}
-function renderMyOrders(){const box=document.getElementById('myOrdersBox');if(!myOrders.length){box.innerHTML='<p>No tienes pedidos todavía.</p>';return}box.innerHTML=`<div class="table-wrap"><table><thead><tr><th>ID</th><th>Producto</th><th>Estado</th><th>Monto</th><th>Respuesta</th><th>Fecha</th></tr></thead><tbody>${myOrders.map(o=>`<tr><td>${o.id}</td><td>${o.product_name||''}</td><td>${statusLabel(o.status)}</td><td>${money(o.amount)}</td><td><div class="response-box">${escapeHtml(o.admin_response||'Sin respuesta todavía')}</div></td><td>${formatDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`}
-function statusLabel(s){const map={exito:'Éxito',rechazado:'Rechazado',en_proceso:'En proceso',accion_en_espera:'Pendiente'};const cls=s==='exito'?'ok':s==='rechazado'?'bad':'warn';return `<span class="${cls}">${map[s]||s||'Pendiente'}</span>`}
-function formatDate(d){return d?new Date(d).toLocaleString('es-MX'):''}
-function escapeHtml(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
-async function sendBalanceRequest(){try{const body={amount:document.getElementById('balAmount').value,reference:document.getElementById('balRef').value,bank:document.getElementById('balBank').value,note:document.getElementById('balNote').value};const r=await api('/api/balance-requests',{method:'POST',body:JSON.stringify(body)});toast(r.message||'Solicitud enviada','ok')}catch(e){toast('Tu servidor aún no tiene activa la ruta de solicitudes de saldo. Avísame y te paso el server.js compatible.','error')}}
-async function sendReport(){try{const body={account_email:document.getElementById('repEmail').value,problem_type:document.getElementById('repType').value,description:document.getElementById('repText').value};const r=await api('/api/account-reports',{method:'POST',body:JSON.stringify(body)});toast(r.message||'Reporte enviado','ok')}catch(e){toast('Tu servidor aún no tiene activa la ruta de reportes. Avísame y te paso el server.js compatible.','error')}}
-function renderAdmin(){if(me?.role!=='admin')return;document.getElementById('adminUsers').innerHTML=`<div class="table-wrap"><table><thead><tr><th>ID</th><th>Nombre</th><th>Email</th><th>Saldo</th><th>Agregar</th></tr></thead><tbody>${adminUsers.map(u=>`<tr><td>${u.id}</td><td>${u.name}</td><td>${u.email}</td><td>${money(u.balance)}</td><td><input id="add${u.id}" type="number" placeholder="Monto"><button class="btn green" onclick="addBalance(${u.id})">Agregar</button></td></tr>`).join('')}</tbody></table></div>`;document.getElementById('adminOrders').innerHTML=`<div class="table-wrap"><table><thead><tr><th>ID</th><th>Cliente</th><th>Producto</th><th>Estado</th><th>Respuesta</th><th>Acción</th></tr></thead><tbody>${adminOrders.map(o=>`<tr><td>${o.id}</td><td>${o.customer_name||''}<br><span class="small">${o.customer_email||''}</span></td><td>${o.product_name||''}<br>${money(o.amount)}</td><td>${statusLabel(o.status)}</td><td><textarea id="resp${o.id}">${escapeHtml(o.admin_response||'')}</textarea></td><td><select id="st${o.id}"><option value="accion_en_espera">Pendiente</option><option value="en_proceso">En proceso</option><option value="exito">Éxito</option><option value="rechazado">Rechazado</option></select><button class="btn" onclick="updateOrder(${o.id})">Guardar</button></td></tr>`).join('')}</tbody></table></div>`;adminOrders.forEach(o=>{const s=document.getElementById('st'+o.id);if(s)s.value=o.status||'accion_en_espera'})}
-async function addBalance(uid){try{const amount=document.getElementById('add'+uid).value;const r=await api('/api/admin/add-balance',{method:'POST',body:JSON.stringify({user_id:uid,amount})});toast(r.message||'Saldo agregado','ok');adminUsers=await api('/api/admin/users');renderAdmin()}catch(e){toast(e.message,'error')}}
-async function updateOrder(id){try{const status=document.getElementById('st'+id).value;const response_message=document.getElementById('resp'+id).value;const r=await api('/api/admin/orders/'+id+'/status',{method:'PATCH',body:JSON.stringify({status,response_message,refund_if_rejected:true})});toast(r.message||'Pedido actualizado','ok');adminOrders=await api('/api/admin/orders');renderAdmin()}catch(e){toast(e.message,'error')}}
-async function createProduct(){try{const body={name:pName.value,price:pPrice.value,category:pCat.value,description:pDesc.value,required_fields:pFields.value.split(',').map(x=>x.trim()).filter(Boolean),charge_mode:pCharge.value,stock_enabled:pStockEnabled.checked,stock:pStock.value};const r=await api('/api/admin/products',{method:'POST',body:JSON.stringify(body)});toast(r.message||'Producto creado','ok');products=await api('/api/products');renderProducts();updateStats()}catch(e){toast(e.message,'error')}}
-function copyText(t){navigator.clipboard?.writeText(t);toast('Copiado','ok')}
-function installPWA(){if(deferredPrompt){deferredPrompt.prompt()}else toast('Usa el menú del navegador para instalar')}
-start();
-</script>
+    async function addBalance() {
+      try {
+        const data = await api("/api/admin/add-balance", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: Number(document.getElementById("balanceUserId").value),
+            amount: document.getElementById("balanceAmount").value,
+            note: document.getElementById("balanceNote").value
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    function toggleBalanceRequestForm() {
+      const panel = document.getElementById("balanceDetailsPanel");
+      const form = document.getElementById("balanceRequestForm");
+      if (panel) panel.classList.toggle("open");
+      if (form) form.classList.remove("hidden");
+    }
+
+    async function sendBalanceRequest() {
+      try {
+        const data = await api("/api/balance-requests", {
+          method: "POST",
+          body: JSON.stringify({
+            amount: document.getElementById("rechargeAmount").value,
+            bank: document.getElementById("rechargeBank").value,
+            reference: document.getElementById("rechargeReference").value,
+            account_holder: document.getElementById("rechargeHolder").value,
+            proof: document.getElementById("rechargeProof").value
+          })
+        });
+
+        document.getElementById("rechargeAmount").value = "";
+        document.getElementById("rechargeBank").value = "";
+        document.getElementById("rechargeReference").value = "";
+        document.getElementById("rechargeHolder").value = "";
+        document.getElementById("rechargeProof").value = "";
+        const balancePanel = document.getElementById("balanceDetailsPanel");
+        if (balancePanel) balancePanel.classList.remove("open");
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadMyBalanceRequests() {
+      const container = document.getElementById("myBalanceRequestsList");
+      if (!container) return;
+
+      const requests = await api("/api/my-balance-requests");
+
+      const html = requests.map(request => `
+        <div class="item">
+          <p><b>Solicitud:</b> #${request.id}</p>
+          <p><b>Monto:</b> $${formatMoney(request.amount)}</p>
+          <p><b>Banco:</b> ${safeText(request.bank)}</p>
+          <p><b>Referencia:</b> ${safeText(request.reference)}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(request.status))}</span></p>
+          <p><b>Respuesta:</b> ${safeText(request.admin_response || "Sin respuesta todavía")}</p>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No tienes solicitudes de saldo todavía.";
+    }
+
+    function getBalanceRequestStatusText(status) {
+      const statuses = {
+        pendiente: "Pendiente de revisión",
+        aprobado: "Aprobado",
+        rechazado: "Rechazado"
+      };
+
+      return statuses[status] || status;
+    }
+
+    async function loadAdminBalanceRequests() {
+      const container = document.getElementById("adminBalanceRequestsList");
+      if (!container) return;
+
+      const requests = await api("/api/admin/balance-requests");
+
+      const html = requests.map(request => `
+        <div class="item">
+          <p><b>Solicitud:</b> #${request.id}</p>
+          <p><b>Usuario ID:</b> ${request.user_id}</p>
+          <p><b>Cliente:</b> ${safeText(request.customer_name)} - ${safeText(request.customer_email)}</p>
+          <p><b>Monto:</b> $${formatMoney(request.amount)}</p>
+          <p><b>Banco:</b> ${safeText(request.bank)}</p>
+          <p><b>Referencia / clave:</b> ${safeText(request.reference)}</p>
+          <p><b>Titular:</b> ${safeText(request.account_holder)}</p>
+          <p><b>Comprobante / nota:</b> ${safeText(request.proof || "No enviado")}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(request.status))}</span></p>
+          <textarea id="balance-response-${request.id}" placeholder="Respuesta para el cliente">${safeText(request.admin_response || "")}</textarea>
+          <div class="button-row">
+            <button onclick="updateBalanceRequestStatus(${request.id}, 'aprobado')" ${request.status === "aprobado" ? "disabled" : ""}>Aprobar y sumar saldo</button>
+            <button onclick="updateBalanceRequestStatus(${request.id}, 'rechazado')" ${request.status === "aprobado" ? "disabled" : ""}>Rechazar</button>
+          </div>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No hay solicitudes de saldo.";
+    }
+
+    async function updateBalanceRequestStatus(requestId, status) {
+      try {
+        const response = document.getElementById("balance-response-" + requestId).value;
+
+        const data = await api("/api/admin/balance-requests/" + requestId + "/status", {
+          method: "PATCH",
+          body: JSON.stringify({
+            status,
+            admin_response: response
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+
+    function toggleAccountReportForm() {
+      const form = document.getElementById("accountReportForm");
+      if (form) form.classList.toggle("hidden");
+    }
+
+    function getAccountReportStatusText(status) {
+      const statuses = {
+        pendiente: "Pendiente de revisión",
+        resuelto: "Resuelto",
+        reemplazo: "Reemplazo",
+        reembolso: "Reembolso"
+      };
+
+      return statuses[status] || status;
+    }
+
+    async function sendAccountReport() {
+      try {
+        const data = await api("/api/account-reports", {
+          method: "POST",
+          body: JSON.stringify({
+            email: document.getElementById("reportEmail").value,
+            issue_type: document.getElementById("reportIssueType").value,
+            description: document.getElementById("reportDescription").value
+          })
+        });
+
+        document.getElementById("reportEmail").value = "";
+        document.getElementById("reportIssueType").value = "contraseña_incorrecta";
+        document.getElementById("reportDescription").value = "";
+        document.getElementById("accountReportForm").classList.add("hidden");
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+
+    function getIssueTypeText(type) {
+      const labels = {
+        contraseña_incorrecta: "Contraseña incorrecta",
+        codigo_de_viaje: "Código de viaje",
+        codigo_de_acceso_disney: "Código de acceso Disney",
+        codigo_de_hbo: "Código de HBO",
+        otro: "Otro"
+      };
+      return labels[type] || type || "Sin tipo";
+    }
+
+    function toggleElementOpen(id) {
+      const element = document.getElementById(id);
+      if (element) element.classList.toggle("open");
+    }
+
+    function toggleRejectedAdminOrders() {
+      showRejectedAdminOrders = !showRejectedAdminOrders;
+      loadAdminOrders();
+    }
+
+    async function loadMyAccountReports() {
+      const container = document.getElementById("myAccountReportsList");
+      if (!container) return;
+
+      const reports = await api("/api/my-account-reports");
+
+      const html = reports.map(report => `
+        <div class="item">
+          <p><b>Reporte:</b> #${report.id}</p>
+          <p><b>Correo reportado:</b> ${safeText(report.email)}</p>
+          <p><b>Tipo de falla:</b> ${safeText(getIssueTypeText(report.issue_type))}</p>
+          <p><b>Explicación:</b> ${safeText(report.description)}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
+          <p><b>Respuesta admin:</b> ${safeText(report.admin_response || "Sin respuesta todavía")}</p>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No tienes reportes todavía.";
+    }
+
+    async function loadAdminAccountReports() {
+      const container = document.getElementById("adminAccountReportsList");
+      if (!container) return;
+
+      const reports = await api("/api/admin/account-reports");
+
+      const html = reports.map(report => `
+        <div class="item">
+          <p><b>Reporte:</b> #${report.id}</p>
+          <p><b>Usuario ID:</b> ${report.user_id}</p>
+          <p><b>Cliente:</b> ${safeText(report.customer_name)} - ${safeText(report.customer_email)}</p>
+          <p><b>Correo con falla:</b> ${safeText(report.email)}</p>
+          <p><b>Explicación:</b> ${safeText(report.description)}</p>
+          <p><b>Veredicto actual:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
+
+          <label class="field-label">Veredicto del admin</label>
+          <select id="report-status-${report.id}">
+            <option value="pendiente" ${report.status === "pendiente" ? "selected" : ""}>Pendiente</option>
+            <option value="resuelto" ${report.status === "resuelto" ? "selected" : ""}>Resuelto</option>
+            <option value="reemplazo" ${report.status === "reemplazo" ? "selected" : ""}>Reemplazo</option>
+            <option value="reembolso" ${report.status === "reembolso" ? "selected" : ""}>Reembolso</option>
+          </select>
+
+          <textarea id="report-response-${report.id}" placeholder="Respuesta para el cliente">${safeText(report.admin_response || "")}</textarea>
+
+          <button onclick="updateAccountReportStatus(${report.id})">Guardar veredicto</button>
+        </div>
+      `).join("");
+
+      container.innerHTML = html || "No hay reportes de cuenta.";
+    }
+
+    async function updateAccountReportStatus(reportId) {
+      try {
+        const status = document.getElementById("report-status-" + reportId).value;
+        const admin_response = document.getElementById("report-response-" + reportId).value;
+
+        const data = await api("/api/admin/account-reports/" + reportId + "/status", {
+          method: "PATCH",
+          body: JSON.stringify({ status, admin_response })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadUsers() {
+      const users = await api("/api/admin/users");
+
+      const html = users.map(user => `
+        <div class="item">
+          <p><b>ID:</b> ${user.id}</p>
+          <p><b>Nombre:</b> ${safeText(user.name)}</p>
+          <p><b>Correo:</b> ${safeText(user.email)}</p>
+          <p><b>Rol:</b> ${safeText(user.role)}</p>
+          <p><b>Saldo:</b> $${formatMoney(user.balance)}</p>
+        </div>
+      `).join("");
+
+      document.getElementById("usersList").innerHTML = html || "No hay usuarios.";
+    }
+
+    async function loadAdminProducts() {
+      const products = await api("/api/products");
+
+      const html = products.map(product => {
+        const requiredFields = parseJsonArray(product.required_fields);
+        const stockEnabled = Number(product.stock_enabled || 0) === 1;
+        const soldOut = stockEnabled && Number(product.stock || 0) <= 0;
+
+        return `
+          <div class="item">
+            <div class="admin-summary-row" onclick="toggleElementOpen('admin-product-edit-${product.id}')">
+              <div>
+                <h3>${safeText(product.name)}</h3>
+                <p class="small-text" style="margin:4px 0 0">
+                  ${safeText(product.category || "Otros")} · $${formatMoney(product.price)}
+                  ${stockEnabled ? ` · Stock: ${Number(product.stock || 0)}${soldOut ? " · Agotado" : ""}` : ""}
+                </p>
+              </div>
+              <button class="small-action-btn" type="button">Modificar</button>
+            </div>
+
+            <div id="admin-product-edit-${product.id}" class="admin-product-details">
+              <label class="field-label">Nombre</label>
+              <input id="editName-${product.id}" value="${safeText(product.name)}" />
+
+              <label class="field-label">Descripción</label>
+              <textarea id="editDescription-${product.id}">${safeText(product.description || "")}</textarea>
+
+              <label class="field-label">Precio</label>
+              <input id="editPrice-${product.id}" type="number" step="0.01" value="${product.price}" />
+
+              <label class="field-label">Categoría</label>
+              <input id="editCategory-${product.id}" value="${safeText(product.category || "Otros")}" />
+
+              <label class="field-label">Datos requeridos</label>
+              <textarea id="editRequiredFields-${product.id}">${safeText(requiredFields.join(", "))}</textarea>
+
+              <label class="field-label">¿Cuándo descontar saldo?</label>
+              <select id="editChargeMode-${product.id}">
+                <option value="on_purchase" ${product.charge_mode === "on_purchase" ? "selected" : ""}>Descontar al comprar</option>
+                <option value="on_success" ${product.charge_mode === "on_success" ? "selected" : ""}>Descontar cuando el admin marque Éxito</option>
+              </select>
+
+              <label class="field-label">Stock</label>
+              <label class="checkbox-row">
+                <input
+                  type="checkbox"
+                  id="editStockEnabled-${product.id}"
+                  ${stockEnabled ? "checked" : ""}
+                />
+                Activar stock para este producto
+              </label>
+
+              <input
+                id="editStock-${product.id}"
+                type="number"
+                min="0"
+                value="${Number(product.stock || 0)}"
+                placeholder="Cantidad disponible"
+              />
+
+              <div class="three-row">
+                <button onclick="updateProduct(${product.id})">Guardar cambios</button>
+                <button class="danger-btn" onclick="deleteProduct(${product.id})">Eliminar</button>
+                <button class="muted-btn" onclick="toggleProduct(${product.id})">Ver como cliente</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("adminProductsList").innerHTML =
+        html || "No hay productos creados.";
+    }
+
+    async function updateProduct(productId) {
+      try {
+        const requiredFields = document.getElementById("editRequiredFields-" + productId).value
+          .split(",")
+          .map(value => normalizeFieldName(value))
+          .filter(value => value.length > 0);
+
+        const data = await api("/api/admin/products/" + productId, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: document.getElementById("editName-" + productId).value,
+            description: document.getElementById("editDescription-" + productId).value,
+            price: document.getElementById("editPrice-" + productId).value,
+            category: document.getElementById("editCategory-" + productId).value,
+            required_fields: requiredFields,
+            charge_mode: document.getElementById("editChargeMode-" + productId).value,
+            stock_enabled: document.getElementById("editStockEnabled-" + productId).checked,
+            stock: document.getElementById("editStock-" + productId).value
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function deleteProduct(productId) {
+      if (!confirm("¿Seguro que quieres eliminar este producto?")) return;
+
+      try {
+        const data = await api("/api/admin/products/" + productId, {
+          method: "DELETE"
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    async function loadAdminOrders() {
+      const orders = await api("/api/admin/orders");
+      const rejectedCount = orders.filter(order => order.status === "rechazado").length;
+      const visibleOrders = showRejectedAdminOrders
+        ? orders
+        : orders.filter(order => order.status !== "rechazado");
+
+      let html = "";
+
+      if (rejectedCount > 0) {
+        html += `
+          <div class="hidden-rejected-note">
+            Hay ${rejectedCount} pedido(s) rechazado(s) oculto(s).
+            <button class="small-action-btn" onclick="toggleRejectedAdminOrders()">
+              ${showRejectedAdminOrders ? "Ocultar rechazados" : "Mirar rechazados"}
+            </button>
+          </div>
+        `;
+      }
+
+      html += visibleOrders.map(order => {
+        const orderData = parseJsonObject(order.order_data);
+
+        return `
+          <div class="item">
+            <div class="admin-summary-row" onclick="toggleElementOpen('admin-order-details-${order.id}')">
+              <div>
+                <h3>Pedido #${order.id} · ${safeText(order.product_name)}</h3>
+                <p class="small-text" style="margin:4px 0 0">
+                  ${safeText(order.customer_name)} · $${formatMoney(order.amount)} · ${safeText(getStatusText(order.status))}
+                </p>
+              </div>
+              <button class="small-action-btn" type="button">Abrir</button>
+            </div>
+
+            <div id="admin-order-details-${order.id}" class="admin-order-details">
+              <p><b>Cliente:</b> ${safeText(order.customer_name)}</p>
+              <p><b>Correo:</b> ${safeText(order.customer_email)}</p>
+              <p><b>Producto:</b> ${safeText(order.product_name)}</p>
+              <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
+              <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
+              <p><b>Cobrado:</b> ${Number(order.charged || 0) === 1 ? "Sí" : "No"}</p>
+              ${renderOrderData(orderData)}
+
+              <label class="field-label">Estado</label>
+              <select id="status-${order.id}">
+                <option value="accion_en_espera" ${order.status === "accion_en_espera" ? "selected" : ""}>Acción en espera</option>
+                <option value="en_proceso" ${order.status === "en_proceso" ? "selected" : ""}>En proceso</option>
+                <option value="exito" ${order.status === "exito" ? "selected" : ""}>Éxito</option>
+                <option value="rechazado" ${order.status === "rechazado" ? "selected" : ""}>Rechazado</option>
+              </select>
+
+              <label class="field-label">Respuesta para el cliente</label>
+              <textarea id="response-${order.id}" placeholder="Respuesta para el cliente">${safeText(order.admin_response || "")}</textarea>
+
+              <label class="checkbox-row">
+                <input type="checkbox" id="refund-${order.id}" />
+                Devolver saldo si se rechaza
+              </label>
+
+              <button onclick="updateOrderStatus(${order.id})">Actualizar pedido</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("adminOrdersList").innerHTML =
+        html || "No hay pedidos todavía.";
+    }
+
+    async function updateOrderStatus(orderId) {
+      try {
+        const status = document.getElementById("status-" + orderId).value;
+        const response = document.getElementById("response-" + orderId).value;
+        const refund = document.getElementById("refund-" + orderId).checked;
+
+        const data = await api("/api/admin/orders/" + orderId + "/status", {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: status,
+            response_message: response,
+            refund_if_rejected: refund
+          })
+        });
+
+        showMessage(data.message);
+        await loadApp();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    }
+
+    loadApp();
+  </script>
 </body>
 </html>
