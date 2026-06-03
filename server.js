@@ -1485,6 +1485,94 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 });
 
 
+
+
+// ADMIN: REPORTE DE VENTAS
+app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const rawDate = String(req.query.date || "").trim();
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const useDate = dateRegex.test(rawDate) ? rawDate : null;
+
+    const dateCondition = useDate
+      ? `DATE(orders.created_at) = $1::date`
+      : `DATE(orders.created_at) = CURRENT_DATE`;
+    const params = useDate ? [useDate] : [];
+
+    const summaryResult = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_orders,
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+       FROM orders
+       WHERE orders.status = 'exito'
+         AND ${dateCondition}`,
+      params
+    );
+
+    const byUserResult = await pool.query(
+      `SELECT
+         users.id AS user_id,
+         users.name AS customer_name,
+         users.email AS customer_email,
+         COUNT(orders.id)::int AS total_orders,
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       WHERE orders.status = 'exito'
+         AND ${dateCondition}
+       GROUP BY users.id, users.name, users.email
+       ORDER BY total_sales DESC, total_orders DESC`,
+      params
+    );
+
+    const byProductResult = await pool.query(
+      `SELECT
+         products.id AS product_id,
+         products.name AS product_name,
+         products.category AS product_category,
+         COUNT(orders.id)::int AS total_orders,
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+       FROM orders
+       JOIN products ON products.id = orders.product_id
+       WHERE orders.status = 'exito'
+         AND ${dateCondition}
+       GROUP BY products.id, products.name, products.category
+       ORDER BY total_sales DESC, total_orders DESC`,
+      params
+    );
+
+    const detailsResult = await pool.query(
+      `SELECT
+         orders.id,
+         orders.amount,
+         orders.status,
+         orders.created_at,
+         users.name AS customer_name,
+         users.email AS customer_email,
+         products.name AS product_name,
+         products.category AS product_category
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       JOIN products ON products.id = orders.product_id
+       WHERE orders.status = 'exito'
+         AND ${dateCondition}
+       ORDER BY orders.created_at DESC, orders.id DESC`,
+      params
+    );
+
+    res.json({
+      date: useDate || null,
+      summary: summaryResult.rows[0] || { total_orders: 0, total_sales: 0 },
+      by_user: byUserResult.rows,
+      by_product: byProductResult.rows,
+      details: detailsResult.rows
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error generando reporte de ventas" });
+  }
+});
+
 // ADMIN: PROBAR CORREO DE NOTIFICACIÓN
 app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, res) => {
   try {
