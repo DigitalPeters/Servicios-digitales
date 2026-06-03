@@ -364,6 +364,26 @@ async function initDatabase() {
     )
   `);
 
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_accounts (
+      id SERIAL PRIMARY KEY,
+      platform VARCHAR(100) NOT NULL,
+      product_name VARCHAR(150) NOT NULL,
+      account_email VARCHAR(255) NOT NULL,
+      account_password VARCHAR(255) NOT NULL,
+      profile_name VARCHAR(100),
+      profile_pin VARCHAR(50),
+      extra_data TEXT,
+      terms_conditions TEXT,
+      status VARCHAR(30) DEFAULT 'available',
+      assigned_order_id INTEGER,
+      assigned_user_id INTEGER,
+      delivered_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
 
@@ -381,6 +401,24 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS charged INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_platform_account_id INTEGER`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_account_data TEXT DEFAULT ''`);
+
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS account_email VARCHAR(255)`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS account_password VARCHAR(255)`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS profile_name VARCHAR(100)`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS profile_pin VARCHAR(50)`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS extra_data TEXT`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS terms_conditions TEXT`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'available'`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_order_id INTEGER`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
 
 
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS bank TEXT DEFAULT ''`);
@@ -413,6 +451,9 @@ async function initDatabase() {
   await pool.query(`UPDATE orders SET admin_response = '' WHERE admin_response IS NULL`);
   await pool.query(`UPDATE orders SET charged = 0 WHERE charged IS NULL`);
   await pool.query(`UPDATE orders SET refunded = 0 WHERE refunded IS NULL`);
+
+  await pool.query(`UPDATE orders SET delivered_account_data = '' WHERE delivered_account_data IS NULL`);
+  await pool.query(`UPDATE platform_accounts SET status = 'available' WHERE status IS NULL OR status = ''`);
 
   await pool.query(`UPDATE balance_requests SET bank = '' WHERE bank IS NULL`);
   await pool.query(`UPDATE balance_requests SET reference = '' WHERE reference IS NULL`);
@@ -692,7 +733,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const userResult = await client.query(
-      `SELECT id, balance FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT id, name, email, balance FROM users WHERE id = $1 FOR UPDATE`,
       [userId]
     );
 
@@ -714,6 +755,64 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       });
     }
 
+    const productName = String(product.name || "").trim();
+    const productCategory = String(product.category || "").trim();
+
+    const platformCountResult = await client.query(
+      `SELECT COUNT(*)::int AS total
+       FROM platform_accounts
+       WHERE lower(product_name) = lower($1)
+          OR lower(platform) = lower($1)
+          OR lower(platform) = lower($2)`,
+      [productName, productCategory]
+    );
+
+    const isPlatformProduct = Number(platformCountResult.rows[0]?.total || 0) > 0;
+    let assignedAccount = null;
+    let deliveredAccountData = "";
+    let orderStatus = "accion_en_espera";
+    let adminResponse = "";
+
+    if (isPlatformProduct) {
+      const availableAccountResult = await client.query(
+        `SELECT *
+         FROM platform_accounts
+         WHERE status = 'available'
+           AND (
+             lower(product_name) = lower($1)
+             OR lower(platform) = lower($1)
+             OR lower(platform) = lower($2)
+           )
+         ORDER BY id ASC
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED`,
+        [productName, productCategory]
+      );
+
+      assignedAccount = availableAccountResult.rows[0];
+
+      if (!assignedAccount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          error: "Por el momento no hay cuentas disponibles para esta plataforma. Intenta más tarde."
+        });
+      }
+
+      deliveredAccountData = [
+        `Plataforma: ${assignedAccount.platform || ""}`,
+        `Producto: ${assignedAccount.product_name || productName}`,
+        `Correo: ${assignedAccount.account_email || ""}`,
+        `Contraseña: ${assignedAccount.account_password || ""}`,
+        assignedAccount.profile_name ? `Perfil: ${assignedAccount.profile_name}` : "",
+        assignedAccount.profile_pin ? `PIN: ${assignedAccount.profile_pin}` : "",
+        assignedAccount.extra_data ? `Datos extra: ${assignedAccount.extra_data}` : "",
+        assignedAccount.terms_conditions ? `Términos y condiciones: ${assignedAccount.terms_conditions}` : ""
+      ].filter(Boolean).join("\n");
+
+      orderStatus = "exito";
+      adminResponse = "Cuenta entregada automáticamente:\n" + deliveredAccountData;
+    }
+
     const charged = chargeMode === "on_purchase" ? 1 : 0;
 
     if (charged === 1) {
@@ -725,22 +824,33 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       [
         userId,
         productId,
         price,
         JSON.stringify(orderData),
-        "accion_en_espera",
-        "",
+        orderStatus,
+        adminResponse,
         charged,
-        0
+        0,
+        assignedAccount ? assignedAccount.id : null,
+        deliveredAccountData
       ]
     );
 
     const newOrderId = orderInsertResult.rows[0].id;
+
+    if (assignedAccount) {
+      await client.query(
+        `UPDATE platform_accounts
+         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+         WHERE id = $3`,
+        [newOrderId, userId, assignedAccount.id]
+      );
+    }
 
     if (Number(product.stock_enabled || 0) === 1) {
       await client.query(
@@ -751,21 +861,21 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     await client.query("COMMIT");
 
-    const customerResult = await pool.query(
-      `SELECT name, email FROM users WHERE id = $1`,
-      [userId]
-    );
-
-    const customer = customerResult.rows[0] || {};
-
     sendNewOrderEmail({
       orderId: newOrderId,
-      customerName: customer.name || "Cliente",
-      customerEmail: customer.email || "Sin correo",
+      customerName: user.name || "Cliente",
+      customerEmail: user.email || "Sin correo",
       productName: product.name,
       amount: price,
       orderData
     });
+
+    if (assignedAccount) {
+      return res.json({
+        message: "Compra realizada correctamente. Tu cuenta fue entregada automáticamente en Mis pedidos.",
+        delivered_account_data: deliveredAccountData
+      });
+    }
 
     if (charged === 1) {
       return res.json({
@@ -785,6 +895,52 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
   }
 });
 
+// CUENTAS DE PLATAFORMAS - ADMIN
+app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM platform_accounts ORDER BY id DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error obteniendo cuentas de plataformas" });
+  }
+});
+
+app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const {
+      platform,
+      product_name,
+      account_email,
+      account_password,
+      profile_name,
+      profile_pin,
+      extra_data,
+      terms_conditions
+    } = req.body;
+
+    if (!platform || !product_name || !account_email || !account_password) {
+      return res.status(400).json({ error: "Faltan datos obligatorios" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO platform_accounts
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'available')
+       RETURNING *`,
+      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || ""]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error guardando cuenta de plataforma" });
+  }
+});
+
+// MIS PEDIDOS
 // MIS PEDIDOS
 app.get("/api/my-orders", authMiddleware, async (req, res) => {
   try {
