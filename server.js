@@ -802,23 +802,38 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         });
       }
 
+      const fechaEntrega = new Date();
+      const fechaVencimiento = new Date(fechaEntrega);
+      fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+
+      function formatFechaMX(fecha) {
+        return fecha.toLocaleDateString("es-MX", {
+          timeZone: "America/Mexico_City",
+          day: "2-digit",
+          month: "2-digit",
+          year: "2-digit"
+        });
+      }
+
       deliveredAccountData = [
-        "✅ Cuenta entregada automáticamente",
+        "🎬 Cuenta de Streaming Entregada",
         "",
-        `Plataforma: ${assignedAccount.platform || ""}`,
-        `Producto: ${assignedAccount.product_name || productName}`,
+        `📌 Plataforma: ${String(assignedAccount.platform || productCategory || productName || "").toUpperCase()}`,
+        `📧 Correo: ${assignedAccount.account_email || ""}`,
+        `🔐 Contraseña: ${assignedAccount.account_password || ""}`,
+        `👤 Perfil: ${assignedAccount.profile_name || "No aplica"}`,
+        `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
+        `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
+        `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
         "",
-        `Correo: ${assignedAccount.account_email || ""}`,
-        `Contraseña: ${assignedAccount.account_password || ""}`,
-        assignedAccount.profile_name ? `Perfil: ${assignedAccount.profile_name}` : "Perfil: No aplica",
-        assignedAccount.profile_pin ? `PIN: ${assignedAccount.profile_pin}` : "PIN: No aplica",
+        "📌 Normas de uso:",
+        "✅ No editar datos de acceso",
+        "✅ No cambiar el nombre ni el código del perfil",
+        "✅ Uso exclusivo en un solo equipo",
+        "✅ No compartir el acceso con otros",
         "",
-        "Datos extra:",
-        assignedAccount.extra_data || "No aplica",
-        "",
-        "Términos y condiciones:",
-        assignedAccount.terms_conditions || "No aplica"
-      ].filter(line => line !== null && line !== undefined).join("\n");
+        "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
+      ].join("\n");
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
@@ -1498,11 +1513,14 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
   try {
     const requestedDate = String(req.query.date || "").trim();
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    const useDate = dateRegex.test(requestedDate) ? requestedDate : null;
+    const useDate = dateRegex.test(requestedDate)
+      ? requestedDate
+      : null;
 
     const mexicoTodayResult = await pool.query(
       `SELECT (timezone('America/Mexico_City', NOW()))::date::text AS today`
     );
+
     const selectedDate = useDate || mexicoTodayResult.rows[0].today;
     const params = [selectedDate];
 
@@ -1513,6 +1531,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
         products.name
       )
     `;
+
     const saleProductCategoryExpr = `
       COALESCE(
         NULLIF(orders.product_category_snapshot, ''),
@@ -1520,11 +1539,13 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
         'Otros'
       )
     `;
+
     const dateCondition = `(timezone('America/Mexico_City', orders.created_at))::date = $1::date`;
 
     const summaryResult = await pool.query(
-      `SELECT COUNT(*)::int AS total_orders,
-              COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+      `SELECT
+         COUNT(*)::int AS total_orders,
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1533,11 +1554,12 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     const byUserResult = await pool.query(
-      `SELECT users.id AS user_id,
-              users.name AS customer_name,
-              users.email AS customer_email,
-              COUNT(orders.id)::int AS total_orders,
-              COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+      `SELECT
+         users.id AS user_id,
+         users.name AS customer_name,
+         users.email AS customer_email,
+         COUNT(orders.id)::int AS total_orders,
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
@@ -1549,10 +1571,11 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     const byProductResult = await pool.query(
-      `SELECT ${saleProductNameExpr} AS product_name,
-              ${saleProductCategoryExpr} AS product_category,
-              COUNT(orders.id)::int AS total_orders,
-              COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+      `SELECT
+         ${saleProductNameExpr} AS product_name,
+         ${saleProductCategoryExpr} AS product_category,
+         COUNT(orders.id)::int AS total_orders,
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1563,15 +1586,16 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     const detailsResult = await pool.query(
-      `SELECT orders.id,
-              users.name AS customer_name,
-              users.email AS customer_email,
-              ${saleProductNameExpr} AS product_name,
-              ${saleProductCategoryExpr} AS product_category,
-              orders.amount,
-              orders.status,
-              orders.created_at,
-              to_char(timezone('America/Mexico_City', orders.created_at), 'YYYY-MM-DD HH24:MI:SS') AS created_at_mx
+      `SELECT
+         orders.id,
+         users.name AS customer_name,
+         users.email AS customer_email,
+         ${saleProductNameExpr} AS product_name,
+         ${saleProductCategoryExpr} AS product_category,
+         orders.amount,
+         orders.status,
+         orders.created_at,
+         (timezone('America/Mexico_City', orders.created_at))::text AS created_at_mx
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
