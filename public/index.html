@@ -68,9 +68,9 @@
       <section id="section-dashboard" class="section active">
         <h1 class="section-title">Dashboard</h1>
         <div class="grid-cards">
-          <div class="dash-card clickable" onclick="showSection('account')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
-          <div class="dash-card clickable" onclick="showSection('shop')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
-          <div class="dash-card clickable" onclick="showSection('orders')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
           <div class="dash-card clickable" onclick="showSection('reports')"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
@@ -142,6 +142,32 @@ function showAuth(type){document.getElementById('loginForm').classList.toggle('h
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
 function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders()}}
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
+
+function openUsersFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminUsersPanel'),80);
+  }else{
+    showSection('account');
+  }
+}
+function openProductsFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminProductsPanel'),80);
+  }else{
+    showSection('shop');
+  }
+}
+function openOrdersFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminOrdersPanel'),80);
+  }else{
+    showSection('orders');
+  }
+}
+
 function showMessage(text,type='success'){document.getElementById('message').innerHTML=`<p class="${type}">${safeText(text)}</p>`;setTimeout(()=>{document.getElementById('message').innerHTML=''},4500)}
 function safeText(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function parseJsonArray(v){try{if(Array.isArray(v))return v;const p=JSON.parse(v||'[]');return Array.isArray(p)?p:[]}catch{return[]}}
