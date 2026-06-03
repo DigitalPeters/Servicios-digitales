@@ -1518,7 +1518,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       : null;
 
     const mexicoTodayResult = await pool.query(
-      `SELECT (timezone('America/Mexico_City', NOW()))::date::text AS today`
+      `SELECT ((NOW() AT TIME ZONE 'America/Mexico_City')::date)::text AS today`
     );
 
     const selectedDate = useDate || mexicoTodayResult.rows[0].today;
@@ -1540,7 +1540,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
-    const dateCondition = `(timezone('America/Mexico_City', orders.created_at))::date = $1::date`;
+    const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
       `SELECT
@@ -1595,7 +1595,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          orders.amount,
          orders.status,
          orders.created_at,
-         (timezone('America/Mexico_City', orders.created_at))::text AS created_at_mx
+         to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
