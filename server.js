@@ -1486,17 +1486,16 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
 
 
-
 // ADMIN: REPORTE DE VENTAS
 app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const rawDate = String(req.query.date || "").trim();
+    const requestedDate = String(req.query.date || "").trim();
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    const useDate = dateRegex.test(rawDate) ? rawDate : null;
+    const useDate = dateRegex.test(requestedDate) ? requestedDate : null;
 
     const dateCondition = useDate
-      ? `DATE(orders.created_at) = $1::date`
-      : `DATE(orders.created_at) = CURRENT_DATE`;
+      ? "DATE(orders.created_at) = $1"
+      : "DATE(orders.created_at) = CURRENT_DATE";
     const params = useDate ? [useDate] : [];
 
     const summaryResult = await pool.query(
@@ -1544,19 +1543,19 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     const detailsResult = await pool.query(
       `SELECT
          orders.id,
-         orders.amount,
-         orders.status,
-         orders.created_at,
          users.name AS customer_name,
          users.email AS customer_email,
          products.name AS product_name,
-         products.category AS product_category
+         products.category AS product_category,
+         orders.amount,
+         orders.status,
+         orders.created_at
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}
-       ORDER BY orders.created_at DESC, orders.id DESC`,
+       ORDER BY orders.created_at DESC`,
       params
     );
 
