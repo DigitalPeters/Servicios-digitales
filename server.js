@@ -799,18 +799,25 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       }
 
       deliveredAccountData = [
+        "✅ Cuenta entregada automáticamente",
+        "",
         `Plataforma: ${assignedAccount.platform || ""}`,
         `Producto: ${assignedAccount.product_name || productName}`,
+        "",
         `Correo: ${assignedAccount.account_email || ""}`,
         `Contraseña: ${assignedAccount.account_password || ""}`,
-        assignedAccount.profile_name ? `Perfil: ${assignedAccount.profile_name}` : "",
-        assignedAccount.profile_pin ? `PIN: ${assignedAccount.profile_pin}` : "",
-        assignedAccount.extra_data ? `Datos extra: ${assignedAccount.extra_data}` : "",
-        assignedAccount.terms_conditions ? `Términos y condiciones: ${assignedAccount.terms_conditions}` : ""
-      ].filter(Boolean).join("\n");
+        assignedAccount.profile_name ? `Perfil: ${assignedAccount.profile_name}` : "Perfil: No aplica",
+        assignedAccount.profile_pin ? `PIN: ${assignedAccount.profile_pin}` : "PIN: No aplica",
+        "",
+        "Datos extra:",
+        assignedAccount.extra_data || "No aplica",
+        "",
+        "Términos y condiciones:",
+        assignedAccount.terms_conditions || "No aplica"
+      ].filter(line => line !== null && line !== undefined).join("\n");
 
       orderStatus = "exito";
-      adminResponse = "Cuenta entregada automáticamente:\n" + deliveredAccountData;
+      adminResponse = deliveredAccountData;
     }
 
     const charged = chargeMode === "on_purchase" ? 1 : 0;
