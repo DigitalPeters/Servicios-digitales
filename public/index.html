@@ -4,610 +4,126 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Servicios Digitales Peters</title>
-
   <style>
-    :root {
-      --navy: #17144f;
-      --navy-2: #21156a;
-      --bg: #f4f6fb;
-      --card: #ffffff;
-      --text: #0f172a;
-      --muted: #64748b;
-      --line: #e5e7eb;
-      --success: #078c32;
-      --danger: #ef4444;
-      --warning: #f59e0b;
-      --shadow: 0 14px 35px rgba(15, 23, 42, .10);
-      --radius: 22px;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-
-    .hidden { display: none !important; }
-
-    button, input, textarea, select { font-family: inherit; }
-
-    button {
-      border: 0;
-      border-radius: 14px;
-      padding: 12px 18px;
-      background: var(--navy);
-      color: white;
-      cursor: pointer;
-      font-weight: 800;
-      transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease;
-      box-shadow: 0 8px 18px rgba(23, 20, 79, .16);
-    }
-
-    button:hover { transform: translateY(-1px); opacity: .95; }
-    button:active { transform: translateY(0); }
-    button.secondary { background: #eef2ff; color: var(--navy); box-shadow: none; }
-    button.success { background: var(--success); }
-    button.danger { background: var(--danger); }
-    button.gray { background: #52525b; }
-
-    input, textarea, select {
-      width: 100%;
-      border: 1px solid #d9deea;
-      border-radius: 14px;
-      padding: 12px 14px;
-      margin: 8px 0 12px;
-      font-size: 15px;
-      background: #f8fafc;
-      color: var(--text);
-      outline: none;
-    }
-
-    input:focus, textarea:focus, select:focus {
-      border-color: var(--navy);
-      box-shadow: 0 0 0 4px rgba(23, 20, 79, .08);
-      background: white;
-    }
-
-    textarea { min-height: 92px; resize: vertical; }
-    label { font-weight: 800; color: #475569; }
-
-    .login-wrap {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background:
-        linear-gradient(165deg, transparent 0 62%, var(--navy) 62% 100%),
-        linear-gradient(15deg, var(--navy) 0 18%, transparent 18% 100%),
-        #ffffff;
-    }
-
-    .login-card {
-      width: min(720px, 100%);
-      background: white;
-      border-radius: 28px;
-      padding: 70px 52px 42px;
-      box-shadow: var(--shadow);
-      position: relative;
-    }
-
-    .logo-circle {
-      width: 136px;
-      height: 136px;
-      border-radius: 50%;
-      background: var(--navy);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 70px;
-      font-weight: 900;
-      position: absolute;
-      left: 50%;
-      top: -68px;
-      transform: translateX(-50%);
-      box-shadow: 0 18px 34px rgba(23, 20, 79, .22);
-    }
-
-    .login-card h1 {
-      margin: 36px 0 24px;
-      text-align: center;
-      font-size: clamp(30px, 5vw, 44px);
-      color: #4b5563;
-      letter-spacing: -.03em;
-    }
-
-    .tabs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-
-    .tabs button { border-radius: 18px; font-size: 16px; }
-    .tabs button:not(.active) { background: #e9eefb; color: var(--navy); box-shadow: none; }
-
-    .login-card form button[type="submit"] { width: 100%; padding: 16px; font-size: 18px; border-radius: 18px; margin-top: 6px; }
-
-    .app-layout {
-      display: grid;
-      grid-template-columns: 280px 1fr;
-      min-height: 100vh;
-    }
-
-    .sidebar {
-      background: var(--navy);
-      color: white;
-      padding: 22px 18px;
-      position: sticky;
-      top: 0;
-      height: 100vh;
-      overflow: auto;
-      box-shadow: 12px 0 35px rgba(23, 20, 79, .14);
-      z-index: 5;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 26px;
-    }
-
-    .brand .avatar {
-      width: 70px;
-      height: 70px;
-      border-radius: 50%;
-      background: white;
-      color: var(--navy);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 900;
-      font-size: 34px;
-      flex: 0 0 auto;
-    }
-
-    .brand-title { font-size: 23px; line-height: 1.05; font-weight: 900; }
-    .brand-email { font-size: 13px; color: #dbeafe; overflow: hidden; text-overflow: ellipsis; }
-
-    .nav-btn {
-      width: 100%;
-      margin: 7px 0;
-      background: transparent;
-      color: white;
-      box-shadow: none;
-      display: flex;
-      justify-content: flex-start;
-      align-items: center;
-      gap: 12px;
-      padding: 14px 16px;
-      border-radius: 18px;
-      font-size: 16px;
-      text-align: left;
-    }
-
-    .nav-btn.active, .nav-btn:hover { background: white; color: var(--navy); transform: none; }
-    .logout-btn { width: 100%; margin-top: 26px; background: var(--danger); border-radius: 18px; }
-
-    .main {
-      padding: 18px 28px 42px;
-      overflow-x: hidden;
-    }
-
-    .topbar {
-      background: white;
-      border-radius: 0 0 22px 22px;
-      padding: 12px 18px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      box-shadow: var(--shadow);
-      margin: -18px -28px 28px;
-      position: sticky;
-      top: 0;
-      z-index: 3;
-    }
-
-    .mobile-menu { display: none; }
-    .searchbox { max-width: 430px; position: relative; flex: 1; }
-    .searchbox input { margin: 0; padding-left: 52px; background: white; }
-    .searchbox::before { content: "🔍"; position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 22px; z-index: 1; }
-
-    .topbar-spacer { flex: 1; }
-    .status-pill { background: var(--success); color: white; padding: 10px 17px; border-radius: 12px; font-weight: 900; }
-    .install-btn { background: #52525b; box-shadow: none; }
-
-    .page-title { font-size: clamp(30px, 4vw, 46px); margin: 0 0 22px; letter-spacing: -.04em; }
-
-    .section { display: none; }
-    .section.active { display: block; }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(180px, 1fr));
-      gap: 18px;
-      margin-bottom: 24px;
-    }
-
-    .stat-card, .card, .product, .order, .balance-card, .report-card, .admin-card {
-      background: white;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      border: 1px solid rgba(226, 232, 240, .8);
-    }
-
-    .stat-card {
-      padding: 22px;
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      cursor: pointer;
-    }
-
-    .stat-icon {
-      width: 76px;
-      height: 76px;
-      border-radius: 16px;
-      background: var(--navy);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 32px;
-      flex: 0 0 auto;
-    }
-
-    .stat-label { color: #555; font-size: 20px; font-weight: 800; }
-    .stat-value { font-size: 34px; font-weight: 900; color: var(--navy); line-height: 1.1; }
-
-    .two-col { display: grid; grid-template-columns: 1.1fr .9fr; gap: 22px; }
-    .card { padding: 26px; margin-bottom: 22px; }
-    .card h2, .admin-card h2 { margin-top: 0; font-size: 26px; }
-    .muted { color: var(--muted); }
-
-    .chip-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
-    .chip { padding: 8px 12px; border-radius: 999px; background: #eef2ff; color: var(--navy); font-weight: 800; font-size: 13px; }
-
-    .category-title {
-      background: var(--navy);
-      color: white;
-      padding: 14px 16px;
-      border-radius: 16px;
-      font-weight: 900;
-      margin: 18px 0 10px;
-    }
-
-    .product, .order, .balance-card, .report-card {
-      padding: 18px;
-      margin: 14px 0;
-    }
-
-    .product-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      cursor: pointer;
-    }
-
-    .product-title { font-size: 21px; font-weight: 900; }
-    .price { font-size: 19px; font-weight: 900; color: var(--navy); white-space: nowrap; }
-    .product-details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
-    .req-tags { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0 14px; }
-    .req-tag { background: #eef2f7; border-radius: 999px; padding: 6px 10px; font-size: 13px; font-weight: 700; color: #475569; }
-
-    .account-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(150px, 1fr));
-      gap: 14px;
-    }
-
-    .account-box {
-      background: #f8fafc;
-      border: 1px solid var(--line);
-      padding: 16px;
-      border-radius: 16px;
-    }
-
-    .account-box b { display: block; color: #64748b; font-size: 13px; margin-bottom: 6px; text-transform: uppercase; }
-    .account-box span { font-weight: 900; font-size: 18px; }
-
-    .order p, .balance-card p, .report-card p { white-space: pre-line; }
-    .success-text { color: var(--success); font-weight: 900; }
-    .warning-text { color: var(--warning); font-weight: 900; }
-    .danger-text { color: var(--danger); font-weight: 900; }
-
-    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; }
-    th { background: #e5e7eb; text-align: left; color: #4b5563; }
-    th, td { padding: 12px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
-
-    .admin-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 18px; }
-    .admin-card { padding: 22px; }
-    .button-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-
-    .empty { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 20px; border-radius: 16px; color: var(--muted); }
-
-    @media (max-width: 980px) {
-      .app-layout { grid-template-columns: 1fr; }
-      .sidebar {
-        position: relative;
-        height: auto;
-        border-radius: 0 0 22px 22px;
-        padding: 16px;
-      }
-      .brand { margin-bottom: 10px; }
-      .brand .avatar { width: 58px; height: 58px; font-size: 29px; }
-      .brand-title { font-size: 23px; }
-      .mobile-menu { display: block; margin-left: auto; background: transparent; font-size: 32px; padding: 4px 8px; box-shadow: none; }
-      .nav { display: none; margin-top: 12px; }
-      .nav.open { display: block; }
-      .logout-btn { margin-top: 10px; }
-      .main { padding: 14px 10px 34px; }
-      .topbar { margin: 0 0 20px; border-radius: 18px; flex-wrap: wrap; position: relative; }
-      .searchbox { min-width: 100%; max-width: none; }
-      .topbar-spacer { display: none; }
-      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-      .stat-card { padding: 16px; gap: 12px; min-height: 140px; align-items: center; }
-      .stat-icon { width: 68px; height: 68px; }
-      .stat-label { font-size: 18px; }
-      .stat-value { font-size: 30px; }
-      .two-col, .admin-grid { grid-template-columns: 1fr; }
-      .account-grid { grid-template-columns: 1fr; }
-      .card { padding: 18px; border-radius: 18px; }
-      .page-title { font-size: 34px; }
-    }
-
-    @media (max-width: 560px) {
-      .login-card { padding: 66px 22px 28px; }
-      .logo-circle { width: 112px; height: 112px; top: -56px; font-size: 58px; }
-      .tabs { grid-template-columns: 1fr; }
-      .grid { grid-template-columns: 1fr 1fr; }
-      .stat-card { flex-direction: column; align-items: flex-start; }
-      .topbar button, .status-pill { padding: 9px 12px; font-size: 14px; }
-      .product-head { align-items: flex-start; }
-    }
-</style>
+    :root { --navy:#15124c; --navy2:#21176a; --ink:#071226; --muted:#667085; --bg:#f4f6fb; --card:#fff; --line:#e5e7eb; --green:#008f2f; --danger:#ef4444; --shadow:0 18px 45px rgba(15,23,42,.10); --radius:18px; }
+    * { box-sizing:border-box; } body { margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--ink); font-size:15px; }
+    button,input,textarea,select { font:inherit; } button { border:0; border-radius:14px; padding:12px 18px; background:var(--navy); color:#fff; font-weight:800; cursor:pointer; box-shadow:0 8px 18px rgba(21,18,76,.12); } button:hover { filter:brightness(1.05); } button:disabled { opacity:.45; cursor:not-allowed; }
+    input,textarea,select { width:100%; padding:13px 15px; margin:8px 0 14px; border:1px solid #d7dce7; border-radius:14px; background:#f8fafc; outline:none; } textarea { min-height:86px; resize:vertical; } label,.field-label { font-weight:800; color:#4b5563; }
+    .hidden { display:none!important; } #message { position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:50; min-width:260px; max-width:90vw; padding:12px 18px; border-radius:999px; background:#ecfdf3; color:#027a48; font-weight:800; text-align:center; box-shadow:var(--shadow); } #message.error { background:#fff1f2; color:#be123c; }
+    .auth-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; background:linear-gradient(160deg,#fff 0 45%, var(--navy) 45% 100%); }
+    .auth-card { width:min(720px,96vw); background:#fff; border-radius:28px; padding:42px; box-shadow:var(--shadow); text-align:center; } .auth-logo { width:126px; height:126px; border-radius:50%; margin:-90px auto 25px; background:var(--navy); color:#fff; display:grid; place-items:center; font-size:66px; font-weight:900; }
+    .auth-card h1 { margin:0 0 24px; font-size:34px; color:#4b5563; } .auth-tabs { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; } .auth-tabs button:nth-child(2){ background:#eef2ff; color:var(--navy); }
+    .app-shell { min-height:100vh; display:grid; grid-template-columns:260px 1fr; } .sidebar { background:var(--navy); color:#fff; padding:24px 16px; position:sticky; top:0; height:100vh; overflow:auto; }
+    .brand { display:flex; gap:14px; align-items:center; margin-bottom:28px; } .brand-badge { width:64px; height:64px; border-radius:50%; background:#fff; color:var(--navy); display:grid; place-items:center; font-size:32px; font-weight:900; flex:0 0 auto; } .brand h2 { margin:0; font-size:22px; line-height:1.05; } .brand p { margin:4px 0 0; color:#d8d6ff; font-size:13px; overflow:hidden; text-overflow:ellipsis; }
+    .side-link { width:100%; display:flex; align-items:center; gap:12px; background:transparent; color:#fff; box-shadow:none; border-radius:18px; margin:8px 0; padding:14px 16px; justify-content:flex-start; } .side-link.active { background:#fff; color:var(--navy); } .logout-side { margin-top:24px; width:100%; background:#f04444; }
+    .main { padding:0 28px 40px; overflow:hidden; } .topbar { height:82px; display:flex; align-items:center; gap:18px; justify-content:space-between; margin-bottom:26px; background:#fff; border-radius:0 0 18px 18px; box-shadow:var(--shadow); padding:12px 24px; }
+    .searchbox { max-width:360px; display:flex; align-items:center; gap:10px; border:1px solid #d7dce7; border-radius:16px; padding:4px 12px; background:#fff; } .searchbox input { border:0; margin:0; background:#fff; padding:10px 0; } .top-actions { display:flex; gap:14px; align-items:center; } .pill { border-radius:12px; padding:11px 18px; font-weight:900; background:#525252; color:#fff; } .pill.green { background:var(--green); } .user-chip { display:flex; align-items:center; gap:12px; font-weight:800; } .user-dot { width:44px; height:44px; border-radius:50%; background:#f2eef6; display:grid; place-items:center; color:var(--navy); font-weight:900; }
+    .page-title { font-size:32px; margin:6px 0 24px; } .stats-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:22px; margin-bottom:28px; } .stat-card { background:#fff; border-radius:18px; padding:24px; display:flex; align-items:center; gap:20px; box-shadow:var(--shadow); min-height:120px; cursor:pointer; } .stat-icon { width:64px; height:64px; border-radius:14px; background:var(--navy); color:#fff; display:grid; place-items:center; font-size:30px; font-weight:900; flex:0 0 auto; } .stat-card h3 { margin:0; color:#555; font-size:20px; } .stat-card strong { display:block; margin-top:8px; font-size:34px; color:var(--navy); }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:24px; } .card { background:#fff; border-radius:18px; padding:24px; box-shadow:var(--shadow); margin-bottom:24px; } .card h2 { margin:0 0 16px; font-size:24px; } .info-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; } .info-box { border:1px solid var(--line); border-radius:16px; padding:17px; background:#f9fafb; } .info-box span { display:block; color:var(--muted); font-weight:800; text-transform:uppercase; font-size:13px; } .info-box strong { display:block; margin-top:6px; font-size:19px; }
+    .clean-category { background:var(--navy); color:#fff; padding:13px 16px; border-radius:14px; margin:16px 0 10px; font-weight:900; } .product-card,.order-card,.admin-product-card,.user-card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px; margin:12px 0; box-shadow:0 8px 20px rgba(15,23,42,.06); } .product-summary { display:flex; justify-content:space-between; align-items:center; gap:14px; cursor:pointer; } .product-summary h3 { margin:0; } .product-price { font-size:20px; font-weight:900; color:var(--navy); } .product-details { display:none; border-top:1px solid var(--line); margin-top:14px; padding-top:14px; } .stock-ok { color:var(--green); font-weight:900; } .stock-out { color:var(--danger); font-weight:900; } .small-text { color:var(--muted); font-size:13px; } .success-text { white-space:pre-line; line-height:1.45; background:#f8fafc; padding:12px; border-radius:12px; }
+    .admin-title { margin-bottom:16px; } .row { display:grid; grid-template-columns:1fr 1fr; gap:24px; } .checkbox-row { display:flex; align-items:center; gap:8px; } .checkbox-row input { width:auto; margin:0; }
+    @media (max-width: 900px) { .app-shell { grid-template-columns:1fr; } .sidebar { position:relative; height:auto; border-radius:0 0 24px 24px; } .brand { margin-bottom:12px; } .side-link { display:inline-flex; width:auto; margin:5px; } .logout-side { width:auto; } .main { padding:0 14px 28px; } .topbar { flex-direction:column; height:auto; align-items:stretch; padding:16px; } .top-actions { flex-wrap:wrap; justify-content:center; } .searchbox { max-width:none; } .stats-grid { grid-template-columns:1fr 1fr; gap:14px; } .grid-2,.row,.info-grid { grid-template-columns:1fr; } .page-title { font-size:26px; } .stat-card { min-height:105px; padding:16px; } .stat-icon { width:54px; height:54px; } .stat-card strong { font-size:28px; } }
+    @media (max-width: 540px) { body { font-size:14px; } .auth-card { padding:28px 20px; } .auth-logo { width:92px; height:92px; font-size:48px; margin-top:-68px; } .stats-grid { grid-template-columns:1fr 1fr; } .stat-card { flex-direction:column; align-items:flex-start; gap:12px; } .top-actions .pill { padding:9px 12px; } }
+  </style>
 </head>
-
 <body>
-  <div class="container">
-    <h1>Servicios Digitales Peters</h1>
-    <p class="brand-subtitle">Plataforma de trámites y servicios digitales.</p>
+  <div id="message" class="hidden"></div>
 
-    <div id="message"></div>
-
-    <div id="authSection" class="row">
-      <div class="card">
-        <h2>Iniciar sesión</h2>
-        <input id="loginEmail" placeholder="Correo" />
-        <input id="loginPassword" type="password" placeholder="Contraseña" />
-        <button onclick="login()">Entrar</button>
+  <section id="authSection" class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">P</div>
+      <h1>Servicios Digitales Peters</h1>
+      <div class="auth-tabs">
+        <button onclick="showLogin()">Iniciar sesión</button>
+        <button onclick="showRegister()">Crear cuenta</button>
       </div>
-
-      <div class="card">
-        <h2>Crear cuenta</h2>
-        <input id="registerName" placeholder="Nombre" />
-        <input id="registerEmail" placeholder="Correo" />
-        <input id="registerPassword" type="password" placeholder="Contraseña" />
-        <button onclick="register()">Registrarme</button>
+      <div id="loginBox">
+        <label>Correo</label><input id="loginEmail" type="email" autocomplete="email" />
+        <label>Contraseña</label><input id="loginPassword" type="password" autocomplete="current-password" />
+        <button style="width:100%" onclick="login()">Iniciar sesión</button>
       </div>
-    </div>
-
-    <div id="appSection" class="hidden">
-      <div class="card">
-        <div class="topbar">
-          <h2>Mi cuenta</h2>
-          <button style="max-width:180px" onclick="logout()">Cerrar sesión</button>
-        </div>
-
-        <div class="account-grid">
-          <div class="account-box">
-            <div class="account-label">Nombre</div>
-            <div class="account-value" id="userName"></div>
-          </div>
-
-          <div class="account-box">
-            <div class="account-label">Correo</div>
-            <div class="account-value" id="userEmail"></div>
-          </div>
-
-          <div class="account-box">
-            <div class="account-label">Rol</div>
-            <div class="account-value" id="userRole"></div>
-          </div>
-
-          <div class="account-box">
-            <div class="account-label">Saldo</div>
-            <div class="account-value">$<span id="userBalance"></span></div>
-          </div>
-        </div>
-
-        <div id="rechargeCard" class="recharge-card">
-          <div class="recharge-title">
-            <div>
-              <h2>Recargar saldo</h2>
-              <p class="small-text" style="margin-bottom:0">Solicita que revisemos tu transferencia y agreguemos saldo a tu cuenta.</p>
-            </div>
-            <button class="recharge-button" onclick="toggleBalanceRequestForm()">+ Cargar saldo</button>
-          </div>
-
-          <div id="balanceDetailsPanel" class="collapsible-panel">
-          <div class="balance-alert" style="background:#ecfeff;border-color:#67e8f9;color:#164e63">
-            <b>Datos para transferencia:</b><br>
-            <b>Banco:</b> Mercado Pago<br>
-            <b>Titular:</b> Pedro Garcia Diaz<br>
-            <b>CLABE:</b> 722969020555596471<br>
-            <b>Concepto:</b> ropa o comida
-          </div>
-
-          <div class="balance-alert">
-            El saldo no se agrega automáticamente. Primero envías los datos de tu transferencia, después el administrador revisa el pago y aprueba la carga.
-          </div>
-
-          <div id="balanceRequestForm" class="balance-form">
-            <label class="field-label">Monto transferido</label>
-            <input id="rechargeAmount" type="number" step="0.01" min="1" placeholder="Ejemplo: 100" />
-
-            <label class="field-label">Banco desde donde enviaste</label>
-            <input id="rechargeBank" placeholder="Ejemplo: BBVA, Banorte, Nu, Mercado Pago" />
-
-            <label class="field-label">Referencia / clave de rastreo</label>
-            <input id="rechargeReference" placeholder="Referencia o clave de rastreo" />
-
-            <label class="field-label">Nombre del titular que envió</label>
-            <input id="rechargeHolder" placeholder="Nombre completo del titular" />
-
-            <label class="field-label">Comprobante o nota opcional</label>
-            <input id="rechargeProof" placeholder="Liga de comprobante, folio o nota" />
-
-            <button onclick="sendBalanceRequest()">Enviar solicitud de saldo</button>
-          </div>
-
-          <h3>Mis solicitudes de saldo</h3>
-          <div id="myBalanceRequestsList"></div>
-          </div>
-        </div>
-
-        <div id="accountReportCard" class="recharge-card">
-          <div class="recharge-title">
-            <div>
-              <h2>Reportar problema de cuenta</h2>
-              <p class="small-text" style="margin-bottom:0">Envíanos el correo de la cuenta y explica la falla. El administrador revisará y dará el veredicto final.</p>
-            </div>
-            <button class="recharge-button" onclick="toggleAccountReportForm()">Reportar falla</button>
-          </div>
-
-          <div id="accountReportForm" class="hidden">
-            <label class="field-label">Correo con falla</label>
-            <input id="reportEmail" type="email" placeholder="correo@ejemplo.com" />
-
-            <label class="field-label">Tipo de falla</label>
-            <select id="reportIssueType">
-              <option value="contraseña_incorrecta">Contraseña incorrecta</option>
-              <option value="codigo_de_viaje">Código de viaje</option>
-              <option value="codigo_de_acceso_disney">Código de acceso Disney</option>
-              <option value="codigo_de_hbo">Código de HBO</option>
-              <option value="otro">Otro</option>
-            </select>
-
-            <label class="field-label">Explicación de la falla</label>
-            <textarea id="reportDescription" placeholder="Explica qué problema tiene la cuenta"></textarea>
-
-            <button onclick="sendAccountReport()">Enviar reporte</button>
-          </div>
-
-          <h3>Mis reportes</h3>
-          <div id="myAccountReportsList"></div>
-        </div>
-
-      </div>
-
-      <div class="row">
-        <div class="card">
-          <h2>Productos</h2>
-          <p class="small-text">Selecciona un producto para ver los datos que debes ingresar.</p>
-          <div id="productsList"></div>
-        </div>
-
-        <div class="card">
-          <h2>Mis pedidos</h2>
-          <div id="myOrdersList"></div>
-        </div>
-      </div>
-
-      <div id="adminSection" class="hidden">
-        <div class="admin-title">
-          <h2 style="margin:0">Panel de administrador</h2>
-        </div>
-
-        <div class="row">
-          <div class="card">
-            <h2>Crear producto</h2>
-
-            <label class="field-label">Nombre del producto</label>
-            <input id="productName" placeholder="Ejemplo: Acta de Nacimiento" />
-
-            <label class="field-label">Descripción</label>
-            <textarea id="productDescription" placeholder="Descripción que verá el cliente"></textarea>
-
-            <label class="field-label">Precio</label>
-            <input id="productPrice" type="number" step="0.01" placeholder="Precio" />
-
-            <label class="field-label">Categoría</label>
-            <input id="productCategory" placeholder="Ejemplo: Actas, CSF, IMSS" />
-
-            <label class="field-label">Datos requeridos</label>
-            <textarea id="productRequiredFields" placeholder="Escribe separados por coma. Ejemplo: curp, nombre completo, nss"></textarea>
-            <p class="small-text">Puedes poner cualquier dato que ocupe el trámite.</p>
-
-            <label class="field-label">¿Cuándo descontar saldo?</label>
-            <select id="productChargeMode">
-              <option value="on_purchase">Descontar al comprar</option>
-              <option value="on_success">Descontar cuando el admin marque Éxito</option>
-            </select>
-
-            <label class="field-label">Stock</label>
-            <label class="checkbox-row">
-              <input type="checkbox" id="productStockEnabled" />
-              Activar stock para este producto
-            </label>
-
-            <input id="productStock" type="number" min="0" value="0" placeholder="Cantidad disponible" />
-
-            <button onclick="createProduct()">Crear producto</button>
-          </div>
-
-          <div class="card">
-            <h2>Agregar saldo</h2>
-            <input id="balanceUserId" type="number" placeholder="ID del usuario" />
-            <input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" />
-            <input id="balanceNote" placeholder="Nota" />
-            <button onclick="addBalance()">Agregar saldo</button>
-
-            <hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb">
-
-            <h2>Usuarios</h2>
-            <div id="usersList"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Solicitudes de carga de saldo</h2>
-          <p class="small-text">Revisa tu banco antes de aprobar. Al aprobar, el saldo se suma automáticamente al cliente.</p>
-          <div id="adminBalanceRequestsList"></div>
-        </div>
-
-
-
-        <div class="card">
-          <h2>Reportes de cuenta</h2>
-          <p class="small-text">El cliente solo reporta la falla. El veredicto final lo decides tú como admin.</p>
-          <div id="adminAccountReportsList"></div>
-        </div>
-
-        <div class="card">
-          <h2>Productos creados</h2>
-          <div id="adminProductsList"></div>
-        </div>
-
-        <div class="card">
-          <h2>Pedidos</h2>
-          <div id="adminOrdersList"></div>
-        </div>
+      <div id="registerBox" class="hidden">
+        <label>Nombre</label><input id="registerName" />
+        <label>Correo</label><input id="registerEmail" type="email" />
+        <label>Contraseña</label><input id="registerPassword" type="password" />
+        <button style="width:100%" onclick="register()">Crear cuenta</button>
       </div>
     </div>
-  </div>
+  </section>
 
-  <script>
+  <section id="appSection" class="hidden app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div id="brandInitial" class="brand-badge">P</div><div><h2>Servicios<br>Digitales Peters</h2><p id="shellUserEmail"></p></div></div>
+      <button class="side-link active" data-page="dashboardPage" onclick="showPage('dashboardPage')">◴ Dashboard</button>
+      <button class="side-link" data-page="accountPage" onclick="showPage('accountPage')">👤 Mi cuenta</button>
+      <button class="side-link" data-page="shopPage" onclick="showPage('shopPage')">🛒 Tienda</button>
+      <button class="side-link" data-page="ordersPage" onclick="showPage('ordersPage')">▤ Mis pedidos</button>
+      <button class="side-link" data-page="adminPage" id="adminNavBtn" onclick="showPage('adminPage')">⚙️ Admin</button>
+      <button class="logout-side" onclick="logout()">Cerrar sesión</button>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="searchbox"><span>🔎</span><input id="globalSearch" oninput="filterProducts()" placeholder="Buscar producto..." /></div>
+        <div class="top-actions"><span class="pill green">Abierto</span><span class="pill">Instalar</span><span class="pill" id="roleBadge">Cliente</span><div class="user-chip"><span id="topInitial" class="user-dot">P</span><span id="topUserName"></span></div></div>
+      </div>
+
+      <section id="dashboardPage" class="page-view">
+        <h1 class="page-title">Dashboard</h1>
+        <div class="stats-grid">
+          <div class="stat-card" onclick="showPage('accountPage')"><div class="stat-icon">👤</div><div><h3>Mi saldo</h3><strong id="dashBalance">$0.00</strong></div></div>
+          <div class="stat-card" onclick="showPage('shopPage')"><div class="stat-icon">P</div><div><h3>Productos</h3><strong id="dashProducts">0</strong></div></div>
+          <div class="stat-card" onclick="showPage('ordersPage')"><div class="stat-icon">▤</div><div><h3>Pedidos</h3><strong id="dashOrders">0</strong></div></div>
+          <div class="stat-card"><div class="stat-icon">✓</div><div><h3>Estado</h3><strong style="color:var(--green)">Online</strong></div></div>
+          <div class="stat-card"><div class="stat-icon">●</div><div><h3>Rol</h3><strong id="dashRole">Cliente</strong></div></div>
+          <div class="stat-card"><div class="stat-icon">★</div><div><h3>Último pedido</h3><strong id="dashLastOrder" style="font-size:18px;color:#4b5563">Sin pedidos</strong></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card"><h2>Accesos rápidos</h2><button onclick="showPage('shopPage')">Ir a tienda</button> <button onclick="showPage('ordersPage')">Ver pedidos</button></div>
+          <div class="card"><h2>Entrega automática</h2><p class="small-text">Al comprar una cuenta de plataforma disponible, se asigna automáticamente y los datos aparecen separados en tus pedidos.</p></div>
+        </div>
+      </section>
+
+      <section id="accountPage" class="page-view hidden">
+        <h1 class="page-title">Mi cuenta</h1>
+        <div class="card"><div class="info-grid"><div class="info-box"><span>Nombre</span><strong id="userName"></strong></div><div class="info-box"><span>Correo</span><strong id="userEmail"></strong></div><div class="info-box"><span>Rol</span><strong id="userRole"></strong></div><div class="info-box"><span>Saldo</span><strong>$<span id="userBalance"></span></strong></div></div></div>
+      </section>
+
+      <section id="shopPage" class="page-view hidden">
+        <h1 class="page-title">Tienda</h1><div class="card"><p class="small-text">Selecciona un producto para ver los datos requeridos y comprar.</p><div id="productsList"></div></div>
+      </section>
+
+      <section id="ordersPage" class="page-view hidden">
+        <h1 class="page-title">Mis pedidos</h1><div class="card"><div id="myOrdersList"></div></div>
+      </section>
+
+      <section id="adminPage" class="page-view hidden">
+        <h1 class="page-title">Administrador</h1>
+        <div id="adminSection" class="hidden">
+          <div class="row">
+            <div class="card"><h2>Crear producto</h2>
+              <label class="field-label">Nombre del producto</label><input id="productName" placeholder="Ejemplo: Prime perfil" />
+              <label class="field-label">Descripción</label><textarea id="productDescription" placeholder="Descripción que verá el cliente"></textarea>
+              <label class="field-label">Precio</label><input id="productPrice" type="number" step="0.01" placeholder="Precio" />
+              <label class="field-label">Categoría</label><input id="productCategory" placeholder="Ejemplo: plataforma" />
+              <label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="Ejemplo: correo, perfil"></textarea>
+              <label class="field-label">¿Cuándo descontar saldo?</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select>
+              <label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock para este producto</label>
+              <input id="productStock" type="number" min="0" value="0" placeholder="Cantidad disponible" />
+              <button onclick="createProduct()">Crear producto</button>
+            </div>
+            <div class="card"><h2>Agregar saldo</h2><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button onclick="addBalance()">Agregar saldo</button><hr style="margin:22px 0;border:0;border-top:1px solid #e5e7eb"><h2>Usuarios</h2><div id="usersList"></div></div>
+          </div>
+          <div class="card"><h2>Productos creados</h2><div id="adminProductsList"></div></div>
+          <div class="card"><h2>Pedidos</h2><div id="adminOrdersList"></div></div>
+        </div>
+      </section>
+    </main>
+  </section>
+
+<script>
     let token = localStorage.getItem("token");
     let currentUser = null;
-    let showRejectedAdminOrders = false;
 
     function showMessage(text, type = "success") {
       document.getElementById("message").innerHTML =
@@ -731,7 +247,53 @@
         token = data.token;
         localStorage.setItem("token", token);
         showMessage(data.message);
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -750,7 +312,53 @@
         token = data.token;
         localStorage.setItem("token", token);
         showMessage("Sesión iniciada");
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -778,19 +386,17 @@
         document.getElementById("userEmail").textContent = currentUser.email;
         document.getElementById("userRole").textContent = currentUser.role;
         document.getElementById("userBalance").textContent = formatMoney(currentUser.balance);
+        refreshShellUser();
 
         await loadProducts();
         await loadMyOrders();
-        await loadMyBalanceRequests();
-        await loadMyAccountReports();
+        updateDashboardCards();
 
         if (currentUser.role === "admin") {
           document.getElementById("adminSection").classList.remove("hidden");
           await loadUsers();
           await loadAdminProducts();
           await loadAdminOrders();
-          await loadAdminBalanceRequests();
-          await loadAdminAccountReports();
         } else {
           document.getElementById("adminSection").classList.add("hidden");
         }
@@ -802,6 +408,8 @@
 
     async function loadProducts() {
       const products = await api("/api/products");
+      window.__lastProducts = products;
+      updateDashboardCards && updateDashboardCards();
 
       const categories = {};
 
@@ -916,7 +524,53 @@
         });
 
         showMessage(data.message);
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -924,6 +578,8 @@
 
     async function loadMyOrders() {
       const orders = await api("/api/my-orders");
+      window.__lastOrders = orders;
+      updateDashboardCards && updateDashboardCards();
 
       const html = orders.map(order => {
         const orderData = parseJsonObject(order.order_data);
@@ -994,7 +650,53 @@
         document.getElementById("productStock").value = "0";
 
         showMessage(data.message);
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -1012,250 +714,53 @@
         });
 
         showMessage(data.message);
-        await loadApp();
-      } catch (error) {
-        showMessage(error.message, "error");
-      }
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function toggleBalanceRequestForm() {
-      const panel = document.getElementById("balanceDetailsPanel");
-      const form = document.getElementById("balanceRequestForm");
-      if (panel) panel.classList.toggle("open");
-      if (form) form.classList.remove("hidden");
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
     }
 
-    async function sendBalanceRequest() {
-      try {
-        const data = await api("/api/balance-requests", {
-          method: "POST",
-          body: JSON.stringify({
-            amount: document.getElementById("rechargeAmount").value,
-            bank: document.getElementById("rechargeBank").value,
-            reference: document.getElementById("rechargeReference").value,
-            account_holder: document.getElementById("rechargeHolder").value,
-            proof: document.getElementById("rechargeProof").value
-          })
-        });
-
-        document.getElementById("rechargeAmount").value = "";
-        document.getElementById("rechargeBank").value = "";
-        document.getElementById("rechargeReference").value = "";
-        document.getElementById("rechargeHolder").value = "";
-        document.getElementById("rechargeProof").value = "";
-        const balancePanel = document.getElementById("balanceDetailsPanel");
-        if (balancePanel) balancePanel.classList.remove("open");
-
-        showMessage(data.message);
-        await loadApp();
-      } catch (error) {
-        showMessage(error.message, "error");
-      }
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
     }
 
-    async function loadMyBalanceRequests() {
-      const container = document.getElementById("myBalanceRequestsList");
-      if (!container) return;
-
-      const requests = await api("/api/my-balance-requests");
-
-      const html = requests.map(request => `
-        <div class="item">
-          <p><b>Solicitud:</b> #${request.id}</p>
-          <p><b>Monto:</b> $${formatMoney(request.amount)}</p>
-          <p><b>Banco:</b> ${safeText(request.bank)}</p>
-          <p><b>Referencia:</b> ${safeText(request.reference)}</p>
-          <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(request.status))}</span></p>
-          <p><b>Respuesta:</b> ${safeText(request.admin_response || "Sin respuesta todavía")}</p>
-        </div>
-      `).join("");
-
-      container.innerHTML = html || "No tienes solicitudes de saldo todavía.";
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
     }
 
-    function getBalanceRequestStatusText(status) {
-      const statuses = {
-        pendiente: "Pendiente de revisión",
-        aprobado: "Aprobado",
-        rechazado: "Rechazado"
-      };
-
-      return statuses[status] || status;
-    }
-
-    async function loadAdminBalanceRequests() {
-      const container = document.getElementById("adminBalanceRequestsList");
-      if (!container) return;
-
-      const requests = await api("/api/admin/balance-requests");
-
-      const html = requests.map(request => `
-        <div class="item">
-          <p><b>Solicitud:</b> #${request.id}</p>
-          <p><b>Usuario ID:</b> ${request.user_id}</p>
-          <p><b>Cliente:</b> ${safeText(request.customer_name)} - ${safeText(request.customer_email)}</p>
-          <p><b>Monto:</b> $${formatMoney(request.amount)}</p>
-          <p><b>Banco:</b> ${safeText(request.bank)}</p>
-          <p><b>Referencia / clave:</b> ${safeText(request.reference)}</p>
-          <p><b>Titular:</b> ${safeText(request.account_holder)}</p>
-          <p><b>Comprobante / nota:</b> ${safeText(request.proof || "No enviado")}</p>
-          <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(request.status))}</span></p>
-          <textarea id="balance-response-${request.id}" placeholder="Respuesta para el cliente">${safeText(request.admin_response || "")}</textarea>
-          <div class="button-row">
-            <button onclick="updateBalanceRequestStatus(${request.id}, 'aprobado')" ${request.status === "aprobado" ? "disabled" : ""}>Aprobar y sumar saldo</button>
-            <button onclick="updateBalanceRequestStatus(${request.id}, 'rechazado')" ${request.status === "aprobado" ? "disabled" : ""}>Rechazar</button>
-          </div>
-        </div>
-      `).join("");
-
-      container.innerHTML = html || "No hay solicitudes de saldo.";
-    }
-
-    async function updateBalanceRequestStatus(requestId, status) {
-      try {
-        const response = document.getElementById("balance-response-" + requestId).value;
-
-        const data = await api("/api/admin/balance-requests/" + requestId + "/status", {
-          method: "PATCH",
-          body: JSON.stringify({
-            status,
-            admin_response: response
-          })
-        });
-
-        showMessage(data.message);
-        await loadApp();
-      } catch (error) {
-        showMessage(error.message, "error");
-      }
-    }
-
-
-    function toggleAccountReportForm() {
-      const form = document.getElementById("accountReportForm");
-      if (form) form.classList.toggle("hidden");
-    }
-
-    function getAccountReportStatusText(status) {
-      const statuses = {
-        pendiente: "Pendiente de revisión",
-        resuelto: "Resuelto",
-        reemplazo: "Reemplazo",
-        reembolso: "Reembolso"
-      };
-
-      return statuses[status] || status;
-    }
-
-    async function sendAccountReport() {
-      try {
-        const data = await api("/api/account-reports", {
-          method: "POST",
-          body: JSON.stringify({
-            email: document.getElementById("reportEmail").value,
-            issue_type: document.getElementById("reportIssueType").value,
-            description: document.getElementById("reportDescription").value
-          })
-        });
-
-        document.getElementById("reportEmail").value = "";
-        document.getElementById("reportIssueType").value = "contraseña_incorrecta";
-        document.getElementById("reportDescription").value = "";
-        document.getElementById("accountReportForm").classList.add("hidden");
-
-        showMessage(data.message);
-        await loadApp();
-      } catch (error) {
-        showMessage(error.message, "error");
-      }
-    }
-
-
-    function getIssueTypeText(type) {
-      const labels = {
-        contraseña_incorrecta: "Contraseña incorrecta",
-        codigo_de_viaje: "Código de viaje",
-        codigo_de_acceso_disney: "Código de acceso Disney",
-        codigo_de_hbo: "Código de HBO",
-        otro: "Otro"
-      };
-      return labels[type] || type || "Sin tipo";
-    }
-
-    function toggleElementOpen(id) {
-      const element = document.getElementById(id);
-      if (element) element.classList.toggle("open");
-    }
-
-    function toggleRejectedAdminOrders() {
-      showRejectedAdminOrders = !showRejectedAdminOrders;
-      loadAdminOrders();
-    }
-
-    async function loadMyAccountReports() {
-      const container = document.getElementById("myAccountReportsList");
-      if (!container) return;
-
-      const reports = await api("/api/my-account-reports");
-
-      const html = reports.map(report => `
-        <div class="item">
-          <p><b>Reporte:</b> #${report.id}</p>
-          <p><b>Correo reportado:</b> ${safeText(report.email)}</p>
-          <p><b>Tipo de falla:</b> ${safeText(getIssueTypeText(report.issue_type))}</p>
-          <p><b>Explicación:</b> ${safeText(report.description)}</p>
-          <p><b>Estado:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
-          <p><b>Respuesta admin:</b> ${safeText(report.admin_response || "Sin respuesta todavía")}</p>
-        </div>
-      `).join("");
-
-      container.innerHTML = html || "No tienes reportes todavía.";
-    }
-
-    async function loadAdminAccountReports() {
-      const container = document.getElementById("adminAccountReportsList");
-      if (!container) return;
-
-      const reports = await api("/api/admin/account-reports");
-
-      const html = reports.map(report => `
-        <div class="item">
-          <p><b>Reporte:</b> #${report.id}</p>
-          <p><b>Usuario ID:</b> ${report.user_id}</p>
-          <p><b>Cliente:</b> ${safeText(report.customer_name)} - ${safeText(report.customer_email)}</p>
-          <p><b>Correo con falla:</b> ${safeText(report.email)}</p>
-          <p><b>Explicación:</b> ${safeText(report.description)}</p>
-          <p><b>Veredicto actual:</b> <span class="status">${safeText(getAccountReportStatusText(report.status))}</span></p>
-
-          <label class="field-label">Veredicto del admin</label>
-          <select id="report-status-${report.id}">
-            <option value="pendiente" ${report.status === "pendiente" ? "selected" : ""}>Pendiente</option>
-            <option value="resuelto" ${report.status === "resuelto" ? "selected" : ""}>Resuelto</option>
-            <option value="reemplazo" ${report.status === "reemplazo" ? "selected" : ""}>Reemplazo</option>
-            <option value="reembolso" ${report.status === "reembolso" ? "selected" : ""}>Reembolso</option>
-          </select>
-
-          <textarea id="report-response-${report.id}" placeholder="Respuesta para el cliente">${safeText(report.admin_response || "")}</textarea>
-
-          <button onclick="updateAccountReportStatus(${report.id})">Guardar veredicto</button>
-        </div>
-      `).join("");
-
-      container.innerHTML = html || "No hay reportes de cuenta.";
-    }
-
-    async function updateAccountReportStatus(reportId) {
-      try {
-        const status = document.getElementById("report-status-" + reportId).value;
-        const admin_response = document.getElementById("report-response-" + reportId).value;
-
-        const data = await api("/api/admin/account-reports/" + reportId + "/status", {
-          method: "PATCH",
-          body: JSON.stringify({ status, admin_response })
-        });
-
-        showMessage(data.message);
-        await loadApp();
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -1283,66 +788,54 @@
       const html = products.map(product => {
         const requiredFields = parseJsonArray(product.required_fields);
         const stockEnabled = Number(product.stock_enabled || 0) === 1;
-        const soldOut = stockEnabled && Number(product.stock || 0) <= 0;
 
         return `
           <div class="item">
-            <div class="admin-summary-row" onclick="toggleElementOpen('admin-product-edit-${product.id}')">
-              <div>
-                <h3>${safeText(product.name)}</h3>
-                <p class="small-text" style="margin:4px 0 0">
-                  ${safeText(product.category || "Otros")} · $${formatMoney(product.price)}
-                  ${stockEnabled ? ` · Stock: ${Number(product.stock || 0)}${soldOut ? " · Agotado" : ""}` : ""}
-                </p>
-              </div>
-              <button class="small-action-btn" type="button">Modificar</button>
-            </div>
+            <h3>${safeText(product.name)}</h3>
 
-            <div id="admin-product-edit-${product.id}" class="admin-product-details">
-              <label class="field-label">Nombre</label>
-              <input id="editName-${product.id}" value="${safeText(product.name)}" />
+            <label class="field-label">Nombre</label>
+            <input id="editName-${product.id}" value="${safeText(product.name)}" />
 
-              <label class="field-label">Descripción</label>
-              <textarea id="editDescription-${product.id}">${safeText(product.description || "")}</textarea>
+            <label class="field-label">Descripción</label>
+            <textarea id="editDescription-${product.id}">${safeText(product.description || "")}</textarea>
 
-              <label class="field-label">Precio</label>
-              <input id="editPrice-${product.id}" type="number" step="0.01" value="${product.price}" />
+            <label class="field-label">Precio</label>
+            <input id="editPrice-${product.id}" type="number" step="0.01" value="${product.price}" />
 
-              <label class="field-label">Categoría</label>
-              <input id="editCategory-${product.id}" value="${safeText(product.category || "Otros")}" />
+            <label class="field-label">Categoría</label>
+            <input id="editCategory-${product.id}" value="${safeText(product.category || "Otros")}" />
 
-              <label class="field-label">Datos requeridos</label>
-              <textarea id="editRequiredFields-${product.id}">${safeText(requiredFields.join(", "))}</textarea>
+            <label class="field-label">Datos requeridos</label>
+            <textarea id="editRequiredFields-${product.id}">${safeText(requiredFields.join(", "))}</textarea>
 
-              <label class="field-label">¿Cuándo descontar saldo?</label>
-              <select id="editChargeMode-${product.id}">
-                <option value="on_purchase" ${product.charge_mode === "on_purchase" ? "selected" : ""}>Descontar al comprar</option>
-                <option value="on_success" ${product.charge_mode === "on_success" ? "selected" : ""}>Descontar cuando el admin marque Éxito</option>
-              </select>
+            <label class="field-label">¿Cuándo descontar saldo?</label>
+            <select id="editChargeMode-${product.id}">
+              <option value="on_purchase" ${product.charge_mode === "on_purchase" ? "selected" : ""}>Descontar al comprar</option>
+              <option value="on_success" ${product.charge_mode === "on_success" ? "selected" : ""}>Descontar cuando el admin marque Éxito</option>
+            </select>
 
-              <label class="field-label">Stock</label>
-              <label class="checkbox-row">
-                <input
-                  type="checkbox"
-                  id="editStockEnabled-${product.id}"
-                  ${stockEnabled ? "checked" : ""}
-                />
-                Activar stock para este producto
-              </label>
-
+            <label class="field-label">Stock</label>
+            <label class="checkbox-row">
               <input
-                id="editStock-${product.id}"
-                type="number"
-                min="0"
-                value="${Number(product.stock || 0)}"
-                placeholder="Cantidad disponible"
+                type="checkbox"
+                id="editStockEnabled-${product.id}"
+                ${stockEnabled ? "checked" : ""}
               />
+              Activar stock para este producto
+            </label>
 
-              <div class="three-row">
-                <button onclick="updateProduct(${product.id})">Guardar cambios</button>
-                <button class="danger-btn" onclick="deleteProduct(${product.id})">Eliminar</button>
-                <button class="muted-btn" onclick="toggleProduct(${product.id})">Ver como cliente</button>
-              </div>
+            <input
+              id="editStock-${product.id}"
+              type="number"
+              min="0"
+              value="${Number(product.stock || 0)}"
+              placeholder="Cantidad disponible"
+            />
+
+            <div class="three-row">
+              <button onclick="updateProduct(${product.id})">Guardar cambios</button>
+              <button class="danger-btn" onclick="deleteProduct(${product.id})">Eliminar</button>
+              <button class="muted-btn" onclick="toggleProduct(${product.id})">Ver como cliente</button>
             </div>
           </div>
         `;
@@ -1374,7 +867,53 @@
         });
 
         showMessage(data.message);
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -1389,7 +928,53 @@
         });
 
         showMessage(data.message);
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
@@ -1397,66 +982,38 @@
 
     async function loadAdminOrders() {
       const orders = await api("/api/admin/orders");
-      const rejectedCount = orders.filter(order => order.status === "rechazado").length;
-      const visibleOrders = showRejectedAdminOrders
-        ? orders
-        : orders.filter(order => order.status !== "rechazado");
 
-      let html = "";
-
-      if (rejectedCount > 0) {
-        html += `
-          <div class="hidden-rejected-note">
-            Hay ${rejectedCount} pedido(s) rechazado(s) oculto(s).
-            <button class="small-action-btn" onclick="toggleRejectedAdminOrders()">
-              ${showRejectedAdminOrders ? "Ocultar rechazados" : "Mirar rechazados"}
-            </button>
-          </div>
-        `;
-      }
-
-      html += visibleOrders.map(order => {
+      const html = orders.map(order => {
         const orderData = parseJsonObject(order.order_data);
 
         return `
           <div class="item">
-            <div class="admin-summary-row" onclick="toggleElementOpen('admin-order-details-${order.id}')">
-              <div>
-                <h3>Pedido #${order.id} · ${safeText(order.product_name)}</h3>
-                <p class="small-text" style="margin:4px 0 0">
-                  ${safeText(order.customer_name)} · $${formatMoney(order.amount)} · ${safeText(getStatusText(order.status))}
-                </p>
-              </div>
-              <button class="small-action-btn" type="button">Abrir</button>
-            </div>
+            <p><b>Pedido:</b> #${order.id}</p>
+            <p><b>Cliente:</b> ${safeText(order.customer_name)}</p>
+            <p><b>Correo:</b> ${safeText(order.customer_email)}</p>
+            <p><b>Producto:</b> ${safeText(order.product_name)}</p>
+            <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
+            <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
+            <p><b>Cobrado:</b> ${Number(order.charged || 0) === 1 ? "Sí" : "No"}</p>
+            ${renderOrderData(orderData)}
 
-            <div id="admin-order-details-${order.id}" class="admin-order-details">
-              <p><b>Cliente:</b> ${safeText(order.customer_name)}</p>
-              <p><b>Correo:</b> ${safeText(order.customer_email)}</p>
-              <p><b>Producto:</b> ${safeText(order.product_name)}</p>
-              <p><b>Monto:</b> $${formatMoney(order.amount)}</p>
-              <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(order.status))}</span></p>
-              <p><b>Cobrado:</b> ${Number(order.charged || 0) === 1 ? "Sí" : "No"}</p>
-              ${renderOrderData(orderData)}
+            <label class="field-label">Estado</label>
+            <select id="status-${order.id}">
+              <option value="accion_en_espera" ${order.status === "accion_en_espera" ? "selected" : ""}>Acción en espera</option>
+              <option value="en_proceso" ${order.status === "en_proceso" ? "selected" : ""}>En proceso</option>
+              <option value="exito" ${order.status === "exito" ? "selected" : ""}>Éxito</option>
+              <option value="rechazado" ${order.status === "rechazado" ? "selected" : ""}>Rechazado</option>
+            </select>
 
-              <label class="field-label">Estado</label>
-              <select id="status-${order.id}">
-                <option value="accion_en_espera" ${order.status === "accion_en_espera" ? "selected" : ""}>Acción en espera</option>
-                <option value="en_proceso" ${order.status === "en_proceso" ? "selected" : ""}>En proceso</option>
-                <option value="exito" ${order.status === "exito" ? "selected" : ""}>Éxito</option>
-                <option value="rechazado" ${order.status === "rechazado" ? "selected" : ""}>Rechazado</option>
-              </select>
+            <label class="field-label">Respuesta para el cliente</label>
+            <textarea id="response-${order.id}" placeholder="Respuesta para el cliente">${safeText(order.admin_response || "")}</textarea>
 
-              <label class="field-label">Respuesta para el cliente</label>
-              <textarea id="response-${order.id}" placeholder="Respuesta para el cliente">${safeText(order.admin_response || "")}</textarea>
+            <label class="checkbox-row">
+              <input type="checkbox" id="refund-${order.id}" />
+              Devolver saldo si se rechaza
+            </label>
 
-              <label class="checkbox-row">
-                <input type="checkbox" id="refund-${order.id}" />
-                Devolver saldo si se rechaza
-              </label>
-
-              <button onclick="updateOrderStatus(${order.id})">Actualizar pedido</button>
-            </div>
+            <button onclick="updateOrderStatus(${order.id})">Actualizar pedido</button>
           </div>
         `;
       }).join("");
@@ -1481,13 +1038,106 @@
         });
 
         showMessage(data.message);
-        await loadApp();
+        await 
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    loadApp();
       } catch (error) {
         showMessage(error.message, "error");
       }
     }
 
+    
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+      const page = document.getElementById(pageId);
+      if (page) page.classList.remove('hidden');
+      document.querySelectorAll('.side-link').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector(`[data-page="${pageId}"]`);
+      if (btn) btn.classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshShellUser() {
+      if (!currentUser) return;
+      const name = currentUser.name || 'Usuario';
+      const email = currentUser.email || '';
+      const initial = name.charAt(0).toUpperCase() || 'P';
+      ['shellUserName','topUserName'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = name; });
+      const shellEmail = document.getElementById('shellUserEmail'); if (shellEmail) shellEmail.textContent = email;
+      ['brandInitial','topInitial'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = initial; });
+      const roleBadge = document.getElementById('roleBadge'); if (roleBadge) roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Cliente';
+      const adminNav = document.getElementById('adminNavBtn'); if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? 'flex' : 'none';
+    }
+
+    function updateDashboardCards() {
+      if (!currentUser) return;
+      const products = window.__lastProducts || [];
+      const orders = window.__lastOrders || [];
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      set('dashProducts', products.length || 0);
+      set('dashOrders', orders.length || 0);
+      set('dashBalance', '$' + formatMoney(currentUser.balance || 0));
+      set('dashRole', currentUser.role === 'admin' ? 'Admin' : 'Cliente');
+      const last = document.getElementById('dashLastOrder');
+      if (last) last.textContent = orders.length ? ('Pedido #' + orders[0].id + ' · ' + (orders[0].status || 'pendiente')) : 'Sin pedidos todavía';
+      const adminOnlyCards = document.querySelectorAll('.admin-only-card');
+      adminOnlyCards.forEach(el => el.style.display = currentUser.role === 'admin' ? '' : 'none');
+    }
+
+    function filterProducts() {
+      const q = (document.getElementById('globalSearch')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsList .product-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
     loadApp();
   </script>
+
 </body>
 </html>
