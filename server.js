@@ -503,6 +503,12 @@ async function initDatabase() {
     )
   `);
 
+  // Asegura columnas necesarias aunque las tablas se hayan creado manualmente antes
+  await pool.query(`ALTER TABLE user_product_prices ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE user_product_prices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE subadmin_reseller_prices ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE subadmin_reseller_prices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Otros'`);
@@ -1712,13 +1718,20 @@ app.patch("/api/admin/subadmin-prices", authMiddleware, adminMiddleware, async (
       return res.status(400).json({ error: "Usuario, producto y precio válido son obligatorios" });
     }
 
-    await pool.query(
-      `INSERT INTO user_product_prices (user_id, product_id, sale_price, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_id, product_id)
-       DO UPDATE SET sale_price = EXCLUDED.sale_price, updated_at = NOW()`,
+    const updateResult = await pool.query(
+      `UPDATE user_product_prices
+       SET sale_price = $3, updated_at = NOW()
+       WHERE user_id = $1 AND product_id = $2`,
       [user_id, product_id, priceNumber]
     );
+
+    if (updateResult.rowCount === 0) {
+      await pool.query(
+        `INSERT INTO user_product_prices (user_id, product_id, sale_price, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())`,
+        [user_id, product_id, priceNumber]
+      );
+    }
 
     res.json({ message: "Precio del admin independiente actualizado" });
   } catch (err) {
@@ -1807,13 +1820,20 @@ app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, asyn
       return res.status(400).json({ error: "Producto y precio válido son obligatorios" });
     }
 
-    await pool.query(
-      `INSERT INTO subadmin_reseller_prices (owner_user_id, product_id, sale_price, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (owner_user_id, product_id)
-       DO UPDATE SET sale_price = EXCLUDED.sale_price, updated_at = NOW()`,
+    const updateResult = await pool.query(
+      `UPDATE subadmin_reseller_prices
+       SET sale_price = $3, updated_at = NOW()
+       WHERE owner_user_id = $1 AND product_id = $2`,
       [req.user.id, product_id, priceNumber]
     );
+
+    if (updateResult.rowCount === 0) {
+      await pool.query(
+        `INSERT INTO subadmin_reseller_prices (owner_user_id, product_id, sale_price, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())`,
+        [req.user.id, product_id, priceNumber]
+      );
+    }
 
     res.json({ message: "Precio para vendedores actualizado" });
   } catch (err) {
