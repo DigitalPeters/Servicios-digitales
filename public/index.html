@@ -163,7 +163,7 @@
 
       <section id="section-admin" class="section">
         <h1 class="section-title">Panel admin</h1>
-        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
+        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
         <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
         <div id="adminSubadminPricesPanel" class="panel">
           <div class="panel-head">
@@ -201,6 +201,41 @@
           </div>
           <div class="panel" style="box-shadow:none;border:1px solid var(--border);margin-top:16px"><h2>Detalle de ventas</h2><div id="salesDetailsList">Sin ventas.</div></div>
         </div>
+
+        <div id="adminPlatformAccountsPanel" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Inventario de plataformas</h2>
+              <p class="small-text">Agrega cuentas disponibles para entrega automática sin usar pgAdmin. Selecciona el producto/plataforma de la tienda para evitar errores.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadPlatformInventory()">Actualizar</button>
+          </div>
+          <div class="row">
+            <div>
+              <h3>Agregar cuenta disponible</h3>
+              <label class="field-label">Producto / plataforma</label>
+              <select id="platformProductSelect"></select>
+              <label class="field-label">Correo</label>
+              <input id="platformEmail" placeholder="correo@ejemplo.com" />
+              <label class="field-label">Contraseña</label>
+              <input id="platformPassword" placeholder="Contraseña" />
+              <div class="two-row">
+                <div><label class="field-label">Perfil</label><input id="platformProfile" placeholder="P1, Perfil 1, etc." /></div>
+                <div><label class="field-label">PIN</label><input id="platformPin" placeholder="PIN" /></div>
+              </div>
+              <label class="field-label">URL para código/soporte (opcional)</label>
+              <input id="platformAccessUrl" placeholder="https://..." />
+              <button class="green-btn" onclick="createPlatformAccount()">Guardar cuenta disponible</button>
+            </div>
+            <div>
+              <h3>Stock disponible por plataforma</h3>
+              <div id="platformStockSummary">Sin datos.</div>
+            </div>
+          </div>
+          <hr class="divider">
+          <h3>Últimas cuentas agregadas</h3>
+          <div id="platformAccountsList">Sin cuentas.</div>
+        </div>
         <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Costo de compra</label><input id="productCostPrice" type="number" step="0.01" value="0" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
         <div id="adminOrdersPanel" class="panel"><div class="panel-head"><h2>Pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadAdminOrders()">Actualizar</button></div><div id="adminOrdersList"></div></div>
       </section>
@@ -211,7 +246,7 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport()}}
+function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory()}}
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
 function openUsersFromDashboard(){
@@ -252,7 +287,7 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
@@ -1148,6 +1183,67 @@ async function loadSalesReport(forceToday=false){
     console.warn('No se pudo cargar reporte de ventas',e);
     showMessage(e.message||'Error cargando reporte de ventas','error');
   }
+}
+
+
+function populatePlatformProductSelect(){
+  const sel=document.getElementById('platformProductSelect');
+  if(!sel)return;
+  const current=sel.value;
+  const products=(allProducts||[]);
+  sel.innerHTML='<option value="">Selecciona producto/plataforma</option>'+products.map(p=>`<option value="${p.id}">${safeText(p.name)}${p.category?` · ${safeText(p.category)}`:''}</option>`).join('');
+  if(current)sel.value=current;
+}
+async function loadPlatformInventory(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    if(!allProducts.length)allProducts=await api('/api/products');
+    populatePlatformProductSelect();
+    const accounts=await api('/api/admin/platform-accounts');
+    const countEl=document.getElementById('adminPlatformAccountsCount');
+    if(countEl)countEl.textContent=accounts.filter(a=>a.status==='available').length;
+    const summary={};
+    accounts.forEach(a=>{
+      const key=a.product_name||a.platform||'Sin plataforma';
+      if(!summary[key])summary[key]={available:0,delivered:0,total:0};
+      summary[key].total++;
+      if(a.status==='available')summary[key].available++;
+      if(a.status==='delivered')summary[key].delivered++;
+    });
+    const summaryBox=document.getElementById('platformStockSummary');
+    if(summaryBox){
+      const rows=Object.entries(summary).sort((a,b)=>a[0].localeCompare(b[0]));
+      summaryBox.innerHTML=rows.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><td><b>${safeText(name)}</b></td><td class="${v.available<=0?'error':'success'}">${v.available}</td><td>${v.delivered}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas agregadas.';
+    }
+    const listBox=document.getElementById('platformAccountsList');
+    if(listBox){
+      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>URL</th><th>Estado</th></tr></thead><tbody>${accounts.slice(0,40).map(a=>`<tr><td>${a.id}</td><td><b>${safeText(a.product_name||a.platform||'')}</b></td><td>${safeText(a.account_email||'')}</td><td>${safeText(a.profile_name||'')}</td><td>${safeText(a.profile_pin||'')}</td><td>${a.access_url?`<a href="${safeText(a.access_url)}" target="_blank" rel="noopener">Abrir</a>`:'No aplica'}</td><td><span class="status">${safeText(a.status||'')}</span></td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas.';
+    }
+  }catch(e){showMessage(e.message||'Error cargando inventario','error')}
+}
+async function createPlatformAccount(){
+  try{
+    const productId=document.getElementById('platformProductSelect')?.value;
+    const product=(allProducts||[]).find(p=>String(p.id)===String(productId));
+    if(!product)throw new Error('Selecciona un producto/plataforma');
+    const email=(document.getElementById('platformEmail')?.value||'').trim();
+    const password=(document.getElementById('platformPassword')?.value||'').trim();
+    if(!email||!password)throw new Error('Correo y contraseña son obligatorios');
+    await api('/api/admin/platform-accounts',{method:'POST',body:JSON.stringify({
+      platform:product.name,
+      product_name:product.name,
+      account_email:email,
+      account_password:password,
+      profile_name:(document.getElementById('platformProfile')?.value||'').trim(),
+      profile_pin:(document.getElementById('platformPin')?.value||'').trim(),
+      access_url:(document.getElementById('platformAccessUrl')?.value||'').trim(),
+      extra_data:'',
+      terms_conditions:''
+    })});
+    showMessage('Cuenta agregada como disponible');
+    platformEmail.value='';platformPassword.value='';platformProfile.value='';platformPin.value='';platformAccessUrl.value='';
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error guardando cuenta','error')}
 }
 
 loadApp();

@@ -463,6 +463,7 @@ async function initDatabase() {
       profile_pin VARCHAR(50),
       extra_data TEXT,
       terms_conditions TEXT,
+      access_url TEXT DEFAULT '',
       status VARCHAR(30) DEFAULT 'available',
       assigned_order_id INTEGER,
       assigned_user_id INTEGER,
@@ -539,6 +540,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS profile_pin VARCHAR(50)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS extra_data TEXT`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS terms_conditions TEXT`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS access_url TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'available'`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_order_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER`);
@@ -584,6 +586,7 @@ async function initDatabase() {
   await pool.query(`UPDATE orders SET product_name_snapshot = '' WHERE product_name_snapshot IS NULL`);
   await pool.query(`UPDATE orders SET product_category_snapshot = '' WHERE product_category_snapshot IS NULL`);
   await pool.query(`UPDATE orders SET product_cost_snapshot = 0 WHERE product_cost_snapshot IS NULL`);
+  await pool.query(`UPDATE platform_accounts SET access_url = '' WHERE access_url IS NULL`);
   await pool.query(`UPDATE platform_accounts SET status = 'available' WHERE status IS NULL OR status = ''`);
 
   await pool.query(`UPDATE balance_requests SET bank = '' WHERE bank IS NULL`);
@@ -974,6 +977,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
         `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
         `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
+        assignedAccount.access_url ? `🔗 URL para código/soporte: ${assignedAccount.access_url}` : null,
         "",
         "📌 Normas de uso:",
         "✅ No editar datos de acceso",
@@ -982,7 +986,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         "✅ No compartir el acceso con otros",
         "",
         "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
-      ].join("\n");
+      ].filter(line => line !== null && line !== undefined).join("\n");
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
@@ -1096,7 +1100,8 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       profile_name,
       profile_pin,
       extra_data,
-      terms_conditions
+      terms_conditions,
+      access_url
     } = req.body;
 
     if (!platform || !product_name || !account_email || !account_password) {
@@ -1105,10 +1110,10 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
 
     const result = await pool.query(
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'available')
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available')
        RETURNING *`,
-      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || ""]
+      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || "", access_url || ""]
     );
 
     res.json(result.rows[0]);
