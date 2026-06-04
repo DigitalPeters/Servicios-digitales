@@ -57,7 +57,7 @@
         <button class="menu-btn" data-section="reports" onclick="showSection('reports')">⚠ Reportar falla</button>
         <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
         <button id="adminSalesMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openSalesReport()">📊 Reporte ventas</button>
-        <button id="adminInventoryMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openPlatformInventory()">🎬 Inventario plataformas</button>
+        <button id="distributorMenuBtn" class="menu-btn hidden" data-section="distributor" onclick="showSection('distributor')">🏪 Mis vendedores</button>
       </nav>
       <div class="sidebar-bottom"><button class="logout-side" onclick="logout()">Cerrar sesión</button></div>
     </aside>
@@ -77,6 +77,7 @@
           <div class="dash-card clickable" onclick="showSection('reports')"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
+          <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
         </div>
         <div class="row">
           <div class="panel"><div class="panel-head"><h2>Accesos rápidos</h2></div><div class="two-row"><button onclick="showSection('shop')" class="primary-btn">Ir a tienda</button><button onclick="showSection('balance')" class="green-btn">Cargar saldo</button><button onclick="showSection('orders')" class="outline-btn">Ver pedidos</button><button onclick="showSection('reports')" class="outline-btn">Reportar falla</button></div></div>
@@ -121,7 +122,6 @@
               <button class="green-btn" onclick="enviarSolicitudSaldo()">Enviar solicitud de saldo</button>
             </div>
           </div>
-          <hr class="divider"><h3>Historial de solicitudes de saldo</h3><div id="myBalanceRequestsList">Sin solicitudes.</div>
         </div>
       </section>
 
@@ -129,10 +129,53 @@
         <div class="panel"><h2>Reportar falla</h2><p class="small-text">Reporta una falla para que el administrador revise el caso.</p><label class="field-label">Correo con falla</label><input id="reporteCorreo" placeholder="correo@ejemplo.com" /><label class="field-label">Tipo de falla</label><select id="reporteTipo"><option value="contraseña incorrecta">Contraseña incorrecta</option><option value="codigo de viaje">Código de viaje</option><option value="codigo de acceso disney">Código de acceso Disney</option><option value="codigo de hbo">Código de HBO</option><option value="otro">Otro</option></select><label class="field-label">Explicación</label><textarea id="reporteExplicacion" placeholder="Describe el problema"></textarea><button class="primary-btn" onclick="enviarReporteCuenta()">Enviar reporte</button></div>
       </section>
 
+      <section id="section-distributor" class="section">
+        <h1 class="section-title">Mis vendedores</h1>
+        <div class="row">
+          <div class="panel">
+            <h2>Crear vendedor</h2>
+            <p class="small-text">Estos vendedores quedarán ligados a tu cuenta. Ellos verán los precios que tú definas aquí.</p>
+            <label class="field-label">Nombre</label>
+            <input id="resellerName" placeholder="Nombre del vendedor" />
+            <label class="field-label">Correo</label>
+            <input id="resellerEmail" placeholder="correo@ejemplo.com" />
+            <label class="field-label">Contraseña</label>
+            <input id="resellerPassword" type="password" placeholder="Contraseña" />
+            <button class="primary-btn" onclick="createReseller()">Crear vendedor</button>
+          </div>
+          <div class="panel">
+            <h2>Agregar saldo a vendedor</h2>
+            <select id="resellerBalanceSelect"></select>
+            <input id="resellerBalanceAmount" type="number" step="0.01" placeholder="Cantidad" />
+            <input id="resellerBalanceNote" placeholder="Nota" />
+            <button class="green-btn" onclick="addResellerBalance()">Agregar saldo</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Vendedores registrados</h2><button class="outline-btn" style="width:auto" onclick="loadDistributorPanel()">Actualizar</button></div>
+          <div id="resellersList">Sin vendedores.</div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><h2>Precios para mis vendedores</h2><p class="small-text">Tu costo es el precio que tú pagas. Precio vendedor es lo que verá tu vendedor.</p></div><button class="outline-btn" style="width:auto" onclick="loadDistributorPrices()">Actualizar</button></div>
+          <div id="distributorPricesList">Sin precios.</div>
+        </div>
+      </section>
+
       <section id="section-admin" class="section">
         <h1 class="section-title">Panel admin</h1>
-        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div><div class="dash-card clickable" onclick="openPlatformInventory()"><div class="dash-icon">🎬</div><div><div class="dash-label">Stock plataformas</div><div id="adminPlatformStockCount" class="dash-value">0</div></div></div></div>
+        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
         <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
+        <div id="adminSubadminPricesPanel" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Precios para admin independiente</h2>
+              <p class="small-text">Aquí defines el precio/costo que ese admin independiente tendrá contigo. No modifica los precios de otros usuarios.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadAdminSubadminPrices()">Cargar precios</button>
+          </div>
+          <select id="subadminPriceUserSelect" onchange="loadAdminSubadminPrices()"></select>
+          <div id="adminSubadminPricesList">Selecciona un admin independiente.</div>
+        </div>
         <div id="adminBalanceRequestsPanel" class="panel"><div class="panel-head"><h2>Solicitudes de saldo pendientes</h2><button class="outline-btn" style="width:auto" onclick="loadBalanceRequests()">Actualizar</button></div><div id="adminBalanceRequestsList">Sin solicitudes pendientes.</div></div>
         <div id="adminSalesReportPanel" class="panel">
           <div class="panel-head">
@@ -147,8 +190,6 @@
           </div>
           <div class="grid-cards">
             <div class="dash-card"><div class="dash-icon">💵</div><div><div class="dash-label">Total vendido</div><div class="dash-value">$<span id="salesReportTotal">0.00</span></div></div></div>
-            <div class="dash-card"><div class="dash-icon">💸</div><div><div class="dash-label">Costo total</div><div class="dash-value">$<span id="salesReportCost">0.00</span></div></div></div>
-            <div class="dash-card"><div class="dash-icon">📈</div><div><div class="dash-label">Ganancia</div><div class="dash-value">$<span id="salesReportProfit">0.00</span></div></div></div>
             <div class="dash-card"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos éxito</div><div id="salesReportOrders" class="dash-value">0</div></div></div>
             <div class="dash-card"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios con venta</div><div id="salesReportUsers" class="dash-value">0</div></div></div>
           </div>
@@ -158,14 +199,7 @@
           </div>
           <div class="panel" style="box-shadow:none;border:1px solid var(--border);margin-top:16px"><h2>Detalle de ventas</h2><div id="salesDetailsList">Sin ventas.</div></div>
         </div>
-
-        <div id="adminPlatformInventoryPanel" class="panel">
-          <div class="panel-head"><div><h2>Inventario de plataformas</h2><p class="small-text">Agrega cuentas nuevas para entrega automática sin entrar a pgAdmin.</p></div><button class="outline-btn" style="width:auto" onclick="loadPlatformInventory()">Actualizar</button></div>
-          <div class="row"><div><h3>Agregar cuenta</h3><label class="field-label">Producto / plataforma de la tienda</label><select id="platformProductSelect" onchange="fillPlatformProductName()"></select><label class="field-label">Plataforma / nombre</label><input id="platformName" placeholder="Ejemplo: Netflix perfil" /><label class="field-label">Correo</label><input id="platformEmail" placeholder="correo@ejemplo.com" /><label class="field-label">Contraseña</label><input id="platformPassword" placeholder="Contraseña" /><div class="two-row"><div><label class="field-label">Perfil</label><input id="platformProfile" placeholder="P1, P2..." /></div><div><label class="field-label">PIN</label><input id="platformPin" placeholder="PIN" /></div></div><label class="field-label">URL para código/soporte</label><input id="platformUrl" placeholder="https://..." /><button class="green-btn" onclick="addPlatformAccount()">Guardar cuenta disponible</button></div><div><h3>Alerta de stock</h3><p class="small-text">Rojo = sin cuentas disponibles. Amarillo = stock bajo.</p><div id="platformStockList">Cargando stock...</div></div></div>
-          <hr class="divider"><h3>Cuentas recientes</h3><div id="platformAccountsList">Cargando cuentas...</div>
-        </div>
-        <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="two-row"><div><label class="field-label">Precio de venta</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Costo de compra</label><input id="productCostPrice" type="number" step="0.01" value="0" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
-        <div id="adminAccountReportsPanel" class="panel"><div class="panel-head"><h2>Reportes de falla</h2><button class="outline-btn" style="width:auto" onclick="loadAdminAccountReports()">Actualizar</button></div><div id="adminAccountReportsList">Sin reportes.</div></div>
+        <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="two-row"><div><label class="field-label">Precio</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
         <div id="adminOrdersPanel" class="panel"><div class="panel-head"><h2>Pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadAdminOrders()">Actualizar</button></div><div id="adminOrdersList"></div></div>
       </section>
     </main>
@@ -478,7 +512,7 @@ function copyAccountDataFromOrder(orderId,source='my'){
 }
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
 function toggleCreateProduct(){createProductBox.classList.toggle('hidden')}
-async function createProduct(){try{const data=await api('/api/admin/create-product',{method:'POST',body:JSON.stringify({name:productName.value,description:productDescription.value,price:productPrice.value,cost_price:(document.getElementById('productCostPrice')?.value||0),category:productCategory.value,required_fields:getRequiredFieldsFromInput('productRequiredFields'),charge_mode:productChargeMode.value,stock_enabled:productStockEnabled.checked,stock:productStock.value})});showMessage(data.message||'Producto creado');productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';productStock.value='0';productStockEnabled.checked=false;await 
+async function createProduct(){try{const data=await api('/api/admin/create-product',{method:'POST',body:JSON.stringify({name:productName.value,description:productDescription.value,price:productPrice.value,category:productCategory.value,required_fields:getRequiredFieldsFromInput('productRequiredFields'),charge_mode:productChargeMode.value,stock_enabled:productStockEnabled.checked,stock:productStock.value})});showMessage(data.message||'Producto creado');productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';productStock.value='0';productStockEnabled.checked=false;await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
     showSection('admin');
@@ -597,9 +631,9 @@ async function loadSalesReport(){
 }
 
 loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
-async function loadAdminProducts(){const products=allProducts.length?allProducts:await api('/api/products');adminProductsCount.textContent=products.length;adminProductsList.innerHTML=products.map(p=>{const rf=parseJsonArray(p.required_fields);const se=Number(p.stock_enabled||0)===1;return `<div class="item" id="admin-product-${p.id}"><div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id})"><b>${safeText(p.name)}</b><span>$${formatMoney(p.price)} · ${safeText(p.category||'Otros')}</span></div><div class="admin-product-body"><label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" /><label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea><div class="two-row"><div><label class="field-label">Precio venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div><label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea><label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/><div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div></div></div>`}).join('')||'No hay productos.'}
+async function loadAdminProducts(){const products=allProducts.length?allProducts:await api('/api/products');adminProductsCount.textContent=products.length;adminProductsList.innerHTML=products.map(p=>{const rf=parseJsonArray(p.required_fields);const se=Number(p.stock_enabled||0)===1;return `<div class="item" id="admin-product-${p.id}"><div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id})"><b>${safeText(p.name)}</b><span>$${formatMoney(p.price)} · ${safeText(p.category||'Otros')}</span></div><div class="admin-product-body"><label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" /><label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea><div class="two-row"><div><label class="field-label">Precio</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div><label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea><label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/><div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div></div></div>`}).join('')||'No hay productos.'}
 function toggleAdminProduct(id){document.getElementById('admin-product-'+id)?.classList.toggle('open')}
-async function updateProduct(id){try{const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:document.getElementById('editName-'+id).value,description:document.getElementById('editDescription-'+id).value,price:document.getElementById('editPrice-'+id).value,cost_price:(document.getElementById('editCostPrice-'+id)?.value||0),category:document.getElementById('editCategory-'+id).value,required_fields,charge_mode:document.getElementById('editChargeMode-'+id).value,stock_enabled:document.getElementById('editStockEnabled-'+id).checked,stock:document.getElementById('editStock-'+id).value})});showMessage(data.message||'Producto actualizado');await 
+async function updateProduct(id){try{const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:document.getElementById('editName-'+id).value,description:document.getElementById('editDescription-'+id).value,price:document.getElementById('editPrice-'+id).value,category:document.getElementById('editCategory-'+id).value,required_fields,charge_mode:document.getElementById('editChargeMode-'+id).value,stock_enabled:document.getElementById('editStockEnabled-'+id).checked,stock:document.getElementById('editStock-'+id).value})});showMessage(data.message||'Producto actualizado');await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
     showSection('admin');
@@ -921,23 +955,147 @@ setInterval(()=>{
 }, 60000);
 
 
-// ===============================
-// MEJORAS ADMIN: INVENTARIO, STOCK, HISTORIAL, REPORTES Y GANANCIA
-// ===============================
-function openPlatformInventory(){if(currentUser?.role==='admin'){showSection('admin');setTimeout(()=>scrollToAdmin('adminPlatformInventoryPanel'),80);loadPlatformInventory();}}
-const __oldLoadAppMejoras = loadApp;
-loadApp = async function(){await __oldLoadAppMejoras(); if(currentUser?.role==='admin'){document.getElementById('adminInventoryMenuBtn')?.classList.remove('hidden');loadPlatformInventory();loadAdminAccountReports();} loadMyBalanceHistory();};
-const __oldShowSectionMejoras = showSection;
-showSection = function(name){__oldShowSectionMejoras(name); if(name==='balance')loadMyBalanceHistory(); if(name==='admin'&&currentUser?.role==='admin'){loadPlatformInventory();loadAdminAccountReports();}};
-function fillPlatformProductSelect(){const sel=document.getElementById('platformProductSelect'); if(!sel)return; sel.innerHTML='<option value="">Selecciona producto de la tienda</option>'+allProducts.map(p=>`<option value="${safeText(p.name)}" data-category="${safeText(p.category||'')}">${safeText(p.name)} (${safeText(p.category||'')})</option>`).join('');}
-function fillPlatformProductName(){const sel=document.getElementById('platformProductSelect'); const value=sel?.value||''; if(value)document.getElementById('platformName').value=value;}
-async function addPlatformAccount(){try{const productName=(document.getElementById('platformName')?.value||'').trim();const selected=document.getElementById('platformProductSelect');const category=selected?.selectedOptions?.[0]?.dataset?.category||productName;const payload={platform:category||productName,product_name:productName,account_email:(document.getElementById('platformEmail')?.value||'').trim(),account_password:(document.getElementById('platformPassword')?.value||'').trim(),profile_name:(document.getElementById('platformProfile')?.value||'').trim(),profile_pin:(document.getElementById('platformPin')?.value||'').trim(),access_url:(document.getElementById('platformUrl')?.value||'').trim(),extra_data:'',terms_conditions:''};if(!payload.product_name||!payload.account_email||!payload.account_password)throw new Error('Producto/plataforma, correo y contraseña son obligatorios');await api('/api/admin/platform-accounts',{method:'POST',body:JSON.stringify(payload)});['platformEmail','platformPassword','platformProfile','platformPin','platformUrl'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});showMessage('Cuenta agregada al inventario');await loadPlatformInventory();}catch(e){showMessage(e.message,'error');}}
-async function loadPlatformInventory(){if(currentUser?.role!=='admin')return;try{fillPlatformProductSelect();const [stock,accounts]=await Promise.all([api('/api/admin/platform-stock').catch(()=>[]),api('/api/admin/platform-accounts').catch(()=>[])]);const totalAvailable=stock.reduce((a,s)=>a+Number(s.available||0),0);const countEl=document.getElementById('adminPlatformStockCount');if(countEl)countEl.textContent=totalAvailable;const stockBox=document.getElementById('platformStockList');if(stockBox){stockBox.innerHTML=stock.length?stock.map(s=>{const av=Number(s.available||0);const color=av===0?'#fee2e2':(av<=2?'#fef3c7':'#e9fff7');return `<div class="item" style="background:${color}"><b>${safeText(s.product_name||s.platform)}</b><p>Disponibles: <b>${av}</b> · Entregadas: ${s.delivered||0} · Total: ${s.total||0}</p></div>`;}).join(''):'No hay cuentas en inventario.';}const accountsBox=document.getElementById('platformAccountsList');if(accountsBox){accountsBox.innerHTML=accounts.slice(0,20).map(a=>`<div class="item"><p><b>#${a.id}</b> ${safeText(a.product_name||'')} · <span class="status">${safeText(a.status||'')}</span></p><p><b>Correo:</b> ${safeText(a.account_email||'')}</p><p><b>Perfil:</b> ${safeText(a.profile_name||'')} · <b>PIN:</b> ${safeText(a.profile_pin||'')}</p>${a.access_url?`<p><b>URL:</b> ${safeText(a.access_url)}</p>`:''}</div>`).join('')||'No hay cuentas.';}}catch(e){console.warn(e);}}
-async function loadMyBalanceHistory(){if(!token)return;try{const box=document.getElementById('myBalanceRequestsList');if(!box)return;const rows=await api('/api/my-balance-requests').catch(()=>[]);box.innerHTML=rows.length?rows.map(r=>`<div class="item"><p><b>Monto:</b> $${formatMoney(r.amount)} · <b>Estado:</b> <span class="status">${safeText(r.status||'')}</span></p><p><b>Banco:</b> ${safeText(r.bank||'')} · <b>Nombre:</b> ${safeText(r.account_holder||'')}</p><p class="small-text">${safeText(r.created_at||'')}</p>${r.admin_response?`<p><b>Respuesta:</b> ${safeText(r.admin_response)}</p>`:''}</div>`).join(''):'Sin solicitudes.';}catch(e){console.warn(e);}}
-async function loadAdminAccountReports(){if(currentUser?.role!=='admin')return;try{const box=document.getElementById('adminAccountReportsList');if(!box)return;const rows=await api('/api/admin/account-reports').catch(()=>[]);box.innerHTML=rows.length?rows.map(r=>`<div class="item"><p><b>Reporte #${r.id}</b> · <span class="status">${safeText(r.status||'')}</span></p><p><b>Cliente:</b> ${safeText(r.customer_name||'')} · ${safeText(r.customer_email||'')}</p><p><b>Correo falla:</b> ${safeText(r.email||'')}</p><p><b>Tipo:</b> ${safeText(r.issue_type||'')}</p><p><b>Explicación:</b> ${safeText(r.description||'')}</p><label class="field-label">Respuesta admin</label><textarea id="report-response-${r.id}">${safeText(r.admin_response||'')}</textarea><div class="three-row"><button onclick="updateAccountReport(${r.id}, 'resuelto')" class="green-btn">Resuelto</button><button onclick="updateAccountReport(${r.id}, 'reemplazo')" class="primary-btn">Reemplazo</button><button onclick="updateAccountReport(${r.id}, 'reembolso')" class="danger-btn">Reembolso</button></div></div>`).join(''):'Sin reportes.';}catch(e){console.warn(e);}}
-async function updateAccountReport(id,status){try{const admin_response=document.getElementById('report-response-'+id)?.value||'';await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status,admin_response})});showMessage('Reporte actualizado');loadAdminAccountReports();}catch(e){showMessage(e.message,'error');}}
-const __oldLoadSalesReportProfit = loadSalesReport;
-loadSalesReport = async function(forceToday=false){if(currentUser?.role!=='admin')return;try{const input=document.getElementById('salesReportDate');if(forceToday&&input)input.value='';const date=input?.value||'';const data=await api('/api/admin/sales-report'+(date?'?date='+encodeURIComponent(date):''));if(input&&data?.date)input.value=data.date;const total=Number(data?.summary?.total_sales||0),totalCost=Number(data?.summary?.total_cost||0),totalProfit=Number(data?.summary?.total_profit||0),totalOrders=Number(data?.summary?.total_orders||0);const byUser=data?.by_user||[],byProduct=data?.by_product||[],details=data?.details||[];['statSalesToday','adminSalesToday','salesReportTotal'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=formatMoney(total);});const costEl=document.getElementById('salesReportCost');if(costEl)costEl.textContent=formatMoney(totalCost);const profitEl=document.getElementById('salesReportProfit');if(profitEl)profitEl.textContent=formatMoney(totalProfit);const ordersEl=document.getElementById('salesReportOrders');if(ordersEl)ordersEl.textContent=totalOrders;const usersEl=document.getElementById('salesReportUsers');if(usersEl)usersEl.textContent=byUser.length;const byUserBox=document.getElementById('salesByUserList');if(byUserBox)byUserBox.innerHTML=byUser.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Usuario</th><th>Pedidos</th><th>Venta</th><th>Costo</th><th>Ganancia</th></tr></thead><tbody>${byUser.map(u=>`<tr><td><b>${safeText(u.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(u.customer_email||'')}</span></td><td>${u.total_orders}</td><td>$${formatMoney(u.total_sales)}</td><td>$${formatMoney(u.total_cost)}</td><td><b>$${formatMoney(u.total_profit)}</b></td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por usuario.';const byProductBox=document.getElementById('salesByProductList');if(byProductBox)byProductBox.innerHTML=byProduct.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Pedidos</th><th>Venta</th><th>Costo</th><th>Ganancia</th></tr></thead><tbody>${byProduct.map(p=>`<tr><td><b>${safeText(p.product_name||'Producto')}</b><br><span class="small-text">${safeText(p.product_category||'')}</span></td><td>${p.total_orders}</td><td>$${formatMoney(p.total_sales)}</td><td>$${formatMoney(p.total_cost)}</td><td><b>$${formatMoney(p.total_profit)}</b></td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por producto.';const detailsBox=document.getElementById('salesDetailsList');if(detailsBox)detailsBox.innerHTML=details.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Producto</th><th>Venta</th><th>Costo</th><th>Ganancia</th><th>Fecha México</th></tr></thead><tbody>${details.map(o=>`<tr><td>#${o.id}</td><td><b>${safeText(o.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(o.customer_email||'')}</span></td><td>${safeText(o.product_name||'')}</td><td>$${formatMoney(o.amount)}</td><td>$${formatMoney(o.cost_price)}</td><td><b>$${formatMoney(o.profit)}</b></td><td>${safeText(o.created_at_mx||'')}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas en esta fecha.';}catch(e){console.warn('No se pudo cargar reporte de ventas',e);showMessage(e.message||'Error cargando reporte de ventas','error');}};
+function isDistributorUser(){
+  return currentUser && (currentUser.role === 'admin' || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+}
+function isSubadminOnly(){
+  return currentUser && currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+}
+
+const __oldShowSectionForDistributor = showSection;
+showSection = function(name){
+  __oldShowSectionForDistributor(name);
+  if(name === 'distributor' && isDistributorUser()){
+    loadDistributorPanel();
+    loadDistributorPrices();
+  }
+};
+
+const __oldLoadAppForDistributor = loadApp;
+loadApp = async function(){
+  await __oldLoadAppForDistributor();
+  const distributorVisible = isSubadminOnly();
+  document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !distributorVisible);
+  document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
+  if(currentUser?.role === 'admin'){
+    renderAdminSubadminSelect();
+  }
+};
+
+async function createReseller(){
+  try{
+    const data = await api('/api/distributor/resellers', {
+      method:'POST',
+      body: JSON.stringify({
+        name: resellerName.value,
+        email: resellerEmail.value,
+        password: resellerPassword.value
+      })
+    });
+    showMessage(data.message || 'Vendedor creado');
+    resellerName.value = resellerEmail.value = resellerPassword.value = '';
+    await loadDistributorPanel();
+  }catch(e){ showMessage(e.message,'error'); }
+}
+
+async function loadDistributorPanel(){
+  if(!isDistributorUser()) return;
+  try{
+    const sellers = await api('/api/distributor/resellers');
+    const stat = document.getElementById('statResellers');
+    if(stat) stat.textContent = sellers.length;
+    const select = document.getElementById('resellerBalanceSelect');
+    if(select){
+      select.innerHTML = '<option value="">Selecciona vendedor</option>' + sellers.map(s=>`<option value="${s.id}">${safeText(s.name)} (${safeText(s.email)}) - $${formatMoney(s.balance)}</option>`).join('');
+    }
+    const box = document.getElementById('resellersList');
+    if(box){
+      box.innerHTML = sellers.length ? sellers.map(s=>`<div class="item"><p><b>ID:</b> ${s.id}</p><p><b>Nombre:</b> ${safeText(s.name)}</p><p><b>Correo:</b> ${safeText(s.email)}</p><p><b>Saldo:</b> $${formatMoney(s.balance)}</p></div>`).join('') : 'Sin vendedores.';
+    }
+  }catch(e){ showMessage(e.message || 'Error cargando vendedores','error'); }
+}
+
+async function addResellerBalance(){
+  try{
+    const data = await api('/api/distributor/add-balance', {
+      method:'POST',
+      body: JSON.stringify({
+        user_id: Number(resellerBalanceSelect.value),
+        amount: resellerBalanceAmount.value,
+        note: resellerBalanceNote.value
+      })
+    });
+    showMessage(data.message || 'Saldo agregado');
+    resellerBalanceAmount.value = resellerBalanceNote.value = '';
+    await loadDistributorPanel();
+  }catch(e){ showMessage(e.message,'error'); }
+}
+
+async function loadDistributorPrices(){
+  if(!isDistributorUser()) return;
+  try{
+    const prices = await api('/api/distributor/prices');
+    const box = document.getElementById('distributorPricesList');
+    if(!box) return;
+    box.innerHTML = prices.length ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Tu costo</th><th>Precio vendedor</th><th>Ganancia</th><th>Guardar</th></tr></thead><tbody>${prices.map(p=>`<tr><td><b>${safeText(p.name)}</b><br><span class="small-text">${safeText(p.category||'')}</span></td><td>$${formatMoney(p.owner_price)}</td><td><input id="resellerPrice-${p.product_id}" type="number" step="0.01" value="${Number(p.reseller_price||0)}" /></td><td>$${formatMoney(Number(p.reseller_price||0)-Number(p.owner_price||0))}</td><td><button class="primary-btn" onclick="saveDistributorPrice(${p.product_id})">Guardar</button></td></tr>`).join('')}</tbody></table></div>` : 'No hay productos.';
+  }catch(e){ showMessage(e.message || 'Error cargando precios','error'); }
+}
+
+async function saveDistributorPrice(productId){
+  try{
+    const value = document.getElementById('resellerPrice-'+productId).value;
+    const data = await api('/api/distributor/prices', {method:'PATCH', body: JSON.stringify({product_id: productId, sale_price: value})});
+    showMessage(data.message || 'Precio actualizado');
+    await loadDistributorPrices();
+  }catch(e){ showMessage(e.message,'error'); }
+}
+
+const __oldLoadUsersForSubadminTools = loadUsers;
+loadUsers = async function(){
+  await __oldLoadUsersForSubadminTools();
+  renderAdminSubadminSelect();
+  const box=document.getElementById('usersList');
+  if(currentUser?.role==='admin' && box && Array.isArray(allUsers)){
+    box.innerHTML = allUsers.map(u=>`<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)} ${u.is_subadmin ? '<span class="chip">Admin independiente</span>' : ''}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p>${u.role !== 'admin' ? `<button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${u.is_subadmin ? 'false' : 'true'})">${u.is_subadmin ? 'Quitar admin independiente' : 'Convertir en admin independiente'}</button>` : ''}</div>`).join('') || 'No hay usuarios.';
+  }
+};
+
+function renderAdminSubadminSelect(){
+  const select=document.getElementById('subadminPriceUserSelect');
+  if(!select || !Array.isArray(allUsers)) return;
+  const current=select.value;
+  const subadmins=allUsers.filter(u=>u.is_subadmin === true || u.is_subadmin === 1 || u.is_subadmin === 'true');
+  select.innerHTML='<option value="">Selecciona admin independiente</option>'+subadmins.map(u=>`<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)})</option>`).join('');
+  select.value=current;
+}
+
+async function toggleSubadmin(userId, value){
+  try{
+    const data=await api('/api/admin/users/'+userId+'/subadmin',{method:'PATCH', body:JSON.stringify({is_subadmin:value===true})});
+    showMessage(data.message || 'Usuario actualizado');
+    await loadUsers();
+  }catch(e){ showMessage(e.message,'error'); }
+}
+
+async function loadAdminSubadminPrices(){
+  try{
+    const userId=document.getElementById('subadminPriceUserSelect')?.value;
+    const box=document.getElementById('adminSubadminPricesList');
+    if(!userId){ if(box) box.innerHTML='Selecciona un admin independiente.'; return; }
+    const prices=await api('/api/admin/subadmin-prices/'+userId);
+    if(!box) return;
+    box.innerHTML=prices.length ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Precio general</th><th>Precio para este admin</th><th>Guardar</th></tr></thead><tbody>${prices.map(p=>`<tr><td><b>${safeText(p.name)}</b><br><span class="small-text">${safeText(p.category||'')}</span></td><td>$${formatMoney(p.general_price)}</td><td><input id="subadminPrice-${p.product_id}" type="number" step="0.01" value="${Number(p.sale_price||0)}" /></td><td><button class="primary-btn" onclick="saveAdminSubadminPrice(${userId}, ${p.product_id})">Guardar</button></td></tr>`).join('')}</tbody></table></div>` : 'No hay productos.';
+  }catch(e){ showMessage(e.message || 'Error cargando precios','error'); }
+}
+
+async function saveAdminSubadminPrice(userId, productId){
+  try{
+    const value=document.getElementById('subadminPrice-'+productId).value;
+    const data=await api('/api/admin/subadmin-prices',{method:'PATCH', body:JSON.stringify({user_id:Number(userId), product_id:productId, sale_price:value})});
+    showMessage(data.message || 'Precio guardado');
+    await loadAdminSubadminPrices();
+  }catch(e){ showMessage(e.message,'error'); }
+}
 
 loadApp();
 </script>

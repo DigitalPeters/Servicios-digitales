@@ -290,6 +290,93 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
+
+async function distributorMiddleware(req, res, next) {
+  try {
+    const result = await pool.query(
+      `SELECT id, role, COALESCE(is_subadmin, false) AS is_subadmin FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+
+    const user = result.rows[0];
+
+    if (!user || (user.role !== "admin" && user.is_subadmin !== true)) {
+      return res.status(403).json({ error: "Distribuidor requerido" });
+    }
+
+    req.distributor = user;
+    next();
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error validando distribuidor" });
+  }
+}
+
+async function getFullUser(userId, client = pool) {
+  const result = await client.query(
+    `SELECT id, name, email, role, balance,
+            COALESCE(is_subadmin, false) AS is_subadmin,
+            owner_user_id
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+
+  return result.rows[0];
+}
+
+async function getEffectiveProductPrice(client, user, product) {
+  const fallbackPrice = Number(product.price || 0);
+
+  if (!user) return fallbackPrice;
+
+  if (user.role === "admin") {
+    return fallbackPrice;
+  }
+
+  // Si este usuario es vendedor de un distribuidor, toma el precio final que su distribuidor definió.
+  if (user.owner_user_id) {
+    const resellerPriceResult = await client.query(
+      `SELECT sale_price
+       FROM subadmin_reseller_prices
+       WHERE owner_user_id = $1 AND product_id = $2`,
+      [user.owner_user_id, product.id]
+    );
+
+    if (resellerPriceResult.rows[0]) {
+      return Number(resellerPriceResult.rows[0].sale_price || fallbackPrice);
+    }
+
+    // Si no tiene precio final, usa el costo/precio que ese distribuidor tiene contigo.
+    const ownerPriceResult = await client.query(
+      `SELECT sale_price
+       FROM user_product_prices
+       WHERE user_id = $1 AND product_id = $2`,
+      [user.owner_user_id, product.id]
+    );
+
+    if (ownerPriceResult.rows[0]) {
+      return Number(ownerPriceResult.rows[0].sale_price || fallbackPrice);
+    }
+
+    return fallbackPrice;
+  }
+
+  // Si es usuario normal o admin independiente, toma su precio especial si existe.
+  const customPriceResult = await client.query(
+    `SELECT sale_price
+     FROM user_product_prices
+     WHERE user_id = $1 AND product_id = $2`,
+    [user.id, product.id]
+  );
+
+  if (customPriceResult.rows[0]) {
+    return Number(customPriceResult.rows[0].sale_price || fallbackPrice);
+  }
+
+  return fallbackPrice;
+}
+
 async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -313,8 +400,7 @@ async function initDatabase() {
       charge_mode TEXT DEFAULT 'on_purchase',
       active INTEGER DEFAULT 1,
       stock_enabled INTEGER DEFAULT 0,
-      stock INTEGER DEFAULT 0,
-      cost_price NUMERIC DEFAULT 0
+      stock INTEGER DEFAULT 0
     )
   `);
 
@@ -377,7 +463,6 @@ async function initDatabase() {
       profile_pin VARCHAR(50),
       extra_data TEXT,
       terms_conditions TEXT,
-      access_url TEXT DEFAULT '',
       status VARCHAR(30) DEFAULT 'available',
       assigned_order_id INTEGER,
       assigned_user_id INTEGER,
@@ -388,6 +473,36 @@ async function initDatabase() {
 
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_subadmin BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS owner_user_id INTEGER`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_product_prices (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+      sale_price NUMERIC NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, product_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subadmin_reseller_prices (
+      id SERIAL PRIMARY KEY,
+      owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+      sale_price NUMERIC NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(owner_user_id, product_id)
+    )
+  `);
+
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Otros'`);
@@ -396,7 +511,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_enabled INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0`);
-  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_data TEXT DEFAULT '{}'`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accion_en_espera'`);
@@ -409,7 +523,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_account_data TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_category_snapshot TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cost_price_snapshot NUMERIC DEFAULT 0`);
 
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
@@ -419,7 +532,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS profile_pin VARCHAR(50)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS extra_data TEXT`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS terms_conditions TEXT`);
-  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS access_url TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'available'`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_order_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER`);
@@ -447,13 +559,14 @@ async function initDatabase() {
 
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
+  await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
+  await pool.query(`UPDATE products SET cost_price = 0 WHERE cost_price IS NULL`);
   await pool.query(`UPDATE products SET active = 1 WHERE active IS NULL`);
   await pool.query(`UPDATE products SET category = 'Otros' WHERE category IS NULL`);
   await pool.query(`UPDATE products SET required_fields = '[]' WHERE required_fields IS NULL`);
   await pool.query(`UPDATE products SET charge_mode = 'on_purchase' WHERE charge_mode IS NULL`);
   await pool.query(`UPDATE products SET stock_enabled = 0 WHERE stock_enabled IS NULL`);
   await pool.query(`UPDATE products SET stock = 0 WHERE stock IS NULL`);
-  await pool.query(`UPDATE products SET cost_price = 0 WHERE cost_price IS NULL`);
   await pool.query(`UPDATE orders SET order_data = '{}' WHERE order_data IS NULL`);
   await pool.query(`UPDATE orders SET status = 'accion_en_espera' WHERE status IS NULL`);
   await pool.query(`UPDATE orders SET admin_response = '' WHERE admin_response IS NULL`);
@@ -463,9 +576,7 @@ async function initDatabase() {
   await pool.query(`UPDATE orders SET delivered_account_data = '' WHERE delivered_account_data IS NULL`);
   await pool.query(`UPDATE orders SET product_name_snapshot = '' WHERE product_name_snapshot IS NULL`);
   await pool.query(`UPDATE orders SET product_category_snapshot = '' WHERE product_category_snapshot IS NULL`);
-  await pool.query(`UPDATE orders SET cost_price_snapshot = 0 WHERE cost_price_snapshot IS NULL`);
   await pool.query(`UPDATE platform_accounts SET status = 'available' WHERE status IS NULL OR status = ''`);
-  await pool.query(`UPDATE platform_accounts SET access_url = '' WHERE access_url IS NULL`);
 
   await pool.query(`UPDATE balance_requests SET bank = '' WHERE bank IS NULL`);
   await pool.query(`UPDATE balance_requests SET reference = '' WHERE reference IS NULL`);
@@ -547,7 +658,7 @@ app.post("/api/login", async (req, res) => {
 app.get("/api/me", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email, role, balance FROM users WHERE id = $1`,
+      `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users WHERE id = $1`,
       [req.user.id]
     );
 
@@ -567,6 +678,8 @@ app.get("/api/me", authMiddleware, async (req, res) => {
 // PRODUCTOS ACTIVOS
 app.get("/api/products", authMiddleware, async (req, res) => {
   try {
+    const viewer = await getFullUser(req.user.id);
+
     const result = await pool.query(
       `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock
        FROM products
@@ -574,7 +687,24 @@ app.get("/api/products", authMiddleware, async (req, res) => {
        ORDER BY category ASC, name ASC`
     );
 
-    res.json(result.rows);
+    const products = [];
+
+    for (const product of result.rows) {
+      const effectivePrice = await getEffectiveProductPrice(pool, viewer, product);
+      const cleanProduct = {
+        ...product,
+        base_price: product.price,
+        price: effectivePrice
+      };
+
+      if (viewer.role !== "admin") {
+        delete cleanProduct.cost_price;
+      }
+
+      products.push(cleanProduct);
+    }
+
+    res.json(products);
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando productos" });
@@ -748,7 +878,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const userResult = await client.query(
-      `SELECT id, name, email, balance FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users WHERE id = $1 FOR UPDATE`,
       [userId]
     );
 
@@ -759,8 +889,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    const price = Number(product.price);
-    const productCost = Math.max(0, Number(product.cost_price || 0));
+    const price = await getEffectiveProductPrice(client, user, product);
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
 
@@ -837,7 +966,6 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
         `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
         `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
-        assignedAccount.access_url ? `🔗 URL para código/soporte: ${assignedAccount.access_url}` : "",
         "",
         "📌 Normas de uso:",
         "✅ No editar datos de acceso",
@@ -863,8 +991,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, cost_price_snapshot)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         userId,
@@ -878,8 +1006,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         assignedAccount ? assignedAccount.id : null,
         deliveredAccountData,
         product.name || productName,
-        product.category || productCategory,
-        productCost
+        product.category || productCategory
       ]
     );
 
@@ -960,8 +1087,7 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       profile_name,
       profile_pin,
       extra_data,
-      terms_conditions,
-      access_url
+      terms_conditions
     } = req.body;
 
     if (!platform || !product_name || !account_email || !account_password) {
@@ -970,67 +1096,16 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
 
     const result = await pool.query(
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available')
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'available')
        RETURNING *`,
-      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || "", access_url || ""]
+      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || ""]
     );
 
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error guardando cuenta de plataforma" });
-  }
-});
-
-
-// ADMIN: RESUMEN DE STOCK DE PLATAFORMAS
-app.get("/api/admin/platform-stock", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT
-         COALESCE(NULLIF(product_name, ''), platform) AS product_name,
-         COALESCE(NULLIF(platform, ''), product_name) AS platform,
-         COUNT(*) FILTER (WHERE status = 'available')::int AS available,
-         COUNT(*) FILTER (WHERE status = 'delivered')::int AS delivered,
-         COUNT(*)::int AS total
-       FROM platform_accounts
-       GROUP BY COALESCE(NULLIF(product_name, ''), platform), COALESCE(NULLIF(platform, ''), product_name)
-       ORDER BY available ASC, product_name ASC`
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error cargando stock de plataformas" });
-  }
-});
-
-// ADMIN: ACTUALIZAR CUENTA DE PLATAFORMA
-app.patch("/api/admin/platform-accounts/:accountId", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const accountId = req.params.accountId;
-    const { platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status } = req.body;
-    const result = await pool.query(
-      `UPDATE platform_accounts
-       SET platform = COALESCE($1, platform),
-           product_name = COALESCE($2, product_name),
-           account_email = COALESCE($3, account_email),
-           account_password = COALESCE($4, account_password),
-           profile_name = COALESCE($5, profile_name),
-           profile_pin = COALESCE($6, profile_pin),
-           extra_data = COALESCE($7, extra_data),
-           terms_conditions = COALESCE($8, terms_conditions),
-           access_url = COALESCE($9, access_url),
-           status = COALESCE($10, status)
-       WHERE id = $11
-       RETURNING *`,
-      [platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, accountId]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Cuenta no encontrada" });
-    res.json({ message: "Cuenta actualizada", account: result.rows[0] });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error actualizando cuenta" });
   }
 });
 
@@ -1071,7 +1146,7 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
 app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email, role, balance FROM users ORDER BY id DESC`
+      `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users ORDER BY id DESC`
     );
 
     res.json(result.rows);
@@ -1574,6 +1649,204 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
 
 
+
+
+// ADMIN: activar/desactivar usuario como admin independiente
+app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const isSubadmin = req.body.is_subadmin === true;
+
+    const result = await pool.query(
+      `UPDATE users SET is_subadmin = $1 WHERE id = $2 AND role <> 'admin'
+       RETURNING id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id`,
+      [isSubadmin, userId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado o no se puede modificar" });
+    }
+
+    res.json({ message: isSubadmin ? "Usuario convertido en admin independiente" : "Admin independiente desactivado", user: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando admin independiente" });
+  }
+});
+
+// ADMIN: precios que tú le das a un admin independiente
+app.get("/api/admin/subadmin-prices/:userId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+
+    const result = await pool.query(
+      `SELECT
+         products.id AS product_id,
+         products.name,
+         products.category,
+         products.price AS general_price,
+         products.cost_price,
+         COALESCE(user_product_prices.sale_price, products.price) AS sale_price
+       FROM products
+       LEFT JOIN user_product_prices
+         ON user_product_prices.product_id = products.id
+        AND user_product_prices.user_id = $1
+       WHERE products.active = 1
+       ORDER BY products.category ASC, products.name ASC`,
+      [userId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando precios del admin independiente" });
+  }
+});
+
+app.patch("/api/admin/subadmin-prices", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { user_id, product_id, sale_price } = req.body;
+    const priceNumber = Number(sale_price);
+
+    if (!user_id || !product_id || !priceNumber || priceNumber <= 0) {
+      return res.status(400).json({ error: "Usuario, producto y precio válido son obligatorios" });
+    }
+
+    await pool.query(
+      `INSERT INTO user_product_prices (user_id, product_id, sale_price, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (user_id, product_id)
+       DO UPDATE SET sale_price = EXCLUDED.sale_price, updated_at = NOW()`,
+      [user_id, product_id, priceNumber]
+    );
+
+    res.json({ message: "Precio del admin independiente actualizado" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error guardando precio" });
+  }
+});
+
+// DISTRIBUIDOR: vendedores y precios para vendedores
+app.get("/api/distributor/resellers", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, role, balance, owner_user_id, created_at
+       FROM users
+       WHERE owner_user_id = $1
+       ORDER BY id DESC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando vendedores" });
+  }
+});
+
+app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "Nombre, correo y contraseña son obligatorios" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
+       VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
+       RETURNING id, name, email, role, balance, owner_user_id`,
+      [name.trim(), email.trim().toLowerCase(), hashedPassword, req.user.id]
+    );
+
+    res.json({ message: "Vendedor creado correctamente", user: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(400).json({ error: "No se pudo crear vendedor. Revisa si el correo ya existe." });
+  }
+});
+
+app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         products.id AS product_id,
+         products.name,
+         products.category,
+         products.price AS general_price,
+         COALESCE(user_product_prices.sale_price, products.price) AS owner_price,
+         COALESCE(subadmin_reseller_prices.sale_price, user_product_prices.sale_price, products.price) AS reseller_price
+       FROM products
+       LEFT JOIN user_product_prices
+         ON user_product_prices.product_id = products.id
+        AND user_product_prices.user_id = $1
+       LEFT JOIN subadmin_reseller_prices
+         ON subadmin_reseller_prices.product_id = products.id
+        AND subadmin_reseller_prices.owner_user_id = $1
+       WHERE products.active = 1
+       ORDER BY products.category ASC, products.name ASC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando precios para vendedores" });
+  }
+});
+
+app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const { product_id, sale_price } = req.body;
+    const priceNumber = Number(sale_price);
+
+    if (!product_id || !priceNumber || priceNumber <= 0) {
+      return res.status(400).json({ error: "Producto y precio válido son obligatorios" });
+    }
+
+    await pool.query(
+      `INSERT INTO subadmin_reseller_prices (owner_user_id, product_id, sale_price, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (owner_user_id, product_id)
+       DO UPDATE SET sale_price = EXCLUDED.sale_price, updated_at = NOW()`,
+      [req.user.id, product_id, priceNumber]
+    );
+
+    res.json({ message: "Precio para vendedores actualizado" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error guardando precio para vendedores" });
+  }
+});
+
+app.post("/api/distributor/add-balance", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const { user_id, amount, note } = req.body;
+    const amountNumber = Number(amount);
+
+    if (!user_id || !amountNumber || amountNumber <= 0) {
+      return res.status(400).json({ error: "Vendedor y cantidad son obligatorios" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2 AND owner_user_id = $3`,
+      [amountNumber, user_id, req.user.id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Vendedor no encontrado" });
+    }
+
+    res.json({ message: `Saldo agregado al vendedor${note ? ": " + note : ""}` });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error agregando saldo al vendedor" });
+  }
+});
+
 // ADMIN: REPORTE DE VENTAS (fecha local México)
 app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -1606,20 +1879,12 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
-    // Si una orden vieja quedó con cost_price_snapshot en 0, usamos el costo actual del producto.
-    // Para órdenes nuevas se sigue usando el snapshot guardado al momento de la compra.
-    const saleCostExpr = `
-      COALESCE(NULLIF(orders.cost_price_snapshot, 0), products.cost_price, 0)
-    `;
-
     const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
       `SELECT
          COUNT(*)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
-         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - ${saleCostExpr}), 0)::numeric AS total_profit
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1633,9 +1898,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          users.name AS customer_name,
          users.email AS customer_email,
          COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
-         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - ${saleCostExpr}), 0)::numeric AS total_profit
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
@@ -1651,9 +1914,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
          COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
-         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - ${saleCostExpr}), 0)::numeric AS total_profit
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1671,8 +1932,6 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
          orders.amount,
-         ${saleCostExpr} AS cost_price,
-         (orders.amount - ${saleCostExpr}) AS profit,
          orders.status,
          orders.created_at,
          to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
