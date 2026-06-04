@@ -1606,14 +1606,20 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
+    // Si una orden vieja quedó con cost_price_snapshot en 0, usamos el costo actual del producto.
+    // Para órdenes nuevas se sigue usando el snapshot guardado al momento de la compra.
+    const saleCostExpr = `
+      COALESCE(NULLIF(orders.cost_price_snapshot, 0), products.cost_price, 0)
+    `;
+
     const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
       `SELECT
          COUNT(*)::int AS total_orders,
          COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
-         COALESCE(SUM(orders.cost_price_snapshot), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - orders.cost_price_snapshot), 0)::numeric AS total_profit
+         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
+         COALESCE(SUM(orders.amount - ${saleCostExpr}), 0)::numeric AS total_profit
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1628,8 +1634,8 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          users.email AS customer_email,
          COUNT(orders.id)::int AS total_orders,
          COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
-         COALESCE(SUM(orders.cost_price_snapshot), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - orders.cost_price_snapshot), 0)::numeric AS total_profit
+         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
+         COALESCE(SUM(orders.amount - ${saleCostExpr}), 0)::numeric AS total_profit
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
@@ -1646,8 +1652,8 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductCategoryExpr} AS product_category,
          COUNT(orders.id)::int AS total_orders,
          COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
-         COALESCE(SUM(orders.cost_price_snapshot), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - orders.cost_price_snapshot), 0)::numeric AS total_profit
+         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
+         COALESCE(SUM(orders.amount - ${saleCostExpr}), 0)::numeric AS total_profit
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1665,8 +1671,8 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
          orders.amount,
-         orders.cost_price_snapshot AS cost_price,
-         (orders.amount - orders.cost_price_snapshot) AS profit,
+         ${saleCostExpr} AS cost_price,
+         (orders.amount - ${saleCostExpr}) AS profit,
          orders.status,
          orders.created_at,
          to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
