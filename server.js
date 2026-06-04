@@ -308,6 +308,7 @@ async function initDatabase() {
       name TEXT,
       description TEXT,
       price NUMERIC,
+      cost_price NUMERIC DEFAULT 0,
       category TEXT DEFAULT 'Otros',
       required_fields TEXT DEFAULT '[]',
       charge_mode TEXT DEFAULT 'on_purchase',
@@ -388,6 +389,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Otros'`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS required_fields TEXT DEFAULT '[]'`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS charge_mode TEXT DEFAULT 'on_purchase'`);
@@ -406,6 +408,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_account_data TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_category_snapshot TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cost_price_snapshot NUMERIC DEFAULT 0`);
 
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
@@ -443,6 +446,7 @@ async function initDatabase() {
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE products SET active = 1 WHERE active IS NULL`);
+  await pool.query(`UPDATE products SET cost_price = 0 WHERE cost_price IS NULL`);
   await pool.query(`UPDATE products SET category = 'Otros' WHERE category IS NULL`);
   await pool.query(`UPDATE products SET required_fields = '[]' WHERE required_fields IS NULL`);
   await pool.query(`UPDATE products SET charge_mode = 'on_purchase' WHERE charge_mode IS NULL`);
@@ -457,6 +461,7 @@ async function initDatabase() {
   await pool.query(`UPDATE orders SET delivered_account_data = '' WHERE delivered_account_data IS NULL`);
   await pool.query(`UPDATE orders SET product_name_snapshot = '' WHERE product_name_snapshot IS NULL`);
   await pool.query(`UPDATE orders SET product_category_snapshot = '' WHERE product_category_snapshot IS NULL`);
+  await pool.query(`UPDATE orders SET cost_price_snapshot = 0 WHERE cost_price_snapshot IS NULL`);
   await pool.query(`UPDATE platform_accounts SET status = 'available' WHERE status IS NULL OR status = ''`);
 
   await pool.query(`UPDATE balance_requests SET bank = '' WHERE bank IS NULL`);
@@ -560,10 +565,22 @@ app.get("/api/me", authMiddleware, async (req, res) => {
 app.get("/api/products", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, description, price, category, required_fields, charge_mode, active, stock_enabled, stock
+      `SELECT
+         id,
+         name,
+         description,
+         price,
+         CASE WHEN $1 = 'admin' THEN COALESCE(cost_price, 0) ELSE 0 END AS cost_price,
+         category,
+         required_fields,
+         charge_mode,
+         active,
+         stock_enabled,
+         stock
        FROM products
        WHERE active = 1
-       ORDER BY category ASC, name ASC`
+       ORDER BY category ASC, name ASC`,
+      [req.user.role]
     );
 
     res.json(result.rows);
@@ -576,7 +593,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
 // ADMIN: CREAR PRODUCTO
 app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
+    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({ error: "Nombre y precio son obligatorios" });
@@ -588,6 +605,8 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
       return res.status(400).json({ error: "El precio debe ser mayor a 0" });
     }
 
+    const costPriceNumber = Math.max(0, Number(cost_price || 0));
+
     const validChargeModes = ["on_purchase", "on_success"];
     const finalChargeMode = validChargeModes.includes(charge_mode) ? charge_mode : "on_purchase";
 
@@ -597,12 +616,13 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 
     await pool.query(
       `INSERT INTO products
-       (name, description, price, category, required_fields, charge_mode, active, stock_enabled, stock)
-       VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)`,
+       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)`,
       [
         name.trim(),
         description || "",
         priceNumber,
+        costPriceNumber,
         category || "Otros",
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
@@ -622,7 +642,7 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const productId = req.params.productId;
-    const { name, description, price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
+    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({ error: "Nombre y precio son obligatorios" });
@@ -633,6 +653,8 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
     if (priceNumber <= 0) {
       return res.status(400).json({ error: "El precio debe ser mayor a 0" });
     }
+
+    const costPriceNumber = Math.max(0, Number(cost_price || 0));
 
     const validChargeModes = ["on_purchase", "on_success"];
     const finalChargeMode = validChargeModes.includes(charge_mode) ? charge_mode : "on_purchase";
@@ -646,16 +668,18 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
        SET name = $1,
            description = $2,
            price = $3,
-           category = $4,
-           required_fields = $5,
-           charge_mode = $6,
-           stock_enabled = $7,
-           stock = $8
-       WHERE id = $9 AND active = 1`,
+           cost_price = $4,
+           category = $5,
+           required_fields = $6,
+           charge_mode = $7,
+           stock_enabled = $8,
+           stock = $9
+       WHERE id = $10 AND active = 1`,
       [
         name.trim(),
         description || "",
         priceNumber,
+        costPriceNumber,
         category || "Otros",
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
@@ -749,6 +773,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const price = Number(product.price);
+    const costPrice = Math.max(0, Number(product.cost_price || 0));
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
 
@@ -850,8 +875,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, cost_price_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id`,
       [
         userId,
@@ -865,7 +890,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         assignedAccount ? assignedAccount.id : null,
         deliveredAccountData,
         product.name || productName,
-        product.category || productCategory
+        product.category || productCategory,
+        costPrice
       ]
     );
 
@@ -1540,12 +1566,16 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
+    const saleCostExpr = `COALESCE(NULLIF(orders.cost_price_snapshot, 0), products.cost_price, 0)`;
+
     const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
       `SELECT
          COUNT(*)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
+         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
+         (COALESCE(SUM(orders.amount), 0) - COALESCE(SUM(${saleCostExpr}), 0))::numeric AS total_profit
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1559,7 +1589,9 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          users.name AS customer_name,
          users.email AS customer_email,
          COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
+         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
+         (COALESCE(SUM(orders.amount), 0) - COALESCE(SUM(${saleCostExpr}), 0))::numeric AS total_profit
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
@@ -1575,7 +1607,9 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
          COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales
+         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
+         COALESCE(SUM(${saleCostExpr}), 0)::numeric AS total_cost,
+         (COALESCE(SUM(orders.amount), 0) - COALESCE(SUM(${saleCostExpr}), 0))::numeric AS total_profit
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
@@ -1593,6 +1627,8 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
          orders.amount,
+         ${saleCostExpr}::numeric AS cost_price,
+         (orders.amount - ${saleCostExpr})::numeric AS profit,
          orders.status,
          orders.created_at,
          to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
