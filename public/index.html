@@ -58,7 +58,6 @@
         <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
         <button id="adminSalesMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openSalesReport()">📊 Reporte ventas</button>
       </nav>
-      <div class="sidebar-bottom"><button class="logout-side" onclick="logout()">Cerrar sesión</button></div>
     </aside>
     <main class="main">
       <div class="topbar">
@@ -84,7 +83,7 @@
       </section>
 
       <section id="section-account" class="section">
-        <h1 class="section-title">Mi cuenta</h1><div class="panel"><div class="account-grid"><div class="account-box"><div class="account-label">Nombre</div><div class="account-value" id="userName"></div></div><div class="account-box"><div class="account-label">Correo</div><div class="account-value" id="userEmail"></div></div><div class="account-box"><div class="account-label">Rol</div><div class="account-value" id="userRole"></div></div><div class="account-box"><div class="account-label">Saldo</div><div class="account-value">$<span id="userBalance"></span></div></div></div></div>
+        <h1 class="section-title">Mi cuenta</h1><div class="panel"><div class="account-grid"><div class="account-box"><div class="account-label">Nombre</div><div class="account-value" id="userName"></div></div><div class="account-box"><div class="account-label">Correo</div><div class="account-value" id="userEmail"></div></div><div class="account-box"><div class="account-label">Rol</div><div class="account-value" id="userRole"></div></div><div class="account-box"><div class="account-label">Saldo</div><div class="account-value">$<span id="userBalance"></span></div></div></div><button class="danger-btn" style="margin-top:18px;max-width:220px" onclick="logout()">Cerrar sesión</button></div>
       </section>
 
       <section id="section-shop" class="section">
