@@ -135,7 +135,7 @@
       </section>
 
       <section id="section-reports" class="section">
-        <div class="panel"><h2>Reportar falla</h2><p class="small-text">Reporta una falla solo de una cuenta que hayas comprado y que aparezca en Mis pedidos.</p><label class="field-label">Correo con falla</label><input id="reporteCorreo" placeholder="correo@ejemplo.com" /><label class="field-label">Tipo de falla</label><select id="reporteTipo"><option value="contraseña incorrecta">Contraseña incorrecta</option><option value="codigo de viaje">Código de viaje</option><option value="codigo de acceso disney">Código de acceso Disney</option><option value="codigo de hbo">Código de HBO</option><option value="otro">Otro</option></select><label class="field-label">Explicación</label><textarea id="reporteExplicacion" placeholder="Describe el problema"></textarea><button class="primary-btn" onclick="enviarReporteCuenta()">Enviar reporte</button></div>
+        <div class="panel"><h2>Reportar falla</h2><p class="small-text">Reporta una falla para que el administrador revise el caso.</p><label class="field-label">Correo con falla</label><input id="reporteCorreo" placeholder="correo@ejemplo.com" /><label class="field-label">Tipo de falla</label><select id="reporteTipo"><option value="contraseña incorrecta">Contraseña incorrecta</option><option value="codigo de viaje">Código de viaje</option><option value="codigo de acceso disney">Código de acceso Disney</option><option value="codigo de hbo">Código de HBO</option><option value="otro">Otro</option></select><label class="field-label">Explicación</label><textarea id="reporteExplicacion" placeholder="Describe el problema"></textarea><button class="primary-btn" onclick="enviarReporteCuenta()">Enviar reporte</button></div>
       </section>
 
       <section id="section-distributor" class="section">
@@ -245,6 +245,17 @@
           <h3>Últimas cuentas agregadas</h3>
           <div id="platformAccountsList">Sin cuentas.</div>
         </div>
+        
+        <div id="adminAccountReportsPanel" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Reportes de falla</h2>
+              <p class="small-text">Aquí puedes validar reportes, marcar resuelto o reemplazar una cuenta por otra disponible de la misma plataforma.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadAdminAccountReports()">Actualizar</button>
+          </div>
+          <div id="adminAccountReportsList">Sin reportes.</div>
+        </div>
         <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Costo de compra</label><input id="productCostPrice" type="number" step="0.01" value="0" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
         <div id="adminOrdersPanel" class="panel"><div class="panel-head"><h2>Pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadAdminOrders()">Actualizar</button></div><div id="adminOrdersList"></div></div>
       </section>
@@ -255,7 +266,7 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory()}}
+function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAdminAccountReports()}}
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
 function openUsersFromDashboard(){
@@ -296,7 +307,7 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAdminAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
@@ -304,7 +315,9 @@ function renderProducts(products){let html='';const cats={};products.forEach(p=>
 function renderProductRow(product){const stockEnabled=Number(product.stock_enabled||0)===1;const stock=Number(product.stock||0);const soldOut=stockEnabled&&stock<=0;return `<div class="product-row" data-product-id="${product.id}"><div class="product-header" onclick="toggleProduct(${product.id})"><div><div class="product-name">${safeText(product.name)}</div><span class="chip">${safeText(product.category||'Otros')}</span></div><div><div class="price">$${formatMoney(product.price)}</div>${stockEnabled?`<div class="stock ${soldOut?'out':''}">${soldOut?'Sin stock':'Stock: '+stock}</div>`:''}</div><div>⌄</div></div><div id="product-details-${product.id}" class="product-details"><p class="product-description">${safeText(product.description||'')}</p><p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>${renderProductInputs(product)}<button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut?'disabled':''}>${soldOut?'Sin stock':'Comprar'}</button></div></div>`}
 function toggleProduct(id){const row=document.querySelector(`.product-row[data-product-id="${id}"]`);if(!row)return;const open=row.classList.contains('open');document.querySelectorAll('.product-row').forEach(r=>r.classList.remove('open'));if(!open)row.classList.add('open')}
 function renderProductInputs(product){const fields=parseJsonArray(product.required_fields);if(!fields.length)return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;return fields.map(f=>`<label class="field-label">${safeText(fieldLabel(f))}</label><input id="field-${product.id}-${f}" placeholder="Ingresa ${safeText(fieldLabel(f))}" />`).join('')}
-async function buyProduct(productId){try{const product=allProducts.find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));if(!product)throw new Error('Producto no encontrado');if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`))return;const fields=parseJsonArray(product.required_fields);const order_data={};fields.forEach(f=>{const input=document.getElementById(`field-${productId}-${f}`);order_data[f]=input?input.value.trim():''});const data=await api('/api/buy/'+productId,{method:'POST',body:JSON.stringify({order_data})});showMessage(data.message||'Compra realizada');await 
+async function buyProduct(productId){try{const product=allProducts.find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));if(!product)throw new Error('Producto no encontrado');if(!confirm(`Vas a comprar: ${product.name}
+Costo: $${formatMoney(product.price)}
+¿Confirmas la compra?`))return;const fields=parseJsonArray(product.required_fields);const order_data={};fields.forEach(f=>{const input=document.getElementById(`field-${productId}-${f}`);order_data[f]=input?input.value.trim():''});const data=await api('/api/buy/'+productId,{method:'POST',body:JSON.stringify({order_data})});showMessage(data.message||'Compra realizada');await loadApp();showSection('orders')}catch(e){showMessage(e.message,'error')}}
 function openSalesReport(){
   if(currentUser?.role==='admin'){
     showSection('admin');
@@ -365,7 +378,64 @@ async function loadSalesReport(){
 
 
 
-loadApp();showSection('orders')}catch(e){showMessage(e.message,'error')}}
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
+
 async function loadMyOrders(){myOrders=await api('/api/my-orders');statOrders.textContent=myOrders.length;renderMyOrders();recentOrdersList.innerHTML=myOrders.slice(0,4).map(o=>`<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`).join('')||'Sin pedidos recientes.'}
 function renderMyOrders(){
   myOrdersList.innerHTML=myOrders.map(o=>{
@@ -376,7 +446,7 @@ function renderMyOrders(){
 }
 function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
 async function enviarSolicitudSaldo(){try{const nombre=(document.getElementById('saldoNombre')?.value||'').trim();const banco=(document.getElementById('saldoBanco')?.value||'').trim();const monto=(document.getElementById('saldoMonto')?.value||'').trim();if(!nombre||!banco||!monto)throw new Error('Nombre, banco y monto son obligatorios');let data;try{data=await api('/api/user/solicitud-saldo',{method:'POST',body:JSON.stringify({monto,banco,referencia:'No proporcionada',titular:nombre,comprobante:''})})}catch(err){data=await api('/api/balance-requests',{method:'POST',body:JSON.stringify({amount:monto,bank:banco,reference:'No proporcionada',account_holder:nombre,proof:''})})}showMessage(data.message||'Solicitud enviada');saldoNombre.value=saldoBanco.value=saldoMonto.value='';await loadBalanceRequests()}catch(e){showMessage(e.message,'error')}}
-async function enviarReporteCuenta(){try{const correo=(reporteCorreo.value||'').trim();const tipo=reporteTipo.value;const explicacion=(reporteExplicacion.value||'').trim();if(!correo||!explicacion)throw new Error('Correo y explicación son obligatorios');const data=await api('/api/account-reports',{method:'POST',body:JSON.stringify({email:correo,issue_type:tipo,description:explicacion})});showMessage(data.message||'Reporte enviado');reporteCorreo.value='';reporteExplicacion.value=''}catch(e){showMessage(e.message,'error')}}
+async function enviarReporteCuenta(){try{const data=await api('/api/account-reports',{method:'POST',body:JSON.stringify({email:reporteCorreo.value,issue_type:reporteTipo.value,description:reporteExplicacion.value})});showMessage(data.message||'Reporte enviado');reporteCorreo.value=reporteExplicacion.value=''}catch(e){showMessage(e.message,'error')}}
 function getBalanceRequestStatusText(status){
   const statuses={
     pendiente:"Pendiente",
@@ -505,6 +575,64 @@ async function loadSalesReport(){
 
 
 
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
+
 loadApp();
     showSection('admin');
     setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),120);
@@ -625,6 +753,64 @@ async function loadSalesReport(){
 
 
 
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
+
 loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function loadUsers(){allUsers=await api('/api/admin/users');statUsers.textContent=allUsers.length;adminUsersCount.textContent=allUsers.length;balanceUserSelect.innerHTML='<option value="">Selecciona usuario</option>'+allUsers.map(u=>`<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)}) - $${formatMoney(u.balance)}</option>`).join('');balanceUserSelect.onchange=()=>{balanceUserId.value=balanceUserSelect.value};usersList.innerHTML=allUsers.map(u=>`<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p></div>`).join('')||'No hay usuarios.'}
 async function addBalance(){try{const data=await api('/api/admin/add-balance',{method:'POST',body:JSON.stringify({user_id:Number(balanceUserId.value),amount:balanceAmount.value,note:balanceNote.value})});showMessage(data.message||'Saldo agregado');balanceAmount.value=balanceNote.value='';await 
@@ -687,6 +873,64 @@ async function loadSalesReport(){
 
 
 
+
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
 
 loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function loadAdminProducts(){const products=allProducts.length?allProducts:await api('/api/products');adminProductsCount.textContent=products.length;adminProductsList.innerHTML=products.map(p=>{const rf=parseJsonArray(p.required_fields);const se=Number(p.stock_enabled||0)===1;return `<div class="item" id="admin-product-${p.id}"><div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id})"><b>${safeText(p.name)}</b><span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')}</span></div><div class="admin-product-body"><label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" /><label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo de compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div><label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea><label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/><div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div></div></div>`}).join('')||'No hay productos.'}
@@ -752,6 +996,64 @@ async function loadSalesReport(){
 
 
 
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
+
 loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function deleteProduct(id){if(!confirm('¿Seguro que quieres eliminar este producto?'))return;try{const data=await api('/api/admin/products/'+id,{method:'DELETE'});showMessage(data.message||'Producto eliminado');await 
 function openSalesReport(){
@@ -813,6 +1115,64 @@ async function loadSalesReport(){
 
 
 
+
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
 
 loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function loadAdminOrders(){
@@ -885,6 +1245,64 @@ async function loadSalesReport(){
 
 
 
+
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
 
 loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 
@@ -1325,6 +1743,64 @@ function renderDashboardSalesCharts(byUser=[], byProduct=[]){
       userBox.innerHTML=`<div class="bar-chart">${users.map((u,i)=>{const val=Number(u.total_sales||0);const pct=Math.max(4,(val/max)*100);return `<div class="bar-row"><div class="bar-label" title="${safeText(u.customer_email||u.customer_name||'Usuario')}">${safeText(u.customer_name||u.customer_email||'Usuario')}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:linear-gradient(90deg,${makeChartColor(i)},#f00662)"></div></div><div class="bar-value">$${formatMoney(val)}</div></div>`}).join('')}</div>`;
     }
   }
+}
+
+
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="outline-btn" onclick="copyText(document.getElementById('accountReportEmail-'+r.id)?.textContent||'')">Copiar correo</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function updateAccountReportStatus(id){
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('accountReportStatus-'+id).value,admin_response:document.getElementById('accountReportResponse-'+id).value})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAdminAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceAccountFromReport(id){
+  if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma? La cuenta anterior se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
 }
 
 loadApp();
