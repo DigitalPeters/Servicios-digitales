@@ -1217,6 +1217,7 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
         orders.order_data,
         orders.status,
         orders.admin_response,
+        orders.delivered_account_data,
         orders.charged,
         orders.refunded,
         orders.created_at,
@@ -1765,6 +1766,10 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       [newAccount.id, deliveredAccountData, report.order_id]
     );
 
+    const replacementResponse = `Cuenta reemplazada correctamente.
+
+${deliveredAccountData}`;
+
     await client.query(
       `UPDATE account_reports
        SET status = 'reemplazo',
@@ -1773,7 +1778,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
            reported_account_id = $2,
            reviewed_at = NOW()
        WHERE id = $3`,
-      [`Cuenta reemplazada correctamente. Nueva cuenta asignada al pedido #${report.order_id}.`, newAccount.id, reportId]
+      [replacementResponse, newAccount.id, reportId]
     );
 
     await client.query("COMMIT");
@@ -1923,6 +1928,7 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
         orders.order_data,
         orders.status,
         orders.admin_response,
+        orders.delivered_account_data,
         orders.charged,
         orders.refunded,
         orders.created_at,

@@ -381,7 +381,8 @@ function renderMyOrders(){
   myOrdersList.innerHTML=myOrders.map(o=>{
     const data=parseJsonObject(o.order_data);
     const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}</div>`
+    const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
   }).join('')||'No tienes pedidos todavía.'
 }
 function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
@@ -604,6 +605,22 @@ function copyAccountDataFromOrder(orderId,source='my'){
     text=getAccountTextFromOrder(order);
   }
   copyToClipboard(text,'Datos de cuenta copiados');
+}
+function extractAccountEmailFromText(text){
+  const value=String(text||'');
+  const match=value.match(/(?:📧\s*)?Correo:\s*([^\s\n]+)/i);
+  return match ? match[1].trim() : '';
+}
+function reportDeliveredAccount(orderId){
+  const order=myOrders.find(o=>Number(o.id)===Number(orderId));
+  const text=getAccountTextFromOrder(order);
+  const email=extractAccountEmailFromText(text);
+  if(!email){showMessage('No pude detectar el correo de esta cuenta para reportarla','error');return;}
+  showSection('reports');
+  const input=document.getElementById('reporteCorreo');
+  if(input){input.value=email;}
+  copyToClipboard(email,'Correo copiado y colocado en el reporte');
+  setTimeout(()=>document.getElementById('reporteExplicacion')?.focus(),150);
 }
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
 function toggleCreateProduct(){createProductBox.classList.toggle('hidden')}
@@ -1368,7 +1385,7 @@ async function loadAccountReports(){
         <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
         <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
         <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
-        ${r.admin_response?`<div class="order-data"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
+        ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
         <div class="two-row">
           <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
           <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
