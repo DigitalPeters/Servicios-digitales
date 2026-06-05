@@ -1386,21 +1386,68 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 
 
 // USUARIO: REPORTAR PROBLEMA DE CUENTA
-app.post("/api/account-reports", authMiddleware, async (req, res) => {
+async function handleAccountReport(req, res) {
   try {
     const userId = req.user.id;
-    const { email, issue_type, description } = req.body;
+    const emailInput = req.body.email || req.body.correo;
+    const issueTypeInput = req.body.issue_type || req.body.tipo || "otro";
+    const descriptionInput = req.body.description || req.body.explicacion;
 
-    if (!email || !description) {
+    const reportEmail = String(emailInput || "").trim().toLowerCase();
+    const issueType = String(issueTypeInput || "otro").trim();
+    const description = String(descriptionInput || "").trim();
+
+    if (!reportEmail || !description) {
       return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
     }
+
+    // Validación importante:
+    // Solo se permite reportar una cuenta que haya sido entregada/comprada por el usuario logueado.
+    // Se valida contra platform_accounts porque ahí queda registrada la cuenta automática asignada.
+    const purchasedAccountResult = await pool.query(
+      `SELECT
+         pa.id AS platform_account_id,
+         pa.platform,
+         pa.product_name,
+         pa.account_email,
+         pa.assigned_order_id,
+         o.id AS order_id,
+         o.status AS order_status
+       FROM platform_accounts pa
+       JOIN orders o ON o.id = pa.assigned_order_id
+       WHERE pa.assigned_user_id = $1
+         AND lower(trim(pa.account_email)) = lower(trim($2))
+         AND pa.status = 'delivered'
+         AND o.status = 'exito'
+       ORDER BY pa.delivered_at DESC NULLS LAST, pa.id DESC
+       LIMIT 1`,
+      [userId, reportEmail]
+    );
+
+    if (purchasedAccountResult.rowCount === 0) {
+      return res.status(400).json({
+        error: "Ese correo no aparece como una cuenta comprada y entregada en tu usuario. Verifica que estés usando el correo exacto de Mis pedidos."
+      });
+    }
+
+    const purchasedAccount = purchasedAccountResult.rows[0];
+
+    const reportDescription = [
+      description,
+      "",
+      "--- Validación automática ---",
+      `Pedido: #${purchasedAccount.order_id}`,
+      `Plataforma: ${purchasedAccount.platform || ""}`,
+      `Producto: ${purchasedAccount.product_name || ""}`,
+      `Correo reportado: ${purchasedAccount.account_email || reportEmail}`
+    ].join("\n");
 
     const insertResult = await pool.query(
       `INSERT INTO account_reports
        (user_id, email, issue_type, description, status, admin_response)
        VALUES ($1, $2, $3, $4, 'pendiente', '')
        RETURNING id`,
-      [userId, String(email).trim(), String(issue_type || "otro").trim(), String(description).trim()]
+      [userId, reportEmail, issueType, reportDescription]
     );
 
     const reportId = insertResult.rows[0].id;
@@ -1416,19 +1463,24 @@ app.post("/api/account-reports", authMiddleware, async (req, res) => {
       reportId,
       customerName: customer.name || "Cliente",
       customerEmail: customer.email || "Sin correo",
-      email,
-      issueType: issue_type || "otro",
-      description
+      email: reportEmail,
+      issueType,
+      description: reportDescription
     });
 
     res.json({
-      message: "Reporte enviado. El administrador revisará la falla y dará el veredicto final."
+      message: "Reporte enviado. La cuenta fue validada con una compra existente y el administrador revisará la falla."
     });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error enviando reporte de cuenta" });
   }
-});
+}
+
+app.post("/api/account-reports", authMiddleware, handleAccountReport);
+
+// Compatibilidad con el index anterior que enviaba a /api/user/reporte-cuenta
+app.post("/api/user/reporte-cuenta", authMiddleware, handleAccountReport);
 
 // USUARIO: MIS REPORTES DE CUENTA
 app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
