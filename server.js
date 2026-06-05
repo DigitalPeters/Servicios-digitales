@@ -2484,6 +2484,77 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
   }
 });
 
+
+
+// ADMIN: REPORTE MENSUAL DESCARGABLE CSV
+app.get("/api/admin/monthly-report.csv", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const month = String(req.query.month || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: "Mes inválido. Usa formato YYYY-MM" });
+    }
+
+    const saleProductNameExpr = `
+      COALESCE(
+        NULLIF(orders.product_name_snapshot, ''),
+        NULLIF(substring(orders.delivered_account_data from 'Producto: ([^\n\r]+)'), ''),
+        products.name
+      )
+    `;
+    const saleProductCategoryExpr = `COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, 'Otros')`;
+    const costExpr = `COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0)`;
+
+    const result = await pool.query(
+      `SELECT
+         orders.id,
+         users.name AS cliente,
+         users.email AS correo_cliente,
+         ${saleProductNameExpr} AS producto,
+         ${saleProductCategoryExpr} AS categoria,
+         orders.amount AS venta,
+         ${costExpr} AS costo,
+         (orders.amount - ${costExpr}) AS ganancia,
+         orders.status,
+         to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS fecha_mexico
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       JOIN products ON products.id = orders.product_id
+       WHERE orders.status = 'exito'
+         AND to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'YYYY-MM') = $1
+       ORDER BY orders.created_at DESC`,
+      [month]
+    );
+
+    const headers = ["ID", "Cliente", "Correo cliente", "Producto", "Categoría", "Venta", "Costo", "Ganancia", "Estado", "Fecha México"];
+    const escapeCsv = (value) => {
+      const text = String(value ?? "");
+      if (/[",\n\r]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+      return text;
+    };
+
+    const rows = result.rows.map(row => [
+      row.id,
+      row.cliente,
+      row.correo_cliente,
+      row.producto,
+      row.categoria,
+      Number(row.venta || 0).toFixed(2),
+      Number(row.costo || 0).toFixed(2),
+      Number(row.ganancia || 0).toFixed(2),
+      row.status,
+      row.fecha_mexico
+    ]);
+
+    const csv = [headers, ...rows].map(row => row.map(escapeCsv).join(",")).join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="reporte-${month}.csv"`);
+    res.send("\ufeff" + csv);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error generando reporte mensual" });
+  }
+});
+
 // ADMIN: PROBAR CORREO DE NOTIFICACIÓN
 app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, res) => {
   try {

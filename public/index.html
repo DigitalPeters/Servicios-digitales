@@ -80,6 +80,8 @@
           <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
+          <div id="dashDailyCutCard" class="dash-card clickable hidden" onclick="openDailyCut()"><div class="dash-icon">🧾</div><div><div class="dash-label">Corte diario</div><div class="small-text">Ventas, costos y utilidad</div></div></div>
+          <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()"><div class="dash-icon">📥</div><div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div></div>
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
         </div>
         <div id="dashboardChartsPanel" class="row hidden">
@@ -221,6 +223,9 @@
           </div>
           <div class="tools">
             <input id="salesReportDate" type="date" onchange="loadSalesReport()" />
+            <button class="green-btn" style="width:auto" onclick="loadDailyCut()">🧾 Ver corte diario</button>
+            <input id="monthlyReportMonth" type="month" />
+            <button class="primary-btn" style="width:auto" onclick="downloadMonthlyReport()">📥 Descargar reporte mensual</button>
           </div>
           <div class="grid-cards">
             <div class="dash-card"><div class="dash-icon">💵</div><div><div class="dash-label">Total vendido</div><div class="dash-value">$<span id="salesReportTotal">0.00</span></div></div></div>
