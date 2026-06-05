@@ -275,7 +275,7 @@
           <h3>Últimas cuentas agregadas</h3>
           <div id="platformAccountsList">Sin cuentas.</div>
         </div>
-        <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Costo de compra</label><input id="productCostPrice" type="number" step="0.01" value="0" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
+        <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Costo de compra</label><input id="productCostPrice" type="number" step="0.01" value="0" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Tipo de producto</label><select id="productType" onchange="toggleComboCreateBox()"><option value="streaming_auto">Automático streaming</option><option value="manual">Manual</option><option value="combo_auto">Combo automático</option></select><div id="createComboBox" class="hidden"><label class="field-label">Descuento por plataforma incluida</label><input id="productComboDiscount" type="number" step="0.01" value="5" /><label class="field-label">Productos incluidos en el combo</label><div id="productComboItemsBox" class="order-data">Primero carga productos.</div><p class="small-text">El precio del combo se calcula automáticamente: suma de productos incluidos menos el descuento por cada plataforma.</p></div><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
         <div id="adminOrdersPanel" class="panel"><div class="panel-head"><h2>Pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadAdminOrders()">Actualizar</button></div><div id="adminOrdersList"></div></div>
       </section>
     </main>
@@ -1718,6 +1718,238 @@ loadApp = async function(){
 
   showSection('dashboard');
 };
+
+
+
+// ===============================
+// COMBOS AUTOMÁTICOS - OVERRIDES
+// ===============================
+function getSelectedComboItems(prefix) {
+  return Array.from(document.querySelectorAll(`input[data-combo-${prefix}]:checked`))
+    .map(input => Number(input.value))
+    .filter(value => Number.isInteger(value) && value > 0);
+}
+
+function renderComboOptions(containerId, selectedIds = [], prefix = "create", excludeId = null) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const selected = new Set((selectedIds || []).map(Number));
+  const options = (allProducts || [])
+    .filter(p => Number(p.id) !== Number(excludeId))
+    .filter(p => String(p.product_type || "streaming_auto") !== "combo_auto")
+    .map(p => `
+      <label class="checkbox-row">
+        <input type="checkbox" data-combo-${prefix}="1" value="${p.id}" ${selected.has(Number(p.id)) ? "checked" : ""} />
+        ${safeText(p.name)} - $${formatMoney(p.price)}
+      </label>
+    `).join("");
+  box.innerHTML = options || "No hay productos individuales para agregar al combo.";
+}
+
+function toggleComboCreateBox() {
+  const isCombo = document.getElementById("productType")?.value === "combo_auto";
+  const box = document.getElementById("createComboBox");
+  if (box) box.classList.toggle("hidden", !isCombo);
+  if (isCombo) renderComboOptions("productComboItemsBox", [], "create");
+}
+
+function toggleComboEditBox(id) {
+  const isCombo = document.getElementById(`editProductType-${id}`)?.value === "combo_auto";
+  const box = document.getElementById(`editComboBox-${id}`);
+  if (box) box.classList.toggle("hidden", !isCombo);
+  if (isCombo) {
+    const product = (allProducts || []).find(p => Number(p.id) === Number(id));
+    renderComboOptions(`editComboItemsBox-${id}`, parseJsonArray(product?.combo_items), `edit-${id}`, id);
+  }
+}
+
+async function createProduct(){
+  try{
+    const data=await api('/api/admin/create-product',{
+      method:'POST',
+      body:JSON.stringify({
+        name:productName.value,
+        description:productDescription.value,
+        price:productPrice.value || 0,
+        cost_price:(document.getElementById('productCostPrice')?.value||0),
+        category:productCategory.value,
+        required_fields:getRequiredFieldsFromInput('productRequiredFields'),
+        charge_mode:productChargeMode.value,
+        stock_enabled:productStockEnabled.checked,
+        stock:productStock.value,
+        product_type:document.getElementById('productType')?.value || 'streaming_auto',
+        combo_items:getSelectedComboItems('create'),
+        combo_discount:document.getElementById('productComboDiscount')?.value || 0
+      })
+    });
+    showMessage(data.message||'Producto creado');
+    productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';
+    if(document.getElementById('productCostPrice'))productCostPrice.value='0';
+    if(document.getElementById('productType'))productType.value='streaming_auto';
+    if(document.getElementById('productComboDiscount'))productComboDiscount.value='5';
+    toggleComboCreateBox();
+    productStock.value='0';
+    productStockEnabled.checked=false;
+    await loadProducts();
+    await loadAdminProducts();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function loadAdminProducts(){
+  const products=allProducts.length?allProducts:await api('/api/products');
+  if(document.getElementById('adminProductsCount'))adminProductsCount.textContent=products.length;
+  const list=document.getElementById('adminProductsList');
+  if(!list)return;
+  list.innerHTML=products.map(p=>{
+    const rf=parseJsonArray(p.required_fields);
+    const se=Number(p.stock_enabled||0)===1;
+    const type=String(p.product_type||'streaming_auto');
+    const selectedCombo=parseJsonArray(p.combo_items);
+    return `<div class="item" id="admin-product-${p.id}">
+      <div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id}); setTimeout(()=>toggleComboEditBox(${p.id}),60)">
+        <b>${safeText(p.name)}</b>
+        <span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')} · ${type==='combo_auto'?'Combo':type==='manual'?'Manual':'Automático'}</span>
+      </div>
+      <div class="admin-product-body">
+        <label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" />
+        <label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea>
+        <div class="three-row"><div><label class="field-label">Precio de venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo de compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div>
+        <label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea>
+        <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
+        <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
+        <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
+        <label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>
+        <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div>
+      </div>
+    </div>`
+  }).join('')||'No hay productos.';
+  products.forEach(p=>{
+    if(String(p.product_type||'')==='combo_auto'){
+      renderComboOptions(`editComboItemsBox-${p.id}`, parseJsonArray(p.combo_items), `edit-${p.id}`, p.id);
+    }
+  });
+}
+
+async function updateProduct(id){
+  try{
+    const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);
+    const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({
+      name:document.getElementById('editName-'+id).value,
+      description:document.getElementById('editDescription-'+id).value,
+      price:document.getElementById('editPrice-'+id).value,
+      cost_price:(document.getElementById('editCostPrice-'+id)?.value||0),
+      category:document.getElementById('editCategory-'+id).value,
+      required_fields,
+      charge_mode:document.getElementById('editChargeMode-'+id).value,
+      stock_enabled:document.getElementById('editStockEnabled-'+id).checked,
+      stock:document.getElementById('editStock-'+id).value,
+      product_type:document.getElementById(`editProductType-${id}`)?.value || 'streaming_auto',
+      combo_items:getSelectedComboItems(`edit-${id}`),
+      combo_discount:document.getElementById(`editComboDiscount-${id}`)?.value || 0
+    })});
+    showMessage(data.message||'Producto actualizado');
+    await loadProducts();
+    await loadAdminProducts();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+
+// ===============================
+// FIX FINAL: UI de combos y garantía visible
+// ===============================
+function ensureComboCreateControls(){
+  const createBox=document.getElementById('createProductBox');
+  if(!createBox)return;
+  if(!document.getElementById('productType')){
+    const charge=document.getElementById('productChargeMode');
+    if(charge){
+      const wrapper=document.createElement('div');
+      wrapper.innerHTML=`
+        <label class="field-label">Tipo de producto</label>
+        <select id="productType" onchange="toggleComboCreateBox()">
+          <option value="streaming_auto">Automático streaming</option>
+          <option value="manual">Manual</option>
+          <option value="combo_auto">Combo automático</option>
+        </select>
+        <div id="createComboBox" class="hidden">
+          <label class="field-label">Descuento por plataforma incluida</label>
+          <input id="productComboDiscount" type="number" step="0.01" value="5" />
+          <label class="field-label">Productos incluidos en el combo</label>
+          <div id="productComboItemsBox" class="order-data">Primero carga productos.</div>
+          <p class="small-text">El combo entrega una cuenta disponible de cada producto seleccionado. Si falta stock de una plataforma, no cobra.</p>
+        </div>`;
+      charge.parentNode.insertBefore(wrapper, charge.previousElementSibling || charge);
+    }
+  }
+  if(document.getElementById('productType')){
+    renderComboOptions('productComboItemsBox', [], 'create');
+    toggleComboCreateBox();
+  }
+}
+
+function toggleCreateProduct(){
+  const box=document.getElementById('createProductBox');
+  if(!box)return;
+  box.classList.toggle('hidden');
+  ensureComboCreateControls();
+}
+
+function hasAccountDelivery(order){
+  const text=getAccountTextFromOrder(order);
+  if(!text)return false;
+  return /Cuenta de Streaming|Combo Streaming|Cuenta entregada|Correo:\s*|📧\s*Correo/i.test(text) && /Contraseña:\s*|🔐\s*Contraseña/i.test(text);
+}
+
+function getWarrantyInfoFromOrder(o){
+  const raw=String(o.delivered_account_data||o.admin_response||'');
+  const m=raw.match(/Fecha de entrega:\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
+  let start=o.created_at?new Date(o.created_at):null;
+  if(m){
+    const day=Number(m[1]), month=Number(m[2])-1, year=Number(m[3].length===2?'20'+m[3]:m[3]);
+    start=new Date(year,month,day);
+  }
+  if(!start||isNaN(start.getTime()))return null;
+  const end=new Date(start);end.setDate(end.getDate()+28);
+  const today=new Date();
+  const msDay=24*60*60*1000;
+  const daysRemaining=Math.max(0,Math.ceil((end-today)/msDay));
+  const daysUsed=Math.min(28,Math.max(0,28-daysRemaining));
+  return {start,end,daysRemaining,daysUsed,active:daysRemaining>0};
+}
+
+function shouldShowWarranty(o){
+  const cat=String(o.product_category||o.product_category_snapshot||'').toLowerCase();
+  const name=String(o.product_name||o.product_name_snapshot||'').toLowerCase();
+  const raw=String(o.delivered_account_data||o.admin_response||'');
+  return hasAccountDelivery(o) || cat.includes('plataforma') || cat.includes('combo') || name.includes('combo') || /Fecha de entrega:/i.test(raw);
+}
+
+function renderWarrantyNotice(o){
+  if(!shouldShowWarranty(o))return '';
+  const w=getWarrantyInfoFromOrder(o);
+  if(!w)return '';
+  return `<div class="order-data"><b>Estado de garantía:</b><p style="margin:5px 0"><b>Entrega:</b> ${w.start.toLocaleDateString('es-MX')} &nbsp; <b>Vence:</b> ${w.end.toLocaleDateString('es-MX')} &nbsp; <b>Días restantes:</b> <span class="${w.active?'success':'error'}">${w.daysRemaining}</span></p></div>`;
+}
+
+function renderMyOrders(){
+  const search=(document.getElementById('myOrdersSearch')?.value||'').toLowerCase().trim();
+  const statusFilter=document.getElementById('myOrdersStatusFilter')?.value||'';
+  let rows=[...(myOrders||[])];
+  rows=rows.filter(o=>{
+    const raw=String(o.delivered_account_data||o.admin_response||'');
+    const email=extractDeliveredAccountEmail(raw);
+    const hay=`${o.id} ${o.product_name||''} ${o.product_category||''} ${email} ${o.status||''}`.toLowerCase();
+    const statusOk=!statusFilter || (statusFilter==='reportado' ? /reporte|falla|reemplazo|reembolso/i.test(raw+String(o.admin_response||'')) : o.status===statusFilter);
+    return statusOk && (!search || hay.includes(search));
+  });
+  myOrdersList.innerHTML=rows.map(o=>{
+    const data=parseJsonObject(o.order_data);
+    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
+    const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`;
+  }).join('')||'No hay pedidos con esos filtros.';
+}
+
 
 loadApp();
 
