@@ -1511,6 +1511,9 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         users.email AS customer_email,
         orders.amount AS order_amount,
         orders.created_at AS order_created_at,
+        CASE WHEN orders.created_at IS NULL THEN 0 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - orders.created_at)) / 86400))::int END AS warranty_days_used,
+        CASE WHEN orders.created_at IS NULL THEN 0 ELSE GREATEST(0, 28 - GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - orders.created_at)) / 86400))::int) END AS warranty_days_remaining,
+        CASE WHEN orders.created_at IS NULL THEN 0 ELSE ROUND((COALESCE(orders.amount,0)::numeric / 28) * GREATEST(0, 28 - GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - orders.created_at)) / 86400))::int), 2) END AS suggested_refund_amount,
         COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name, reported.product_name) AS product_name,
         COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, reported.platform) AS product_category,
         reported.platform AS reported_platform,
@@ -1684,6 +1687,137 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
     await client.query("ROLLBACK");
     console.error(err.message);
     res.status(500).json({ error: "Error reemplazando cuenta" });
+  } finally {
+    client.release();
+  }
+});
+
+
+// ADMIN: REEMBOLSO PROPORCIONAL DE REPORTE DE CUENTA
+app.post("/api/admin/account-reports/:reportId/refund", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const reportId = req.params.reportId;
+
+    await client.query("BEGIN");
+
+    const reportResult = await client.query(
+      `SELECT
+         account_reports.*,
+         orders.id AS order_id,
+         orders.user_id AS order_user_id,
+         orders.amount,
+         orders.created_at AS order_created_at,
+         orders.refunded,
+         products.name AS product_name,
+         products.category AS product_category,
+         reported.id AS old_account_id,
+         reported.account_email AS reported_email
+       FROM account_reports
+       JOIN orders ON orders.id = account_reports.order_id
+       LEFT JOIN products ON products.id = orders.product_id
+       LEFT JOIN platform_accounts reported ON reported.id = account_reports.reported_account_id
+       WHERE account_reports.id = $1
+       FOR UPDATE`,
+      [reportId]
+    );
+
+    const report = reportResult.rows[0];
+
+    if (!report) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Reporte no encontrado o no está ligado a una compra válida" });
+    }
+
+    if (Number(report.refunded || 0) === 1 || Number(report.refund_amount || 0) > 0 || report.resolution_type === "reembolso") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este reporte o pedido ya tiene reembolso aplicado" });
+    }
+
+    const orderAmount = Number(report.amount || 0);
+
+    if (orderAmount <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "El pedido no tiene monto válido para calcular reembolso" });
+    }
+
+    const nowResult = await client.query(
+      `SELECT
+         GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - $1::timestamp)) / 86400))::int AS days_used`,
+      [report.order_created_at]
+    );
+
+    const daysUsed = Number(nowResult.rows[0]?.days_used || 0);
+    const daysRemaining = Math.max(0, 28 - daysUsed);
+
+    if (daysRemaining <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "La garantía de 28 días ya venció. No hay días restantes para reembolsar." });
+    }
+
+    const refundAmount = Number(((orderAmount / 28) * daysRemaining).toFixed(2));
+
+    if (refundAmount <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "El monto de reembolso calculado es 0" });
+    }
+
+    await client.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
+      [refundAmount, report.user_id]
+    );
+
+    await client.query(
+      `UPDATE orders SET refunded = 1 WHERE id = $1`,
+      [report.order_id]
+    );
+
+    if (report.old_account_id) {
+      await client.query(
+        `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
+        [report.old_account_id]
+      );
+    }
+
+    const responseMessage = [
+      "Reembolso proporcional aplicado correctamente.",
+      "",
+      `Pedido: #${report.order_id}`,
+      `Producto: ${report.product_name || report.product_category || "Plataforma"}`,
+      `Correo reportado: ${report.reported_email || report.email || ""}`,
+      `Monto pagado: $${orderAmount.toFixed(2)}`,
+      "Garantía: 28 días",
+      `Días usados: ${daysUsed}`,
+      `Días restantes: ${daysRemaining}`,
+      `Monto reembolsado: $${refundAmount.toFixed(2)}`,
+      "",
+      "El reembolso fue agregado al saldo del usuario."
+    ].join("\n");
+
+    await client.query(
+      `UPDATE account_reports
+       SET status = 'reembolso',
+           resolution_type = 'reembolso',
+           refund_amount = $1,
+           admin_response = $2,
+           reviewed_at = NOW()
+       WHERE id = $3`,
+      [refundAmount, responseMessage, reportId]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      message: `Reembolso aplicado correctamente por $${refundAmount.toFixed(2)}. Días restantes: ${daysRemaining}.`,
+      refund_amount: refundAmount,
+      days_used: daysUsed,
+      days_remaining: daysRemaining
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err.message);
+    res.status(500).json({ error: "Error aplicando reembolso proporcional" });
   } finally {
     client.release();
   }

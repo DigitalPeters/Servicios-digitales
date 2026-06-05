@@ -1803,6 +1803,73 @@ async function replaceAccountFromReport(id){
   }catch(e){showMessage(e.message,'error')}
 }
 
+
+
+// OVERRIDE FINAL: reportes de falla con reemplazo y reembolso proporcional
+async function loadAdminAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const orderDate=r.order_created_at?new Date(r.order_created_at).toLocaleDateString('es-MX'):'';
+      const orderAmount=Number(r.order_amount||0);
+      const daysUsed=Number(r.warranty_days_used||0);
+      const daysRemaining=Number(r.warranty_days_remaining||0);
+      const suggestedRefund=Number(r.suggested_refund_amount||0);
+      const refundApplied=Number(r.refund_amount||0)>0 || r.resolution_type==='reembolso' || r.status==='reembolso';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id}</p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} · ${safeText(r.customer_email||'')}</p>
+        <p><b>Pedido:</b> ${r.order_id?'#'+r.order_id:'No ligado'} ${orderDate?`· Compra: ${orderDate}`:''}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.reported_product_name||'')}</p>
+        <p><b>Correo reportado:</b> <span id="accountReportEmail-${r.id}">${safeText(r.email||r.reported_account_email||'')}</span></p>
+        <p><b>Perfil/PIN:</b> ${safeText(r.reported_profile_name||'No aplica')} / ${safeText(r.reported_profile_pin||'No aplica')}</p>
+        <p><b>Tipo:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Estado:</b> <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        <div class="order-data">
+          <b>Garantía / reembolso proporcional:</b>
+          <p style="margin:5px 0"><b>Monto pagado:</b> $${formatMoney(orderAmount)}</p>
+          <p style="margin:5px 0"><b>Días usados:</b> ${daysUsed} de 28</p>
+          <p style="margin:5px 0"><b>Días restantes:</b> ${daysRemaining}</p>
+          <p style="margin:5px 0"><b>Reembolso sugerido:</b> $${formatMoney(suggestedRefund)}</p>
+          ${refundApplied?`<p style="margin:5px 0"><b>Reembolso aplicado:</b> $${formatMoney(r.refund_amount||suggestedRefund)}</p>`:''}
+        </div>
+        ${r.replacement_account_id?`<div class="order-data"><b>Reemplazo asignado:</b><p>${safeText(r.replacement_account_email||'')}</p><p>Perfil: ${safeText(r.replacement_profile_name||'No aplica')} · PIN: ${safeText(r.replacement_profile_pin||'No aplica')}</p></div>`:''}
+        <label class="field-label">Veredicto manual</label>
+        <select id="accountReportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <label class="field-label">Respuesta para el cliente</label>
+        <textarea id="accountReportResponse-${r.id}">${safeText(r.admin_response||'')}</textarea>
+        <div class="three-row">
+          <button onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+          <button class="green-btn" onclick="replaceAccountFromReport(${r.id})" ${r.replacement_account_id||refundApplied?'disabled':''}>🔁 Reemplazar cuenta</button>
+          <button class="danger-btn" onclick="refundAccountReport(${r.id})" ${refundApplied||r.replacement_account_id?'disabled':''}>💰 Reembolso proporcional</button>
+        </div>
+        <div style="margin-top:10px"><button class="outline-btn" style="width:auto" onclick="copyText(document.getElementById('accountReportEmail-'+${r.id})?.textContent||'')">Copiar correo</button></div>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function refundAccountReport(id){
+  if(!confirm('¿Aplicar reembolso proporcional según los días restantes de garantía? El monto se agregará al saldo del usuario y la cuenta reportada se marcará como fallida.'))return;
+  try{
+    const data=await api('/api/admin/account-reports/'+id+'/refund',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Reembolso aplicado');
+    await loadAdminAccountReports();
+    await loadAdminOrders();
+    await loadUsers();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
+
 loadApp();
 </script>
 </body>
