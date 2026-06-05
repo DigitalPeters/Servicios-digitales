@@ -248,43 +248,6 @@ function normalizeFieldName(name) {
     .replace(/^_+|_+$/g, "");
 }
 
-
-function formatFechaMX(fecha) {
-  return fecha.toLocaleDateString("es-MX", {
-    timeZone: "America/Mexico_City",
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit"
-  });
-}
-
-function buildDeliveredAccountData(account, productName = "", productCategory = "") {
-  const fechaEntrega = new Date();
-  const fechaVencimiento = new Date(fechaEntrega);
-  fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
-
-  return [
-    "🎬 Cuenta de Streaming Entregada",
-    "",
-    `📌 Plataforma: ${String(account.platform || productCategory || productName || "").toUpperCase()}`,
-    `📧 Correo: ${account.account_email || ""}`,
-    `🔐 Contraseña: ${account.account_password || ""}`,
-    `👤 Perfil: ${account.profile_name || "No aplica"}`,
-    `🔢 PIN de acceso: ${account.profile_pin || "No aplica"}`,
-    `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
-    `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
-    account.access_url ? `🔗 URL para código/soporte: ${account.access_url}` : null,
-    "",
-    "📌 Normas de uso:",
-    "✅ No editar datos de acceso",
-    "✅ No cambiar el nombre ni el código del perfil",
-    "✅ Uso exclusivo en un solo equipo",
-    "✅ No compartir el acceso con otros",
-    "",
-    "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
-  ].filter(line => line !== null && line !== undefined).join("\n");
-}
-
 function generateToken(user) {
   return jwt.sign(
     {
@@ -602,11 +565,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS order_id INTEGER`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_account_id INTEGER`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS replacement_account_id INTEGER`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
 
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
@@ -996,7 +954,39 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         });
       }
 
-      deliveredAccountData = buildDeliveredAccountData(assignedAccount, productName, productCategory);
+      const fechaEntrega = new Date();
+      const fechaVencimiento = new Date(fechaEntrega);
+      fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+
+      function formatFechaMX(fecha) {
+        return fecha.toLocaleDateString("es-MX", {
+          timeZone: "America/Mexico_City",
+          day: "2-digit",
+          month: "2-digit",
+          year: "2-digit"
+        });
+      }
+
+      deliveredAccountData = [
+        "🎬 Cuenta de Streaming Entregada",
+        "",
+        `📌 Plataforma: ${String(assignedAccount.platform || productCategory || productName || "").toUpperCase()}`,
+        `📧 Correo: ${assignedAccount.account_email || ""}`,
+        `🔐 Contraseña: ${assignedAccount.account_password || ""}`,
+        `👤 Perfil: ${assignedAccount.profile_name || "No aplica"}`,
+        `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
+        `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
+        `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
+        assignedAccount.access_url ? `🔗 URL para código/soporte: ${assignedAccount.access_url}` : null,
+        "",
+        "📌 Normas de uso:",
+        "✅ No editar datos de acceso",
+        "✅ No cambiar el nombre ni el código del perfil",
+        "✅ Uso exclusivo en un solo equipo",
+        "✅ No compartir el acceso con otros",
+        "",
+        "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
+      ].filter(line => line !== null && line !== undefined).join("\n");
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
@@ -1274,6 +1264,56 @@ app.post("/api/balance-requests", authMiddleware, async (req, res) => {
   }
 });
 
+
+
+// ALIAS COMPATIBLE: SOLICITUD DE SALDO DESDE FRONTEND ANTERIOR
+app.post("/api/user/solicitud-saldo", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const amountNumber = Number(req.body.monto || req.body.amount || 0);
+    const bank = String(req.body.banco || req.body.bank || "").trim();
+    const reference = String(req.body.referencia || req.body.reference || "No proporcionada").trim();
+    const accountHolder = String(req.body.titular || req.body.account_holder || "").trim();
+    const proof = String(req.body.comprobante || req.body.proof || "").trim();
+
+    if (!amountNumber || amountNumber <= 0) {
+      return res.status(400).json({ error: "El monto debe ser mayor a 0" });
+    }
+
+    if (!bank || !accountHolder) {
+      return res.status(400).json({ error: "Banco y nombre de quien transfirió son obligatorios" });
+    }
+
+    const insertResult = await pool.query(
+      `INSERT INTO balance_requests
+       (user_id, amount, bank, reference, account_holder, proof, status, admin_response)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', '')
+       RETURNING id`,
+      [userId, amountNumber, bank, reference || "No proporcionada", accountHolder, proof]
+    );
+
+    const requestId = insertResult.rows[0].id;
+    const customerResult = await pool.query(`SELECT name, email FROM users WHERE id = $1`, [userId]);
+    const customer = customerResult.rows[0] || {};
+
+    sendBalanceRequestEmail({
+      requestId,
+      customerName: customer.name || "Cliente",
+      customerEmail: customer.email || "Sin correo",
+      amount: amountNumber,
+      bank,
+      reference: reference || "No proporcionada",
+      accountHolder,
+      proof
+    });
+
+    res.json({ message: "Solicitud enviada. El administrador revisará tu transferencia y aprobará el saldo si el pago llegó." });
+  } catch (err) {
+    console.error("Error enviando solicitud de saldo:", err.message);
+    res.status(500).json({ error: "Error enviando solicitud de saldo" });
+  }
+});
+
 // USUARIO: MIS SOLICITUDES DE SALDO
 app.get("/api/my-balance-requests", authMiddleware, async (req, res) => {
   try {
@@ -1325,18 +1365,33 @@ app.get("/api/admin/balance-requests", authMiddleware, adminMiddleware, async (r
 // ADMIN: APROBAR O RECHAZAR SOLICITUD DE SALDO
 app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, adminMiddleware, async (req, res) => {
   const client = await pool.connect();
+  let transactionStarted = false;
 
   try {
-    const requestId = req.params.requestId;
-    const { status, admin_response } = req.body;
+    const requestId = Number(req.params.requestId);
+    const rawStatus = String(req.body.status || "").trim().toLowerCase();
+    const admin_response = req.body.admin_response || "";
 
-    const validStatuses = ["pendiente", "aprobado", "rechazado"];
+    const statusMap = {
+      pendiente: "pendiente",
+      aprobado: "aprobado",
+      aprobada: "aprobado",
+      rechazada: "rechazado",
+      rechazado: "rechazado"
+    };
 
-    if (!validStatuses.includes(status)) {
+    const status = statusMap[rawStatus];
+
+    if (!requestId) {
+      return res.status(400).json({ error: "Solicitud inválida" });
+    }
+
+    if (!status) {
       return res.status(400).json({ error: "Estado inválido" });
     }
 
     await client.query("BEGIN");
+    transactionStarted = true;
 
     const requestResult = await client.query(
       `SELECT * FROM balance_requests WHERE id = $1 FOR UPDATE`,
@@ -1347,37 +1402,63 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 
     if (!request) {
       await client.query("ROLLBACK");
+      transactionStarted = false;
       return res.status(404).json({ error: "Solicitud no encontrada" });
     }
 
-    if (request.status === "aprobado" && status === "aprobado") {
+    const currentStatus = statusMap[String(request.status || "pendiente").trim().toLowerCase()] || "pendiente";
+    const amountNumber = Number(request.amount || 0);
+
+    if (!amountNumber || amountNumber <= 0) {
       await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(400).json({ error: "La solicitud no tiene un monto válido" });
+    }
+
+    if (currentStatus === "aprobado" && status === "aprobado") {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
       return res.status(400).json({ error: "Esta solicitud ya fue aprobada antes" });
     }
 
-    if (request.status === "aprobado" && status !== "aprobado") {
+    if (currentStatus === "aprobado" && status !== "aprobado") {
       await client.query("ROLLBACK");
+      transactionStarted = false;
       return res.status(400).json({ error: "No se puede cambiar una solicitud ya aprobada para evitar movimientos duplicados" });
+    }
+
+    const userResult = await client.query(
+      `SELECT id, balance FROM users WHERE id = $1 FOR UPDATE`,
+      [request.user_id]
+    );
+
+    const user = userResult.rows[0];
+
+    if (!user) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(404).json({ error: "Usuario de la solicitud no encontrado" });
     }
 
     if (status === "aprobado") {
       await client.query(
-        `UPDATE users SET balance = balance + $1 WHERE id = $2`,
-        [request.amount, request.user_id]
+        `UPDATE users SET balance = COALESCE(balance, 0) + $1 WHERE id = $2`,
+        [amountNumber, request.user_id]
       );
     }
 
     await client.query(
       `UPDATE balance_requests
-       SET status = $1, resolution_type = $1, admin_response = $2, reviewed_at = NOW()
+       SET status = $1, admin_response = $2, reviewed_at = NOW()
        WHERE id = $3`,
       [status, admin_response || "", requestId]
     );
 
     await client.query("COMMIT");
+    transactionStarted = false;
 
     if (status === "aprobado") {
-      return res.json({ message: `Solicitud aprobada. Se agregaron $${Number(request.amount).toFixed(2)} al cliente.` });
+      return res.json({ message: `Solicitud aprobada. Se agregaron $${amountNumber.toFixed(2)} al cliente.` });
     }
 
     if (status === "rechazado") {
@@ -1386,8 +1467,10 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 
     res.json({ message: "Solicitud actualizada correctamente." });
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err.message);
+    if (transactionStarted) {
+      try { await client.query("ROLLBACK"); } catch (_) {}
+    }
+    console.error("Error actualizando solicitud de saldo:", err.message);
     res.status(500).json({ error: "Error actualizando solicitud de saldo" });
   } finally {
     client.release();
@@ -1396,48 +1479,21 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 
 
 // USUARIO: REPORTAR PROBLEMA DE CUENTA
-async function createAccountReportHandler(req, res) {
+app.post("/api/account-reports", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const email = String(req.body.email || req.body.correo || "").trim();
-    const issue_type = String(req.body.issue_type || req.body.tipo || "otro").trim();
-    const description = String(req.body.description || req.body.explicacion || "").trim();
+    const { email, issue_type, description } = req.body;
 
     if (!email || !description) {
       return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
     }
 
-    const purchasedAccountResult = await pool.query(
-      `SELECT
-         platform_accounts.id AS account_id,
-         platform_accounts.platform,
-         platform_accounts.product_name,
-         orders.id AS order_id,
-         orders.created_at AS order_created_at
-       FROM platform_accounts
-       JOIN orders ON orders.id = platform_accounts.assigned_order_id
-       WHERE platform_accounts.assigned_user_id = $1
-         AND lower(platform_accounts.account_email) = lower($2)
-         AND platform_accounts.status = 'delivered'
-       ORDER BY platform_accounts.delivered_at DESC NULLS LAST, orders.created_at DESC
-       LIMIT 1`,
-      [userId, email]
-    );
-
-    const purchasedAccount = purchasedAccountResult.rows[0];
-
-    if (!purchasedAccount) {
-      return res.status(400).json({
-        error: "Solo puedes reportar correos de cuentas que hayas comprado y que sigan entregadas en tu cuenta."
-      });
-    }
-
     const insertResult = await pool.query(
       `INSERT INTO account_reports
-       (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id)
-       VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6)
+       (user_id, email, issue_type, description, status, admin_response)
+       VALUES ($1, $2, $3, $4, 'pendiente', '')
        RETURNING id`,
-      [userId, email, issue_type, description, purchasedAccount.order_id, purchasedAccount.account_id]
+      [userId, String(email).trim(), String(issue_type || "otro").trim(), String(description).trim()]
     );
 
     const reportId = insertResult.rows[0].id;
@@ -1459,22 +1515,19 @@ async function createAccountReportHandler(req, res) {
     });
 
     res.json({
-      message: "Reporte enviado. El administrador revisará la falla y podrá validar reemplazo, resolución o reembolso."
+      message: "Reporte enviado. El administrador revisará la falla y dará el veredicto final."
     });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error enviando reporte de cuenta" });
   }
-}
-
-app.post("/api/account-reports", authMiddleware, createAccountReportHandler);
-app.post("/api/user/reporte-cuenta", authMiddleware, createAccountReportHandler);
+});
 
 // USUARIO: MIS REPORTES DE CUENTA
 app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at, order_id, reported_account_id, replacement_account_id
+      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at
        FROM account_reports
        WHERE user_id = $1
        ORDER BY id DESC`,
@@ -1502,35 +1555,10 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.admin_response,
         account_reports.created_at,
         account_reports.reviewed_at,
-        account_reports.order_id,
-        account_reports.reported_account_id,
-        account_reports.replacement_account_id,
-        account_reports.refund_amount,
-        account_reports.resolution_type,
         users.name AS customer_name,
-        users.email AS customer_email,
-        orders.amount AS order_amount,
-        orders.created_at AS order_created_at,
-        CASE WHEN orders.created_at IS NULL THEN 0 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - orders.created_at)) / 86400))::int END AS warranty_days_used,
-        CASE WHEN orders.created_at IS NULL THEN 0 ELSE GREATEST(0, 28 - GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - orders.created_at)) / 86400))::int) END AS warranty_days_remaining,
-        CASE WHEN orders.created_at IS NULL THEN 0 ELSE ROUND((COALESCE(orders.amount,0)::numeric / 28) * GREATEST(0, 28 - GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - orders.created_at)) / 86400))::int), 2) END AS suggested_refund_amount,
-        COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name, reported.product_name) AS product_name,
-        COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, reported.platform) AS product_category,
-        reported.platform AS reported_platform,
-        reported.product_name AS reported_product_name,
-        reported.account_email AS reported_account_email,
-        reported.profile_name AS reported_profile_name,
-        reported.profile_pin AS reported_profile_pin,
-        reported.status AS reported_account_status,
-        replacement.account_email AS replacement_account_email,
-        replacement.profile_name AS replacement_profile_name,
-        replacement.profile_pin AS replacement_profile_pin
+        users.email AS customer_email
        FROM account_reports
        JOIN users ON account_reports.user_id = users.id
-       LEFT JOIN orders ON orders.id = account_reports.order_id
-       LEFT JOIN products ON products.id = orders.product_id
-       LEFT JOIN platform_accounts reported ON reported.id = account_reports.reported_account_id
-       LEFT JOIN platform_accounts replacement ON replacement.id = account_reports.replacement_account_id
        ORDER BY account_reports.id DESC`
     );
 
@@ -1555,7 +1583,7 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
 
     const result = await pool.query(
       `UPDATE account_reports
-       SET status = $1, resolution_type = $1, admin_response = $2, reviewed_at = NOW()
+       SET status = $1, admin_response = $2, reviewed_at = NOW()
        WHERE id = $3`,
       [status, admin_response || "", reportId]
     );
@@ -1568,258 +1596,6 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error actualizando reporte de cuenta" });
-  }
-});
-
-
-// ADMIN: REEMPLAZAR CUENTA REPORTADA
-app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMiddleware, async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const reportId = req.params.reportId;
-
-    await client.query("BEGIN");
-
-    const reportResult = await client.query(
-      `SELECT
-         account_reports.*,
-         orders.product_id,
-         orders.amount,
-         orders.created_at AS order_created_at,
-         products.name AS product_name,
-         products.category AS product_category,
-         reported.platform AS reported_platform,
-         reported.product_name AS reported_product_name,
-         reported.account_email AS reported_email,
-         reported.id AS old_account_id
-       FROM account_reports
-       JOIN orders ON orders.id = account_reports.order_id
-       JOIN products ON products.id = orders.product_id
-       JOIN platform_accounts reported ON reported.id = account_reports.reported_account_id
-       WHERE account_reports.id = $1
-       FOR UPDATE`,
-      [reportId]
-    );
-
-    const report = reportResult.rows[0];
-
-    if (!report) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Reporte no encontrado o no está ligado a una compra válida" });
-    }
-
-    if (report.replacement_account_id) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Este reporte ya tiene una cuenta de reemplazo asignada" });
-    }
-
-    const matchProduct = String(report.reported_product_name || report.product_name || "").trim();
-    const matchPlatform = String(report.reported_platform || report.product_category || "").trim();
-
-    const replacementResult = await client.query(
-      `SELECT *
-       FROM platform_accounts
-       WHERE status = 'available'
-         AND id <> $3
-         AND (
-           lower(product_name) = lower($1)
-           OR lower(platform) = lower($1)
-           OR lower(platform) = lower($2)
-           OR lower(product_name) = lower($2)
-         )
-       ORDER BY id ASC
-       LIMIT 1
-       FOR UPDATE SKIP LOCKED`,
-      [matchProduct, matchPlatform, report.old_account_id]
-    );
-
-    const replacement = replacementResult.rows[0];
-
-    if (!replacement) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "No hay cuentas disponibles para reemplazar esta plataforma/producto" });
-    }
-
-    const deliveredAccountData = buildDeliveredAccountData(replacement, report.product_name, report.product_category);
-
-    await client.query(
-      `UPDATE platform_accounts
-       SET status = 'failed'
-       WHERE id = $1`,
-      [report.old_account_id]
-    );
-
-    await client.query(
-      `UPDATE platform_accounts
-       SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
-       WHERE id = $3`,
-      [report.order_id, report.user_id, replacement.id]
-    );
-
-    await client.query(
-      `UPDATE orders
-       SET assigned_platform_account_id = $1,
-           delivered_account_data = $2,
-           admin_response = $2
-       WHERE id = $3`,
-      [replacement.id, deliveredAccountData, report.order_id]
-    );
-
-    await client.query(
-      `UPDATE account_reports
-       SET status = 'reemplazo',
-           resolution_type = 'reemplazo',
-           replacement_account_id = $1,
-           admin_response = $2,
-           reviewed_at = NOW()
-       WHERE id = $3`,
-      [replacement.id, `Cuenta reemplazada correctamente.\n\n${deliveredAccountData}`, reportId]
-    );
-
-    await client.query("COMMIT");
-
-    res.json({
-      message: "Cuenta reemplazada correctamente. La cuenta anterior fue marcada como fallida y la nueva quedó entregada en el pedido del cliente.",
-      delivered_account_data: deliveredAccountData
-    });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err.message);
-    res.status(500).json({ error: "Error reemplazando cuenta" });
-  } finally {
-    client.release();
-  }
-});
-
-
-// ADMIN: REEMBOLSO PROPORCIONAL DE REPORTE DE CUENTA
-app.post("/api/admin/account-reports/:reportId/refund", authMiddleware, adminMiddleware, async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const reportId = req.params.reportId;
-
-    await client.query("BEGIN");
-
-    const reportResult = await client.query(
-      `SELECT
-         account_reports.*,
-         orders.id AS order_id,
-         orders.user_id AS order_user_id,
-         orders.amount,
-         orders.created_at AS order_created_at,
-         orders.refunded,
-         products.name AS product_name,
-         products.category AS product_category,
-         reported.id AS old_account_id,
-         reported.account_email AS reported_email
-       FROM account_reports
-       JOIN orders ON orders.id = account_reports.order_id
-       LEFT JOIN products ON products.id = orders.product_id
-       LEFT JOIN platform_accounts reported ON reported.id = account_reports.reported_account_id
-       WHERE account_reports.id = $1
-       FOR UPDATE`,
-      [reportId]
-    );
-
-    const report = reportResult.rows[0];
-
-    if (!report) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Reporte no encontrado o no está ligado a una compra válida" });
-    }
-
-    if (Number(report.refunded || 0) === 1 || Number(report.refund_amount || 0) > 0 || report.resolution_type === "reembolso") {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Este reporte o pedido ya tiene reembolso aplicado" });
-    }
-
-    const orderAmount = Number(report.amount || 0);
-
-    if (orderAmount <= 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "El pedido no tiene monto válido para calcular reembolso" });
-    }
-
-    const nowResult = await client.query(
-      `SELECT
-         GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - $1::timestamp)) / 86400))::int AS days_used`,
-      [report.order_created_at]
-    );
-
-    const daysUsed = Number(nowResult.rows[0]?.days_used || 0);
-    const daysRemaining = Math.max(0, 28 - daysUsed);
-
-    if (daysRemaining <= 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "La garantía de 28 días ya venció. No hay días restantes para reembolsar." });
-    }
-
-    const refundAmount = Number(((orderAmount / 28) * daysRemaining).toFixed(2));
-
-    if (refundAmount <= 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "El monto de reembolso calculado es 0" });
-    }
-
-    await client.query(
-      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
-      [refundAmount, report.user_id]
-    );
-
-    await client.query(
-      `UPDATE orders SET refunded = 1 WHERE id = $1`,
-      [report.order_id]
-    );
-
-    if (report.old_account_id) {
-      await client.query(
-        `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
-        [report.old_account_id]
-      );
-    }
-
-    const responseMessage = [
-      "Reembolso proporcional aplicado correctamente.",
-      "",
-      `Pedido: #${report.order_id}`,
-      `Producto: ${report.product_name || report.product_category || "Plataforma"}`,
-      `Correo reportado: ${report.reported_email || report.email || ""}`,
-      `Monto pagado: $${orderAmount.toFixed(2)}`,
-      "Garantía: 28 días",
-      `Días usados: ${daysUsed}`,
-      `Días restantes: ${daysRemaining}`,
-      `Monto reembolsado: $${refundAmount.toFixed(2)}`,
-      "",
-      "El reembolso fue agregado al saldo del usuario."
-    ].join("\n");
-
-    await client.query(
-      `UPDATE account_reports
-       SET status = 'reembolso',
-           resolution_type = 'reembolso',
-           refund_amount = $1,
-           admin_response = $2,
-           reviewed_at = NOW()
-       WHERE id = $3`,
-      [refundAmount, responseMessage, reportId]
-    );
-
-    await client.query("COMMIT");
-
-    res.json({
-      message: `Reembolso aplicado correctamente por $${refundAmount.toFixed(2)}. Días restantes: ${daysRemaining}.`,
-      refund_amount: refundAmount,
-      days_used: daysUsed,
-      days_remaining: daysRemaining
-    });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err.message);
-    res.status(500).json({ error: "Error aplicando reembolso proporcional" });
-  } finally {
-    client.release();
   }
 });
 
