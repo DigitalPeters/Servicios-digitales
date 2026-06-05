@@ -76,7 +76,7 @@
           <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
-          <div class="dash-card clickable" onclick="showSection('reports')"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes</div><div id="statReports" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
@@ -186,6 +186,16 @@
           <div id="adminSubadminPricesList">Selecciona un admin independiente.</div>
         </div>
         <div id="adminBalanceRequestsPanel" class="panel"><div class="panel-head"><h2>Solicitudes de saldo pendientes</h2><button class="outline-btn" style="width:auto" onclick="loadBalanceRequests()">Actualizar</button></div><div id="adminBalanceRequestsList">Sin solicitudes pendientes.</div></div>
+        <div id="adminAccountReportsPanel" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Reportes de falla de usuarios</h2>
+              <p class="small-text">Aquí ves las fallas reportadas. Puedes reemplazar la cuenta, aplicar reembolso proporcional o marcar resolución.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadAccountReports()">Actualizar</button>
+          </div>
+          <div id="adminAccountReportsList">Sin reportes pendientes.</div>
+        </div>
         <div id="adminSalesReportPanel" class="panel">
           <div class="panel-head">
             <div>
@@ -255,7 +265,7 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory()}}
+function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports()}}
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
 function openUsersFromDashboard(){
@@ -296,7 +306,7 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
@@ -398,7 +408,18 @@ async function enviarSolicitudSaldo(){
     await loadBalanceRequests();
   }catch(e){showMessage(e.message,'error')}
 }
-async function enviarReporteCuenta(){try{const data=await api('/api/user/reporte-cuenta',{method:'POST',body:JSON.stringify({correo:reporteCorreo.value,tipo:reporteTipo.value,explicacion:reporteExplicacion.value})});showMessage(data.message||'Reporte enviado');reporteCorreo.value=reporteExplicacion.value=''}catch(e){showMessage(e.message,'error')}}
+async function enviarReporteCuenta(){
+  try{
+    const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
+    const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
+    const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
+    if(!correo||!explicacion)throw new Error('Correo y explicación son obligatorios');
+    const data=await api('/api/account-reports',{method:'POST',body:JSON.stringify({email:correo,issue_type:tipo,description:explicacion})});
+    showMessage(data.message||'Reporte enviado');
+    reporteCorreo.value='';reporteExplicacion.value='';
+    await loadAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
 function getBalanceRequestStatusText(status){
   const statuses={
     pendiente:"Pendiente",
@@ -1302,6 +1323,101 @@ async function createPlatformAccount(){
 
 
 
+
+
+
+function openAccountReportsFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminAccountReportsPanel'),80);
+    loadAccountReports();
+  }else{
+    showSection('reports');
+  }
+}
+
+function calculateReportRefundInfo(report){
+  const amount=Number(report.order_amount||0);
+  if(!report.order_created_at||!amount)return {daysUsed:0,daysRemaining:0,refund:0};
+  const purchase=new Date(report.order_created_at);
+  const now=new Date();
+  const msPerDay=24*60*60*1000;
+  const daysUsed=Math.max(0,Math.min(28,Math.ceil((now-purchase)/msPerDay)));
+  const daysRemaining=Math.max(0,28-daysUsed);
+  const refund=Math.round(((amount/28)*daysRemaining)*100)/100;
+  return {daysUsed,daysRemaining,refund};
+}
+
+async function loadAccountReports(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const pending=reports.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
+    const stat=document.getElementById('statReports');
+    if(stat)stat.textContent=pending.length;
+    const box=document.getElementById('adminAccountReportsList');
+    if(!box)return;
+    box.innerHTML=reports.length?reports.map(r=>{
+      const info=calculateReportRefundInfo(r);
+      const canAct=String(r.status||'').toLowerCase()==='pendiente';
+      return `<div class="item">
+        <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
+        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
+        <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+        <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
+        <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
+        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+        <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
+        ${r.admin_response?`<div class="order-data"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
+        <div class="two-row">
+          <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
+          <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+        </div>
+        <div class="two-row" style="margin-top:10px">
+          <select id="reportStatus-${r.id}">
+            <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+            <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+            <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+            <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+          </select>
+          <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
+        </div>
+        <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+      </div>`;
+    }).join(''):'Sin reportes de falla.';
+  }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
+}
+
+async function updateAccountReportStatus(reportId){
+  try{
+    const status=document.getElementById(`reportStatus-${reportId}`)?.value||'pendiente';
+    const admin_response=document.getElementById(`reportResponse-${reportId}`)?.value||'';
+    const data=await api('/api/admin/account-reports/'+reportId+'/status',{method:'PATCH',body:JSON.stringify({status,admin_response})});
+    showMessage(data.message||'Reporte actualizado');
+    await loadAccountReports();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function replaceReportedAccount(reportId){
+  try{
+    if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma?'))return;
+    const data=await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada');
+    await loadAccountReports();
+    await loadAdminOrders();
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function refundReportedAccount(reportId){
+  try{
+    if(!confirm('¿Aplicar reembolso proporcional al saldo del usuario? Esta acción no debe repetirse.'))return;
+    const data=await api('/api/admin/account-reports/'+reportId+'/refund-proportional',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Reembolso aplicado');
+    await loadAccountReports();
+    await loadUsers();
+  }catch(e){showMessage(e.message,'error')}
+}
 
 // ===============================
 // GRÁFICAS DEL DASHBOARD ADMIN

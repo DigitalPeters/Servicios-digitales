@@ -565,6 +565,10 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS order_id INTEGER`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_account_id INTEGER`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
 
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
@@ -601,6 +605,83 @@ async function initDatabase() {
   await pool.query(`UPDATE account_reports SET description = '' WHERE description IS NULL`);
   await pool.query(`UPDATE account_reports SET status = 'pendiente' WHERE status IS NULL`);
   await pool.query(`UPDATE account_reports SET admin_response = '' WHERE admin_response IS NULL`);
+  await pool.query(`UPDATE account_reports SET refund_amount = 0 WHERE refund_amount IS NULL`);
+  await pool.query(`UPDATE account_reports SET resolution_type = '' WHERE resolution_type IS NULL`);
+}
+
+function formatFechaMX(fecha) {
+  return fecha.toLocaleDateString("es-MX", {
+    timeZone: "America/Mexico_City",
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit"
+  });
+}
+
+function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "") {
+  const fechaEntrega = new Date();
+  const fechaVencimiento = new Date(fechaEntrega);
+  fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+
+  const lines = [
+    "🎬 Cuenta de Streaming Entregada",
+    "",
+    `📌 Plataforma: ${String(assignedAccount.platform || productCategory || productName || "").toUpperCase()}`,
+    `📧 Correo: ${assignedAccount.account_email || ""}`,
+    `🔐 Contraseña: ${assignedAccount.account_password || ""}`,
+    `👤 Perfil: ${assignedAccount.profile_name || "No aplica"}`,
+    `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
+    `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
+    `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`
+  ];
+
+  if (assignedAccount.access_url) {
+    lines.push(`🔗 URL para código/soporte: ${assignedAccount.access_url}`);
+  }
+
+  lines.push(
+    "",
+    "📌 Normas de uso:",
+    "✅ No editar datos de acceso",
+    "✅ No cambiar el nombre ni el código del perfil",
+    "✅ Uso exclusivo en un solo equipo",
+    "✅ No compartir el acceso con otros",
+    "",
+    "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
+  );
+
+  return lines.join("\n");
+}
+
+async function findReportedPurchase(client, userId, accountEmail) {
+  const result = await client.query(
+    `SELECT
+       o.id AS order_id,
+       o.user_id,
+       o.amount,
+       o.created_at AS order_created_at,
+       o.refunded,
+       p.id AS product_id,
+       p.name AS product_name,
+       p.category AS product_category,
+       pa.id AS account_id,
+       pa.platform,
+       pa.product_name AS account_product_name,
+       pa.account_email,
+       pa.status AS account_status
+     FROM platform_accounts pa
+     JOIN orders o ON o.id = pa.assigned_order_id
+     JOIN products p ON p.id = o.product_id
+     WHERE pa.assigned_user_id = $1
+       AND lower(pa.account_email) = lower($2)
+       AND o.status = 'exito'
+       AND pa.status IN ('delivered','failed')
+     ORDER BY o.id DESC
+     LIMIT 1`,
+    [userId, String(accountEmail || "").trim()]
+  );
+
+  return result.rows[0] || null;
 }
 
 // REGISTRO
@@ -1479,21 +1560,31 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 
 
 // USUARIO: REPORTAR PROBLEMA DE CUENTA
-app.post("/api/account-reports", authMiddleware, async (req, res) => {
+async function createAccountReportHandler(req, res) {
   try {
     const userId = req.user.id;
-    const { email, issue_type, description } = req.body;
+    const email = String(req.body.email || req.body.correo || "").trim();
+    const issue_type = String(req.body.issue_type || req.body.tipo || "otro").trim();
+    const description = String(req.body.description || req.body.explicacion || "").trim();
 
     if (!email || !description) {
       return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
     }
 
+    const purchase = await findReportedPurchase(pool, userId, email);
+
+    if (!purchase) {
+      return res.status(400).json({
+        error: "Solo puedes reportar un correo que hayas comprado y que fue entregado por el sistema. Revisa que el correo esté escrito igual al de Mis pedidos."
+      });
+    }
+
     const insertResult = await pool.query(
       `INSERT INTO account_reports
-       (user_id, email, issue_type, description, status, admin_response)
-       VALUES ($1, $2, $3, $4, 'pendiente', '')
+       (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id, refund_amount, resolution_type)
+       VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6, 0, '')
        RETURNING id`,
-      [userId, String(email).trim(), String(issue_type || "otro").trim(), String(description).trim()]
+      [userId, email, issue_type || "otro", description, purchase.order_id, purchase.account_id]
     );
 
     const reportId = insertResult.rows[0].id;
@@ -1518,16 +1609,19 @@ app.post("/api/account-reports", authMiddleware, async (req, res) => {
       message: "Reporte enviado. El administrador revisará la falla y dará el veredicto final."
     });
   } catch (err) {
-    console.error(err.message);
+    console.error("Error enviando reporte de cuenta:", err.message);
     res.status(500).json({ error: "Error enviando reporte de cuenta" });
   }
-});
+}
+
+app.post("/api/account-reports", authMiddleware, createAccountReportHandler);
+app.post("/api/user/reporte-cuenta", authMiddleware, createAccountReportHandler);
 
 // USUARIO: MIS REPORTES DE CUENTA
 app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at
+      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at, order_id, reported_account_id, refund_amount, resolution_type
        FROM account_reports
        WHERE user_id = $1
        ORDER BY id DESC`,
@@ -1555,10 +1649,24 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.admin_response,
         account_reports.created_at,
         account_reports.reviewed_at,
+        account_reports.order_id,
+        account_reports.reported_account_id,
+        account_reports.refund_amount,
+        account_reports.resolution_type,
         users.name AS customer_name,
-        users.email AS customer_email
+        users.email AS customer_email,
+        orders.amount AS order_amount,
+        orders.created_at AS order_created_at,
+        products.name AS product_name,
+        products.category AS product_category,
+        platform_accounts.platform AS platform,
+        platform_accounts.product_name AS account_product_name,
+        platform_accounts.status AS account_status
        FROM account_reports
        JOIN users ON account_reports.user_id = users.id
+       LEFT JOIN orders ON orders.id = account_reports.order_id
+       LEFT JOIN products ON products.id = orders.product_id
+       LEFT JOIN platform_accounts ON platform_accounts.id = account_reports.reported_account_id
        ORDER BY account_reports.id DESC`
     );
 
@@ -1566,6 +1674,210 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando reportes de cuenta" });
+  }
+});
+
+
+// ADMIN: REEMPLAZAR CUENTA REPORTADA
+app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    const reportId = req.params.reportId;
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const reportResult = await client.query(
+      `SELECT ar.*, o.amount, o.product_id, o.created_at AS order_created_at,
+              p.name AS product_name, p.category AS product_category,
+              pa.platform, pa.product_name AS account_product_name, pa.account_email
+       FROM account_reports ar
+       JOIN orders o ON o.id = ar.order_id
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN platform_accounts pa ON pa.id = ar.reported_account_id
+       WHERE ar.id = $1
+       FOR UPDATE`,
+      [reportId]
+    );
+
+    const report = reportResult.rows[0];
+
+    if (!report) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    if (!report.order_id || !report.reported_account_id) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado automáticamente" });
+    }
+
+    const matchProduct = report.account_product_name || report.product_name;
+    const matchPlatform = report.platform || report.product_category || report.product_name;
+
+    const availableResult = await client.query(
+      `SELECT *
+       FROM platform_accounts
+       WHERE status = 'available'
+         AND (
+           lower(product_name) = lower($1)
+           OR lower(platform) = lower($1)
+           OR lower(platform) = lower($2)
+           OR lower(product_name) = lower($2)
+         )
+       ORDER BY id ASC
+       LIMIT 1
+       FOR UPDATE SKIP LOCKED`,
+      [matchProduct, matchPlatform]
+    );
+
+    const newAccount = availableResult.rows[0];
+
+    if (!newAccount) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No hay otra cuenta disponible para reemplazar esta plataforma" });
+    }
+
+    const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category);
+
+    await client.query(
+      `UPDATE platform_accounts
+       SET status = 'failed'
+       WHERE id = $1`,
+      [report.reported_account_id]
+    );
+
+    await client.query(
+      `UPDATE platform_accounts
+       SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+       WHERE id = $3`,
+      [report.order_id, report.user_id, newAccount.id]
+    );
+
+    await client.query(
+      `UPDATE orders
+       SET assigned_platform_account_id = $1,
+           delivered_account_data = $2,
+           admin_response = $2,
+           status = 'exito'
+       WHERE id = $3`,
+      [newAccount.id, deliveredAccountData, report.order_id]
+    );
+
+    await client.query(
+      `UPDATE account_reports
+       SET status = 'reemplazo',
+           resolution_type = 'reemplazo',
+           admin_response = $1,
+           reported_account_id = $2,
+           reviewed_at = NOW()
+       WHERE id = $3`,
+      [`Cuenta reemplazada correctamente. Nueva cuenta asignada al pedido #${report.order_id}.`, newAccount.id, reportId]
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    res.json({ message: "Cuenta reemplazada correctamente", delivered_account_data: deliveredAccountData });
+  } catch (err) {
+    if (transactionStarted) {
+      try { await client.query("ROLLBACK"); } catch (_) {}
+    }
+    console.error("Error reemplazando cuenta:", err.message);
+    res.status(500).json({ error: "Error reemplazando cuenta" });
+  } finally {
+    client.release();
+  }
+});
+
+// ADMIN: REEMBOLSO PROPORCIONAL POR DÍAS RESTANTES
+app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    const reportId = req.params.reportId;
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const reportResult = await client.query(
+      `SELECT ar.*, o.amount, o.created_at AS order_created_at, o.refunded
+       FROM account_reports ar
+       JOIN orders o ON o.id = ar.order_id
+       WHERE ar.id = $1
+       FOR UPDATE`,
+      [reportId]
+    );
+
+    const report = reportResult.rows[0];
+
+    if (!report) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    if (!report.order_id || !report.reported_account_id) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado automáticamente" });
+    }
+
+    if (Number(report.refund_amount || 0) > 0 || String(report.resolution_type || "") === "reembolso" || Number(report.refunded || 0) === 1) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este reporte o pedido ya tiene reembolso aplicado" });
+    }
+
+    const purchaseDate = new Date(report.order_created_at);
+    const now = new Date();
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysUsed = Math.max(0, Math.min(28, Math.ceil((now - purchaseDate) / msPerDay)));
+    const daysRemaining = Math.max(0, 28 - daysUsed);
+    const amountPaid = Number(report.amount || 0);
+    const refundAmount = Math.round(((amountPaid / 28) * daysRemaining) * 100) / 100;
+
+    if (refundAmount <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No hay días restantes para reembolsar" });
+    }
+
+    await client.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
+      [refundAmount, report.user_id]
+    );
+
+    await client.query(
+      `UPDATE orders SET refunded = 1 WHERE id = $1`,
+      [report.order_id]
+    );
+
+    await client.query(
+      `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
+      [report.reported_account_id]
+    );
+
+    await client.query(
+      `UPDATE account_reports
+       SET status = 'reembolso',
+           resolution_type = 'reembolso',
+           refund_amount = $1,
+           admin_response = $2,
+           reviewed_at = NOW()
+       WHERE id = $3`,
+      [refundAmount, `Reembolso proporcional aplicado: $${refundAmount.toFixed(2)}. Días usados: ${daysUsed}. Días restantes: ${daysRemaining}.`, reportId]
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    res.json({ message: `Reembolso aplicado por $${refundAmount.toFixed(2)}`, refund_amount: refundAmount, days_used: daysUsed, days_remaining: daysRemaining });
+  } catch (err) {
+    if (transactionStarted) {
+      try { await client.query("ROLLBACK"); } catch (_) {}
+    }
+    console.error("Error aplicando reembolso proporcional:", err.message);
+    res.status(500).json({ error: "Error aplicando reembolso proporcional" });
+  } finally {
+    client.release();
   }
 });
 
