@@ -76,7 +76,7 @@
           <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
-          <div class="dash-card clickable" onclick="showSection('reports')"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes</div><div id="statReports" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="openReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div id="statReportsLabel" class="dash-label">Reportes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
@@ -294,6 +294,16 @@ function openOrdersFromDashboard(){
   }
 }
 
+function openReportsFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminAccountReportsPanel'),80);
+    loadAdminAccountReports();
+  }else{
+    showSection('reports');
+  }
+}
+
 function showMessage(text,type='success'){document.getElementById('message').innerHTML=`<p class="${type}">${safeText(text)}</p>`;setTimeout(()=>{document.getElementById('message').innerHTML=''},4500)}
 function safeText(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function parseJsonArray(v){try{if(Array.isArray(v))return v;const p=JSON.parse(v||'[]');return Array.isArray(p)?p:[]}catch{return[]}}
@@ -307,7 +317,7 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAdminAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';if(document.getElementById('statReportsLabel')){document.getElementById('statReportsLabel').textContent=currentUser.role==='admin'?'Reportes pendientes':'Reportes';}document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAdminAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
@@ -1810,6 +1820,11 @@ async function loadAdminAccountReports(){
   if(currentUser?.role!=='admin')return;
   try{
     const reports=await api('/api/admin/account-reports');
+    const pendingReports=reports.filter(r=>String(r.status||'pendiente').toLowerCase()==='pendiente');
+    const statReportsEl=document.getElementById('statReports');
+    if(statReportsEl)statReportsEl.textContent=pendingReports.length;
+    const labelReportsEl=document.getElementById('statReportsLabel');
+    if(labelReportsEl)labelReportsEl.textContent='Reportes pendientes';
     const box=document.getElementById('adminAccountReportsList');
     if(!box)return;
     box.innerHTML=reports.length?reports.map(r=>{
