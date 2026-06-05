@@ -104,7 +104,21 @@
       </section>
 
       <section id="section-orders" class="section">
-        <div class="panel"><div class="panel-head"><h2>Mis pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadMyOrders()">Actualizar</button></div><div id="myOrdersList"></div></div>
+        <div class="panel">
+          <div class="panel-head"><h2>Mis pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadMyOrders()">Actualizar</button></div>
+          <div class="tools">
+            <input id="myOrdersSearch" placeholder="Buscar por producto, correo o pedido" oninput="renderMyOrders()" />
+            <select id="myOrdersStatusFilter" onchange="renderMyOrders()">
+              <option value="">Todos los estados</option>
+              <option value="exito">Éxito / entregados</option>
+              <option value="accion_en_espera">Acción en espera</option>
+              <option value="en_proceso">En proceso</option>
+              <option value="rechazado">Rechazados</option>
+              <option value="reportado">Con reporte/falla</option>
+            </select>
+          </div>
+          <div id="myOrdersList"></div>
+        </div>
       </section>
 
       <section id="section-balance" class="section">
@@ -377,14 +391,55 @@ async function loadSalesReport(){
 
 
 loadApp();showSection('orders')}catch(e){showMessage(e.message,'error')}}
-async function loadMyOrders(){myOrders=await api('/api/my-orders');statOrders.textContent=myOrders.length;renderMyOrders();recentOrdersList.innerHTML=myOrders.slice(0,4).map(o=>`<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`).join('')||'Sin pedidos recientes.'}
+async function loadMyOrders(){
+  myOrders=await api('/api/my-orders');
+  statOrders.textContent=myOrders.length;
+  renderMyOrders();
+  recentOrdersList.innerHTML=myOrders.slice(0,4).map(o=>`<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`).join('')||'Sin pedidos recientes.'
+}
+function extractDeliveredAccountEmail(text){
+  const m=String(text||'').match(/(?:Correo|📧\s*Correo):\s*([^\n\r\s]+)/i);
+  return m?m[1].trim():'';
+}
+function getWarrantyInfoFromOrder(o){
+  const raw=String(o.delivered_account_data||o.admin_response||'');
+  const m=raw.match(/Fecha de entrega:\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
+  let start=o.created_at?new Date(o.created_at):null;
+  if(m){
+    const day=Number(m[1]), month=Number(m[2])-1, year=Number(m[3].length===2?'20'+m[3]:m[3]);
+    start=new Date(year,month,day);
+  }
+  if(!start||isNaN(start.getTime()))return null;
+  const end=new Date(start);end.setDate(end.getDate()+28);
+  const today=new Date();
+  const msDay=24*60*60*1000;
+  const daysRemaining=Math.max(0,Math.ceil((end-today)/msDay));
+  const daysUsed=Math.min(28,Math.max(0,28-daysRemaining));
+  return {start,end,daysRemaining,daysUsed,active:daysRemaining>0};
+}
+function renderWarrantyNotice(o){
+  if(!hasAccountDelivery(o))return '';
+  const w=getWarrantyInfoFromOrder(o);
+  if(!w)return '';
+  return `<div class="order-data"><b>Garantía:</b><p style="margin:5px 0"><b>Entrega:</b> ${w.start.toLocaleDateString('es-MX')} &nbsp; <b>Vence:</b> ${w.end.toLocaleDateString('es-MX')} &nbsp; <b>Días restantes:</b> <span class="${w.active?'success':'error'}">${w.daysRemaining}</span></p></div>`;
+}
 function renderMyOrders(){
-  myOrdersList.innerHTML=myOrders.map(o=>{
+  const search=(document.getElementById('myOrdersSearch')?.value||'').toLowerCase().trim();
+  const statusFilter=document.getElementById('myOrdersStatusFilter')?.value||'';
+  let rows=[...(myOrders||[])];
+  rows=rows.filter(o=>{
+    const raw=String(o.delivered_account_data||o.admin_response||'');
+    const email=extractDeliveredAccountEmail(raw);
+    const hay=`${o.id} ${o.product_name||''} ${o.product_category||''} ${email} ${o.status||''}`.toLowerCase();
+    const statusOk=!statusFilter || (statusFilter==='reportado' ? /reporte|falla|reemplazo|reembolso/i.test(raw+String(o.admin_response||'')) : o.status===statusFilter);
+    return statusOk && (!search || hay.includes(search));
+  });
+  myOrdersList.innerHTML=rows.map(o=>{
     const data=parseJsonObject(o.order_data);
     const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
     const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
-  }).join('')||'No tienes pedidos todavía.'
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
+  }).join('')||'No hay pedidos con esos filtros.'
 }
 function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
 async function enviarSolicitudSaldo(){
@@ -1294,24 +1349,64 @@ async function loadPlatformInventory(){
     const accounts=await api('/api/admin/platform-accounts');
     const countEl=document.getElementById('adminPlatformAccountsCount');
     if(countEl)countEl.textContent=accounts.filter(a=>a.status==='available').length;
+
     const summary={};
     accounts.forEach(a=>{
       const key=a.product_name||a.platform||'Sin plataforma';
-      if(!summary[key])summary[key]={available:0,delivered:0,total:0};
+      if(!summary[key])summary[key]={available:0,delivered:0,sold_outside:0,failed:0,total:0};
       summary[key].total++;
       if(a.status==='available')summary[key].available++;
       if(a.status==='delivered')summary[key].delivered++;
+      if(a.status==='sold_outside')summary[key].sold_outside++;
+      if(a.status==='failed')summary[key].failed++;
     });
     const summaryBox=document.getElementById('platformStockSummary');
     if(summaryBox){
       const rows=Object.entries(summary).sort((a,b)=>a[0].localeCompare(b[0]));
-      summaryBox.innerHTML=rows.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><td><b>${safeText(name)}</b></td><td class="${v.available<=0?'error':'success'}">${v.available}</td><td>${v.delivered}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas agregadas.';
+      summaryBox.innerHTML=rows.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Vendidas fuera</th><th>Fallidas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><td><b>${safeText(name)}</b>${v.available<=2?`<br><span class="error">Stock bajo</span>`:''}</td><td class="${v.available<=0?'error':(v.available<=2?'status':'success')}">${v.available}</td><td>${v.delivered}</td><td>${v.sold_outside}</td><td>${v.failed}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas agregadas.';
     }
     const listBox=document.getElementById('platformAccountsList');
     if(listBox){
-      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>URL</th><th>Estado</th></tr></thead><tbody>${accounts.slice(0,40).map(a=>`<tr><td>${a.id}</td><td><b>${safeText(a.product_name||a.platform||'')}</b></td><td>${safeText(a.account_email||'')}</td><td>${safeText(a.profile_name||'')}</td><td>${safeText(a.profile_pin||'')}</td><td>${a.access_url?`<a href="${safeText(a.access_url)}" target="_blank" rel="noopener">Abrir</a>`:'No aplica'}</td><td><span class="status">${safeText(a.status||'')}</span></td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas.';
+      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.slice(0,120).map(a=>renderPlatformAccountRow(a)).join('')}</tbody></table></div>`:'Sin cuentas.';
     }
   }catch(e){showMessage(e.message||'Error cargando inventario','error')}
+}
+function renderPlatformAccountRow(a){
+  const statuses=['available','delivered','failed','sold_outside','reserved'];
+  return `<tr>
+    <td>${a.id}</td>
+    <td><b>${safeText(a.product_name||a.platform||'')}</b><br><span class="small-text">${safeText(a.platform||'')}</span></td>
+    <td><input id="pa-email-${a.id}" value="${safeText(a.account_email||'')}" placeholder="Correo"/><input id="pa-pass-${a.id}" value="${safeText(a.account_password||'')}" placeholder="Contraseña"/></td>
+    <td><input id="pa-profile-${a.id}" value="${safeText(a.profile_name||'')}" placeholder="Perfil"/><input id="pa-pin-${a.id}" value="${safeText(a.profile_pin||'')}" placeholder="PIN"/></td>
+    <td><input id="pa-url-${a.id}" value="${safeText(a.access_url||'')}" placeholder="URL opcional"/></td>
+    <td><select id="pa-status-${a.id}">${statuses.map(st=>`<option value="${st}" ${a.status===st?'selected':''}>${st}</option>`).join('')}</select></td>
+    <td><button class="primary-btn" style="width:auto;margin-bottom:6px" onclick="updatePlatformAccount(${a.id}, '${safeText(a.product_name||a.platform||'')}')">Guardar</button><br><button class="muted-btn" style="width:auto" onclick="markPlatformAccountSoldOutside(${a.id})">Vendido por fuera</button></td>
+  </tr>`;
+}
+async function updatePlatformAccount(id, productName){
+  try{
+    const payload={
+      platform: productName,
+      product_name: productName,
+      account_email:(document.getElementById('pa-email-'+id)?.value||'').trim(),
+      account_password:(document.getElementById('pa-pass-'+id)?.value||'').trim(),
+      profile_name:(document.getElementById('pa-profile-'+id)?.value||'').trim(),
+      profile_pin:(document.getElementById('pa-pin-'+id)?.value||'').trim(),
+      access_url:(document.getElementById('pa-url-'+id)?.value||'').trim(),
+      status:document.getElementById('pa-status-'+id)?.value||'available'
+    };
+    const data=await api('/api/admin/platform-accounts/'+id,{method:'PATCH',body:JSON.stringify(payload)});
+    showMessage(data.message||'Cuenta actualizada');
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error actualizando cuenta','error')}
+}
+async function markPlatformAccountSoldOutside(id){
+  if(!confirm('¿Marcar esta cuenta/perfil como vendido por fuera? Ya no se entregará automáticamente.'))return;
+  try{
+    const data=await api('/api/admin/platform-accounts/'+id+'/sold-outside',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Marcada como vendida por fuera');
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error marcando vendido por fuera','error')}
 }
 async function createPlatformAccount(){
   try{

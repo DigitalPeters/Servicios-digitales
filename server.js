@@ -1204,6 +1204,87 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
   }
 });
 
+
+
+app.patch("/api/admin/platform-accounts/:accountId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const accountId = req.params.accountId;
+    const allowedStatuses = ["available", "delivered", "failed", "sold_outside", "reserved"];
+    const {
+      platform,
+      product_name,
+      account_email,
+      account_password,
+      profile_name,
+      profile_pin,
+      access_url,
+      status
+    } = req.body;
+
+    if (!account_email || !account_password) {
+      return res.status(400).json({ error: "Correo y contraseña son obligatorios" });
+    }
+
+    const cleanStatus = allowedStatuses.includes(String(status || "")) ? String(status) : "available";
+    const clearAssignment = cleanStatus === "available" || cleanStatus === "sold_outside" || cleanStatus === "failed";
+
+    const result = await pool.query(
+      `UPDATE platform_accounts
+       SET platform = COALESCE(NULLIF($1, ''), platform),
+           product_name = COALESCE(NULLIF($2, ''), product_name),
+           account_email = $3,
+           account_password = $4,
+           profile_name = $5,
+           profile_pin = $6,
+           access_url = $7,
+           status = $8,
+           assigned_order_id = CASE WHEN $9 THEN NULL ELSE assigned_order_id END,
+           assigned_user_id = CASE WHEN $9 THEN NULL ELSE assigned_user_id END,
+           delivered_at = CASE WHEN $8 = 'sold_outside' THEN COALESCE(delivered_at, NOW()) WHEN $9 THEN NULL ELSE delivered_at END
+       WHERE id = $10
+       RETURNING *`,
+      [
+        platform || "",
+        product_name || "",
+        String(account_email || "").trim(),
+        String(account_password || "").trim(),
+        profile_name || "",
+        profile_pin || "",
+        access_url || "",
+        cleanStatus,
+        clearAssignment,
+        accountId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    res.json({ message: "Cuenta actualizada correctamente", account: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando cuenta de plataforma" });
+  }
+});
+
+app.post("/api/admin/platform-accounts/:accountId/sold-outside", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE platform_accounts
+       SET status = 'sold_outside', delivered_at = COALESCE(delivered_at, NOW()), assigned_order_id = NULL, assigned_user_id = NULL
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.accountId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: "Cuenta no encontrada" });
+    res.json({ message: "Cuenta marcada como vendida por fuera", account: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error marcando cuenta como vendida por fuera" });
+  }
+});
+
 // MIS PEDIDOS
 // MIS PEDIDOS
 app.get("/api/my-orders", authMiddleware, async (req, res) => {
