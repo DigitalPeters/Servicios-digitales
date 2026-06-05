@@ -518,6 +518,9 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_enabled INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type TEXT DEFAULT 'streaming_auto'`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS combo_items TEXT DEFAULT '[]'`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS combo_discount NUMERIC DEFAULT 0`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_data TEXT DEFAULT '{}'`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accion_en_espera'`);
@@ -580,6 +583,9 @@ async function initDatabase() {
   await pool.query(`UPDATE products SET charge_mode = 'on_purchase' WHERE charge_mode IS NULL`);
   await pool.query(`UPDATE products SET stock_enabled = 0 WHERE stock_enabled IS NULL`);
   await pool.query(`UPDATE products SET stock = 0 WHERE stock IS NULL`);
+  await pool.query(`UPDATE products SET product_type = 'streaming_auto' WHERE product_type IS NULL OR product_type = ''`);
+  await pool.query(`UPDATE products SET combo_items = '[]' WHERE combo_items IS NULL OR combo_items = ''`);
+  await pool.query(`UPDATE products SET combo_discount = 0 WHERE combo_discount IS NULL`);
   await pool.query(`UPDATE orders SET order_data = '{}' WHERE order_data IS NULL`);
   await pool.query(`UPDATE orders SET status = 'accion_en_espera' WHERE status IS NULL`);
   await pool.query(`UPDATE orders SET admin_response = '' WHERE admin_response IS NULL`);
@@ -684,6 +690,82 @@ async function findReportedPurchase(client, userId, accountEmail) {
   return result.rows[0] || null;
 }
 
+
+
+async function getComboItems(client, comboItemsValue) {
+  const ids = safeJsonArray(comboItemsValue)
+    .map(v => Number(v))
+    .filter(v => Number.isInteger(v) && v > 0);
+
+  if (!ids.length) return [];
+
+  const result = await client.query(
+    `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount
+     FROM products
+     WHERE id = ANY($1::int[]) AND active = 1`,
+    [ids]
+  );
+
+  const byId = new Map(result.rows.map(row => [Number(row.id), row]));
+  return ids.map(id => byId.get(id)).filter(Boolean);
+}
+
+async function calculateComboPrice(client, user, comboProduct) {
+  const items = await getComboItems(client, comboProduct.combo_items);
+  const discount = Math.max(0, Number(comboProduct.combo_discount || 0));
+  let total = 0;
+
+  for (const item of items) {
+    total += await getEffectiveProductPrice(client, user, item);
+  }
+
+  return Math.max(0, Number((total - (discount * items.length)).toFixed(2)));
+}
+
+function buildComboDeliveredAccountData(accounts) {
+  const fechaEntrega = new Date();
+  const fechaVencimiento = new Date(fechaEntrega);
+  fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+
+  const blocks = accounts.map(account => [
+    `📌 Plataforma: ${String(account.platform || account.product_name || '').toUpperCase()}`,
+    `📧 Correo: ${account.account_email || ''}`,
+    `🔐 Contraseña: ${account.account_password || ''}`,
+    `👤 Perfil: ${account.profile_name || 'No aplica'}`,
+    `🔢 PIN de acceso: ${account.profile_pin || 'No aplica'}`,
+    `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
+    `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`
+  ].join("\n"));
+
+  return [
+    "🎬 Combo Streaming Entregado",
+    "",
+    blocks.join("\n\n━━━━━━━━━━━━━━\n\n")
+  ].join("\n");
+}
+
+async function findAvailableAccountForProduct(client, product, userId) {
+  const productName = String(product.name || '').trim();
+  const productCategory = String(product.category || '').trim();
+
+  const result = await client.query(
+    `SELECT *
+     FROM platform_accounts
+     WHERE status = 'available'
+       AND (
+         lower(product_name) = lower($1)
+         OR lower(platform) = lower($1)
+         OR lower(platform) = lower($2)
+       )
+     ORDER BY id ASC
+     LIMIT 1
+     FOR UPDATE SKIP LOCKED`,
+    [productName, productCategory]
+  );
+
+  return result.rows[0] || null;
+}
+
 // REGISTRO
 app.post("/api/register", async (req, res) => {
   try {
@@ -773,7 +855,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
     const viewer = await getFullUser(req.user.id);
 
     const result = await pool.query(
-      `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock
+      `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount
        FROM products
        WHERE active = 1
        ORDER BY category ASC, name ASC`
@@ -782,7 +864,9 @@ app.get("/api/products", authMiddleware, async (req, res) => {
     const products = [];
 
     for (const product of result.rows) {
-      const effectivePrice = await getEffectiveProductPrice(pool, viewer, product);
+      const effectivePrice = String(product.product_type || '').toLowerCase() === 'combo_auto'
+        ? await calculateComboPrice(pool, viewer, product)
+        : await getEffectiveProductPrice(pool, viewer, product);
       const cleanProduct = {
         ...product,
         base_price: product.price,
@@ -806,7 +890,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
 // ADMIN: CREAR PRODUCTO
 app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
+    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock, product_type, combo_items, combo_discount } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({ error: "Nombre y precio son obligatorios" });
@@ -827,8 +911,8 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 
     await pool.query(
       `INSERT INTO products
-       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)`,
+       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $12)`,
       [
         name.trim(),
         description || "",
@@ -838,7 +922,10 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
         stock_enabled ? 1 : 0,
-        Math.max(0, Number(stock || 0))
+        Math.max(0, Number(stock || 0)),
+        ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
+        JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
+        Math.max(0, Number(combo_discount || 0))
       ]
     );
 
@@ -853,7 +940,7 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const productId = req.params.productId;
-    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock } = req.body;
+    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock, product_type, combo_items, combo_discount } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({ error: "Nombre y precio son obligatorios" });
@@ -882,8 +969,11 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
            required_fields = $6,
            charge_mode = $7,
            stock_enabled = $8,
-           stock = $9
-       WHERE id = $10 AND active = 1`,
+           stock = $9,
+           product_type = $10,
+           combo_items = $11,
+           combo_discount = $12
+       WHERE id = $13 AND active = 1`,
       [
         name.trim(),
         description || "",
@@ -894,6 +984,9 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
         finalChargeMode,
         stock_enabled ? 1 : 0,
         Math.max(0, Number(stock || 0)),
+        ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
+        JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
+        Math.max(0, Number(combo_discount || 0)),
         productId
       ]
     );
@@ -981,7 +1074,10 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    const price = await getEffectiveProductPrice(client, user, product);
+    const isComboProduct = String(product.product_type || '').toLowerCase() === 'combo_auto';
+    const price = isComboProduct
+      ? await calculateComboPrice(client, user, product)
+      : await getEffectiveProductPrice(client, user, product);
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
 
@@ -989,6 +1085,85 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(400).json({
         error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y el producto cuesta $${price.toFixed(2)}`
+      });
+    }
+
+    if (isComboProduct) {
+      const comboItems = await getComboItems(client, product.combo_items);
+
+      if (!comboItems.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Este combo no tiene productos incluidos." });
+      }
+
+      const assignedAccounts = [];
+
+      for (const item of comboItems) {
+        const account = await findAvailableAccountForProduct(client, item, userId);
+        if (!account) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ error: `No hay stock completo para este combo. Falta cuenta disponible para: ${item.name}` });
+        }
+        assignedAccounts.push(account);
+      }
+
+      const deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
+      const charged = chargeMode === "on_purchase" ? 1 : 0;
+
+      if (charged === 1) {
+        await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [price, userId]);
+      }
+
+      const comboCost = comboItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost_price || 0)), 0);
+
+      const orderInsertResult = await client.query(
+        `INSERT INTO orders
+         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot)
+         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10)
+         RETURNING id`,
+        [
+          userId,
+          productId,
+          price,
+          JSON.stringify(orderData),
+          deliveredAccountData,
+          charged,
+          assignedAccounts[0]?.id || null,
+          product.name || 'Combo',
+          product.category || 'Combo',
+          comboCost
+        ]
+      );
+
+      const newOrderId = orderInsertResult.rows[0].id;
+
+      for (const account of assignedAccounts) {
+        await client.query(
+          `UPDATE platform_accounts
+           SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+           WHERE id = $3`,
+          [newOrderId, userId, account.id]
+        );
+      }
+
+      if (Number(product.stock_enabled || 0) === 1) {
+        await client.query(`UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`, [productId]);
+      }
+
+      await client.query("COMMIT");
+
+      sendNewOrderEmail({
+        orderId: newOrderId,
+        customerName: user.name || "Cliente",
+        customerEmail: user.email || "Sin correo",
+        productName: product.name,
+        amount: price,
+        orderData
+      });
+
+      return res.json({
+        message: "Combo comprado correctamente. Tus cuentas fueron entregadas automáticamente en Mis pedidos.",
+        delivered_account_data: deliveredAccountData
       });
     }
 
@@ -1201,87 +1376,6 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error guardando cuenta de plataforma" });
-  }
-});
-
-
-
-app.patch("/api/admin/platform-accounts/:accountId", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const accountId = req.params.accountId;
-    const allowedStatuses = ["available", "delivered", "failed", "sold_outside", "reserved"];
-    const {
-      platform,
-      product_name,
-      account_email,
-      account_password,
-      profile_name,
-      profile_pin,
-      access_url,
-      status
-    } = req.body;
-
-    if (!account_email || !account_password) {
-      return res.status(400).json({ error: "Correo y contraseña son obligatorios" });
-    }
-
-    const cleanStatus = allowedStatuses.includes(String(status || "")) ? String(status) : "available";
-    const clearAssignment = cleanStatus === "available" || cleanStatus === "sold_outside" || cleanStatus === "failed";
-
-    const result = await pool.query(
-      `UPDATE platform_accounts
-       SET platform = COALESCE(NULLIF($1, ''), platform),
-           product_name = COALESCE(NULLIF($2, ''), product_name),
-           account_email = $3,
-           account_password = $4,
-           profile_name = $5,
-           profile_pin = $6,
-           access_url = $7,
-           status = $8,
-           assigned_order_id = CASE WHEN $9 THEN NULL ELSE assigned_order_id END,
-           assigned_user_id = CASE WHEN $9 THEN NULL ELSE assigned_user_id END,
-           delivered_at = CASE WHEN $8 = 'sold_outside' THEN COALESCE(delivered_at, NOW()) WHEN $9 THEN NULL ELSE delivered_at END
-       WHERE id = $10
-       RETURNING *`,
-      [
-        platform || "",
-        product_name || "",
-        String(account_email || "").trim(),
-        String(account_password || "").trim(),
-        profile_name || "",
-        profile_pin || "",
-        access_url || "",
-        cleanStatus,
-        clearAssignment,
-        accountId
-      ]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Cuenta no encontrada" });
-    }
-
-    res.json({ message: "Cuenta actualizada correctamente", account: result.rows[0] });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error actualizando cuenta de plataforma" });
-  }
-});
-
-app.post("/api/admin/platform-accounts/:accountId/sold-outside", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `UPDATE platform_accounts
-       SET status = 'sold_outside', delivered_at = COALESCE(delivered_at, NOW()), assigned_order_id = NULL, assigned_user_id = NULL
-       WHERE id = $1
-       RETURNING *`,
-      [req.params.accountId]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: "Cuenta no encontrada" });
-    res.json({ message: "Cuenta marcada como vendida por fuera", account: result.rows[0] });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error marcando cuenta como vendida por fuera" });
   }
 });
 
@@ -2481,77 +2575,6 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error generando reporte de ventas" });
-  }
-});
-
-
-
-// ADMIN: REPORTE MENSUAL DESCARGABLE CSV
-app.get("/api/admin/monthly-report.csv", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const month = String(req.query.month || "").trim();
-    if (!/^\d{4}-\d{2}$/.test(month)) {
-      return res.status(400).json({ error: "Mes inválido. Usa formato YYYY-MM" });
-    }
-
-    const saleProductNameExpr = `
-      COALESCE(
-        NULLIF(orders.product_name_snapshot, ''),
-        NULLIF(substring(orders.delivered_account_data from 'Producto: ([^\n\r]+)'), ''),
-        products.name
-      )
-    `;
-    const saleProductCategoryExpr = `COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, 'Otros')`;
-    const costExpr = `COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0)`;
-
-    const result = await pool.query(
-      `SELECT
-         orders.id,
-         users.name AS cliente,
-         users.email AS correo_cliente,
-         ${saleProductNameExpr} AS producto,
-         ${saleProductCategoryExpr} AS categoria,
-         orders.amount AS venta,
-         ${costExpr} AS costo,
-         (orders.amount - ${costExpr}) AS ganancia,
-         orders.status,
-         to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS fecha_mexico
-       FROM orders
-       JOIN users ON users.id = orders.user_id
-       JOIN products ON products.id = orders.product_id
-       WHERE orders.status = 'exito'
-         AND to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'YYYY-MM') = $1
-       ORDER BY orders.created_at DESC`,
-      [month]
-    );
-
-    const headers = ["ID", "Cliente", "Correo cliente", "Producto", "Categoría", "Venta", "Costo", "Ganancia", "Estado", "Fecha México"];
-    const escapeCsv = (value) => {
-      const text = String(value ?? "");
-      if (/[",\n\r]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
-      return text;
-    };
-
-    const rows = result.rows.map(row => [
-      row.id,
-      row.cliente,
-      row.correo_cliente,
-      row.producto,
-      row.categoria,
-      Number(row.venta || 0).toFixed(2),
-      Number(row.costo || 0).toFixed(2),
-      Number(row.ganancia || 0).toFixed(2),
-      row.status,
-      row.fecha_mexico
-    ]);
-
-    const csv = [headers, ...rows].map(row => row.map(escapeCsv).join(",")).join("\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="reporte-${month}.csv"`);
-    res.send("\ufeff" + csv);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error generando reporte mensual" });
   }
 });
 
