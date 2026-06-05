@@ -35,7 +35,7 @@
       <div id="loginForm">
         <label class="field-label">Correo</label><input id="loginEmail" placeholder="Correo" />
         <label class="field-label">Contraseña</label><input id="loginPassword" type="password" placeholder="Contraseña" />
-        <button class="primary-btn" onclick="login()">Iniciar sesión</button>
+        <button class="primary-btn" onclick="login()">Iniciar sesión</button><button class="outline-btn" style="margin-top:10px" onclick="requestPasswordReset()">Olvidé mi contraseña</button>
       </div>
       <div id="registerForm" class="hidden">
         <label class="field-label">Nombre</label><input id="registerName" placeholder="Nombre" />
@@ -78,6 +78,7 @@
           <div class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
           <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
+          <div id="dashLowStockCard" class="dash-card clickable hidden" onclick="showSection('admin');setTimeout(()=>scrollToAdmin('adminPlatformAccountsPanel'),80)"><div class="dash-icon">🔻</div><div><div class="dash-label">Stock bajo</div><div id="statLowStock" class="dash-value">0</div></div></div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
         </div>
@@ -95,7 +96,23 @@
       </section>
 
       <section id="section-account" class="section">
-        <h1 class="section-title">Mi cuenta</h1><div class="panel"><div class="account-grid"><div class="account-box"><div class="account-label">Nombre</div><div class="account-value" id="userName"></div></div><div class="account-box"><div class="account-label">Correo</div><div class="account-value" id="userEmail"></div></div><div class="account-box"><div class="account-label">Rol</div><div class="account-value" id="userRole"></div></div><div class="account-box"><div class="account-label">Saldo</div><div class="account-value">$<span id="userBalance"></span></div></div></div></div>
+        <h1 class="section-title">Mi cuenta</h1>
+        <div class="panel"><div class="account-grid"><div class="account-box"><div class="account-label">Nombre</div><div class="account-value" id="userName"></div></div><div class="account-box"><div class="account-label">Correo</div><div class="account-value" id="userEmail"></div></div><div class="account-box"><div class="account-label">Rol</div><div class="account-value" id="userRole"></div></div><div class="account-box"><div class="account-label">Saldo</div><div class="account-value">$<span id="userBalance"></span></div></div></div></div>
+        <div class="panel">
+          <h2>Seguridad</h2>
+          <p class="small-text">Cambia tu contraseña cuando lo necesites.</p>
+          <div class="row">
+            <div>
+              <label class="field-label">Contraseña actual</label>
+              <input id="currentPassword" type="password" placeholder="Contraseña actual" />
+            </div>
+            <div>
+              <label class="field-label">Nueva contraseña</label>
+              <input id="newPassword" type="password" placeholder="Nueva contraseña" />
+            </div>
+          </div>
+          <button class="primary-btn" onclick="changePassword()">Cambiar contraseña</button>
+        </div>
       </section>
 
       <section id="section-shop" class="section">
@@ -103,7 +120,20 @@
       </section>
 
       <section id="section-orders" class="section">
-        <div class="panel"><div class="panel-head"><h2>Mis pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadMyOrders()">Actualizar</button></div><div id="myOrdersList"></div></div>
+        <div class="panel">
+          <div class="panel-head"><h2>Mis pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadMyOrders()">Actualizar</button></div>
+          <div class="tools">
+            <select id="myOrdersStatusFilter" onchange="renderMyOrders()">
+              <option value="">Todos</option>
+              <option value="exito">Entregados / Éxito</option>
+              <option value="accion_en_espera">Pendientes</option>
+              <option value="reembolso">Reembolsados</option>
+              <option value="reemplazo">Reemplazados</option>
+            </select>
+            <input id="myOrdersSearch" placeholder="Buscar por producto, correo o pedido..." oninput="renderMyOrders()" />
+          </div>
+          <div id="myOrdersList"></div>
+        </div>
       </section>
 
       <section id="section-balance" class="section">
@@ -221,7 +251,42 @@
           <div class="panel" style="box-shadow:none;border:1px solid var(--border);margin-top:16px"><h2>Detalle de ventas</h2><div id="salesDetailsList">Sin ventas.</div></div>
         </div>
 
-        <div id="adminPlatformAccountsPanel" class="panel">
+        
+        <div id="adminDailySummaryPanel" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Corte diario</h2>
+              <p class="small-text">Resumen de ventas, costos, ganancias, reembolsos y cargas de saldo del día.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadDailySummary()">Actualizar</button>
+          </div>
+          <div class="tools">
+            <input id="dailySummaryDate" type="date" onchange="loadDailySummary()" />
+            <input id="monthlyReportMonth" type="month" />
+            <button class="green-btn" style="width:auto" onclick="downloadMonthlyReport()">Exportar reporte mensual CSV</button>
+          </div>
+          <div class="grid-cards">
+            <div class="dash-card"><div class="dash-icon">💵</div><div><div class="dash-label">Vendido</div><div class="dash-value">$<span id="dailySalesTotal">0.00</span></div></div></div>
+            <div class="dash-card"><div class="dash-icon">💸</div><div><div class="dash-label">Costo</div><div class="dash-value">$<span id="dailyCostTotal">0.00</span></div></div></div>
+            <div class="dash-card"><div class="dash-icon">📈</div><div><div class="dash-label">Ganancia neta</div><div class="dash-value">$<span id="dailyNetProfit">0.00</span></div></div></div>
+            <div class="dash-card"><div class="dash-icon">↩</div><div><div class="dash-label">Reembolsos</div><div class="dash-value">$<span id="dailyRefunds">0.00</span></div></div></div>
+            <div class="dash-card"><div class="dash-icon">🔁</div><div><div class="dash-label">Reemplazos</div><div id="dailyReplacements" class="dash-value">0</div></div></div>
+            <div class="dash-card"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo aprobado</div><div class="dash-value">$<span id="dailyBalanceApproved">0.00</span></div></div></div>
+          </div>
+        </div>
+
+        <div id="adminActivityPanel" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Actividad admin</h2>
+              <p class="small-text">Registro de acciones importantes dentro del panel.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadAdminActivity()">Actualizar</button>
+          </div>
+          <div id="adminActivityList">Sin actividad.</div>
+        </div>
+
+<div id="adminPlatformAccountsPanel" class="panel">
           <div class="panel-head">
             <div>
               <h2>Inventario de plataformas</h2>
@@ -265,7 +330,7 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports()}}
+function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports();loadDailySummary();loadAdminActivity()}}
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
 function openUsersFromDashboard(){
@@ -306,7 +371,7 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashLowStockCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
@@ -378,12 +443,45 @@ async function loadSalesReport(){
 loadApp();showSection('orders')}catch(e){showMessage(e.message,'error')}}
 async function loadMyOrders(){myOrders=await api('/api/my-orders');statOrders.textContent=myOrders.length;renderMyOrders();recentOrdersList.innerHTML=myOrders.slice(0,4).map(o=>`<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`).join('')||'Sin pedidos recientes.'}
 function renderMyOrders(){
-  myOrdersList.innerHTML=myOrders.map(o=>{
+  const statusFilter=(document.getElementById('myOrdersStatusFilter')?.value||'').toLowerCase();
+  const term=(document.getElementById('myOrdersSearch')?.value||'').toLowerCase();
+  const filtered=(myOrders||[]).filter(o=>{
+    const status=String(o.status||'').toLowerCase();
+    const text=(`${o.id} ${o.product_name||''} ${o.product_category||''} ${o.admin_response||''} ${o.delivered_account_data||''}`).toLowerCase();
+    if(statusFilter==='reembolso'){
+      if(!(String(o.admin_response||'').toLowerCase().includes('reembolso')||String(o.status||'').toLowerCase().includes('reembolso')))return false;
+    }else if(statusFilter==='reemplazo'){
+      if(!(String(o.admin_response||'').toLowerCase().includes('reemplazo')||String(o.admin_response||'').toLowerCase().includes('cuenta reemplazada')))return false;
+    }else if(statusFilter && status!==statusFilter){
+      return false;
+    }
+    return !term || text.includes(term);
+  });
+
+  myOrdersList.innerHTML=filtered.map(o=>{
     const data=parseJsonObject(o.order_data);
     const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
     const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
-  }).join('')||'No tienes pedidos todavía.'
+    const warranty=renderWarrantyInfo(o);
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${warranty}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
+  }).join('')||'No hay pedidos con esos filtros.'
+}
+
+function renderWarrantyInfo(o){
+  if(!hasAccountDelivery(o)||!o.created_at)return '';
+  const start=new Date(o.created_at);
+  const end=new Date(start);
+  end.setDate(end.getDate()+28);
+  const today=new Date();
+  const ms=24*60*60*1000;
+  const daysRemaining=Math.max(0,Math.ceil((end-today)/ms));
+  const expired=daysRemaining<=0;
+  return `<div class="order-data">
+    <b>Garantía:</b>
+    <p style="margin:5px 0"><b>Fecha de entrega:</b> ${start.toLocaleDateString('es-MX')}</p>
+    <p style="margin:5px 0"><b>Fecha de vencimiento:</b> ${end.toLocaleDateString('es-MX')}</p>
+    <p style="margin:5px 0"><b>Días restantes:</b> <span class="${expired?'error':'success'}">${daysRemaining}</span></p>
+  </div>`;
 }
 function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
 async function enviarSolicitudSaldo(){
@@ -1308,10 +1406,70 @@ async function loadPlatformInventory(){
     }
     const listBox=document.getElementById('platformAccountsList');
     if(listBox){
-      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>URL</th><th>Estado</th></tr></thead><tbody>${accounts.slice(0,40).map(a=>`<tr><td>${a.id}</td><td><b>${safeText(a.product_name||a.platform||'')}</b></td><td>${safeText(a.account_email||'')}</td><td>${safeText(a.profile_name||'')}</td><td>${safeText(a.profile_pin||'')}</td><td>${a.access_url?`<a href="${safeText(a.access_url)}" target="_blank" rel="noopener">Abrir</a>`:'No aplica'}</td><td><span class="status">${safeText(a.status||'')}</span></td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas.';
+      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo</th><th>Contraseña</th><th>Perfil</th><th>PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.slice(0,60).map(a=>renderPlatformAccountRow(a)).join('')}</tbody></table></div>`:'Sin cuentas.';
     }
+    const lowCount=Object.values(summary).filter(v=>v.available<=2).length;
+    const lowCard=document.getElementById('dashLowStockCard');
+    const lowEl=document.getElementById('statLowStock');
+    if(lowCard)lowCard.classList.toggle('hidden',currentUser?.role!=='admin');
+    if(lowEl)lowEl.textContent=lowCount;
   }catch(e){showMessage(e.message||'Error cargando inventario','error')}
 }
+
+function renderPlatformAccountRow(a){
+  return `<tr>
+    <td>${a.id}</td>
+    <td><input id="pa-product-${a.id}" value="${safeText(a.product_name||a.platform||'')}" /></td>
+    <td><input id="pa-email-${a.id}" value="${safeText(a.account_email||'')}" /></td>
+    <td><input id="pa-password-${a.id}" value="${safeText(a.account_password||'')}" /></td>
+    <td><input id="pa-profile-${a.id}" value="${safeText(a.profile_name||'')}" /></td>
+    <td><input id="pa-pin-${a.id}" value="${safeText(a.profile_pin||'')}" /></td>
+    <td><input id="pa-url-${a.id}" value="${safeText(a.access_url||'')}" placeholder="https://..." /></td>
+    <td>
+      <select id="pa-status-${a.id}">
+        ${['available','delivered','failed','sold_outside','replaced','reserved'].map(s=>`<option value="${s}" ${String(a.status||'')===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </td>
+    <td>
+      <button class="green-btn" style="width:auto;margin-bottom:6px" onclick="savePlatformAccount(${a.id})">Guardar</button>
+      <button class="muted-btn" style="width:auto" onclick="markPlatformSoldOutside(${a.id})">Vendido fuera</button>
+    </td>
+  </tr>`;
+}
+
+async function savePlatformAccount(id){
+  try{
+    const product=(document.getElementById(`pa-product-${id}`)?.value||'').trim();
+    const email=(document.getElementById(`pa-email-${id}`)?.value||'').trim();
+    const password=(document.getElementById(`pa-password-${id}`)?.value||'').trim();
+    if(!product||!email||!password)throw new Error('Producto, correo y contraseña son obligatorios');
+    await api('/api/admin/platform-accounts/'+id,{
+      method:'PATCH',
+      body:JSON.stringify({
+        platform:product,
+        product_name:product,
+        account_email:email,
+        account_password:password,
+        profile_name:(document.getElementById(`pa-profile-${id}`)?.value||'').trim(),
+        profile_pin:(document.getElementById(`pa-pin-${id}`)?.value||'').trim(),
+        access_url:(document.getElementById(`pa-url-${id}`)?.value||'').trim(),
+        status:(document.getElementById(`pa-status-${id}`)?.value||'available')
+      })
+    });
+    showMessage('Cuenta actualizada correctamente');
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error guardando cuenta','error')}
+}
+
+async function markPlatformSoldOutside(id){
+  try{
+    if(!confirm('¿Marcar esta cuenta/perfil como vendido por fuera? Ya no se entregará automáticamente.'))return;
+    await api('/api/admin/platform-accounts/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:'sold_outside'})});
+    showMessage('Cuenta marcada como vendida por fuera');
+    await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error cambiando estado','error')}
+}
+
 async function createPlatformAccount(){
   try{
     const productId=document.getElementById('platformProductSelect')?.value;
@@ -1486,3 +1644,113 @@ loadApp();
 </script>
 </body>
 </html>
+async function changePassword(){
+  try{
+    const current=(document.getElementById('currentPassword')?.value||'');
+    const newer=(document.getElementById('newPassword')?.value||'');
+    if(!current||!newer)throw new Error('Escribe tu contraseña actual y la nueva');
+    await api('/api/change-password',{method:'POST',body:JSON.stringify({current_password:current,new_password:newer})});
+    currentPassword.value='';newPassword.value='';
+    showMessage('Contraseña actualizada correctamente');
+  }catch(e){showMessage(e.message||'Error cambiando contraseña','error')}
+}
+
+async function requestPasswordReset(){
+  try{
+    const email=(document.getElementById('loginEmail')?.value||prompt('Escribe tu correo para recuperar contraseña')||'').trim();
+    if(!email)throw new Error('Escribe tu correo');
+    const r=await fetch('/api/request-password-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.error||'Error solicitando recuperación');
+    showMessage(data.message||'Si el correo existe, se enviará un enlace');
+  }catch(e){showMessage(e.message||'Error solicitando recuperación','error')}
+}
+
+async function resetPasswordFromUrl(){
+  const params=new URLSearchParams(location.search);
+  const tokenParam=params.get('resetToken');
+  const emailParam=params.get('resetEmail');
+  if(!tokenParam||!emailParam)return;
+  const newPass=prompt('Escribe tu nueva contraseña');
+  if(!newPass)return;
+  try{
+    const r=await fetch('/api/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:emailParam,token:tokenParam,new_password:newPass})});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.error||'Error restableciendo contraseña');
+    history.replaceState({},document.title,location.pathname);
+    showMessage(data.message||'Contraseña restablecida');
+  }catch(e){showMessage(e.message||'Error restableciendo contraseña','error')}
+}
+
+function setTodayDailyDate(){
+  const input=document.getElementById('dailySummaryDate');
+  if(input && !input.value){
+    const d=new Date();
+    input.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  const month=document.getElementById('monthlyReportMonth');
+  if(month && !month.value){
+    const d=new Date();
+    month.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  }
+}
+
+async function loadDailySummary(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    setTodayDailyDate();
+    const date=document.getElementById('dailySummaryDate')?.value||'';
+    const data=await api('/api/admin/daily-summary'+(date?'?date='+encodeURIComponent(date):''));
+    const set=(id,val)=>{const el=document.getElementById(id); if(el)el.textContent=val};
+    set('dailySalesTotal',formatMoney(data.total_sales));
+    set('dailyCostTotal',formatMoney(data.total_cost));
+    set('dailyNetProfit',formatMoney(data.net_profit));
+    set('dailyRefunds',formatMoney(data.total_refunded));
+    set('dailyReplacements',data.total_replacements||0);
+    set('dailyBalanceApproved',formatMoney(data.total_balance_approved));
+    const reports=document.getElementById('statReports');
+    if(reports)reports.textContent=data.pending_reports||0;
+  }catch(e){console.warn('No se pudo cargar corte diario',e)}
+}
+
+function downloadMonthlyReport(){
+  try{
+    setTodayDailyDate();
+    const month=document.getElementById('monthlyReportMonth')?.value||'';
+    if(!month)throw new Error('Selecciona un mes');
+    const tokenValue=localStorage.getItem('token');
+    // Fetch para descargar con Authorization
+    fetch('/api/admin/monthly-report.csv?month='+encodeURIComponent(month),{headers:{Authorization:'Bearer '+tokenValue}})
+      .then(async r=>{
+        if(!r.ok){
+          const d=await r.json().catch(()=>({}));
+          throw new Error(d.error||'No se pudo descargar');
+        }
+        return r.blob();
+      })
+      .then(blob=>{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url;
+        a.download=`reporte-${month}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(e=>showMessage(e.message,'error'));
+  }catch(e){showMessage(e.message,'error')}
+}
+
+async function loadAdminActivity(){
+  if(currentUser?.role!=='admin')return;
+  try{
+    const logs=await api('/api/admin/activity-logs');
+    const box=document.getElementById('adminActivityList');
+    if(!box)return;
+    box.innerHTML=logs.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Fecha</th><th>Admin</th><th>Acción</th><th>Detalle</th></tr></thead><tbody>${logs.map(l=>`<tr><td>${new Date(l.created_at).toLocaleString('es-MX')}</td><td>${safeText(l.admin_name||'Admin')}</td><td><b>${safeText(l.action||'')}</b></td><td>${safeText(l.details||'')}</td></tr>`).join('')}</tbody></table></div>`:'Sin actividad registrada.';
+  }catch(e){console.warn('No se pudo cargar actividad',e)}
+}
+
+resetPasswordFromUrl();
+

@@ -4,6 +4,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const crypto = require("crypto");
 
 const app = express();
 
@@ -570,6 +571,21 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
 
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMP`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_activity_logs (
+      id SERIAL PRIMARY KEY,
+      admin_user_id INTEGER REFERENCES users(id),
+      action TEXT NOT NULL,
+      details TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
@@ -607,6 +623,7 @@ async function initDatabase() {
   await pool.query(`UPDATE account_reports SET admin_response = '' WHERE admin_response IS NULL`);
   await pool.query(`UPDATE account_reports SET refund_amount = 0 WHERE refund_amount IS NULL`);
   await pool.query(`UPDATE account_reports SET resolution_type = '' WHERE resolution_type IS NULL`);
+  await pool.query(`UPDATE users SET failed_login_attempts = 0 WHERE failed_login_attempts IS NULL`);
 }
 
 function formatFechaMX(fecha) {
@@ -651,6 +668,27 @@ function buildDeliveredAccountData(assignedAccount, productName = "", productCat
   );
 
   return lines.join("\n");
+}
+
+
+async function logAdminActivity(adminUserId, action, details = "") {
+  try {
+    await pool.query(
+      `INSERT INTO admin_activity_logs (admin_user_id, action, details)
+       VALUES ($1, $2, $3)`,
+      [adminUserId || null, String(action || ""), String(details || "")]
+    );
+  } catch (err) {
+    console.error("No se pudo guardar actividad admin:", err.message);
+  }
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n\r]/.test(text)) {
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+  return text;
 }
 
 async function findReportedPurchase(client, userId, accountEmail) {
@@ -718,11 +756,12 @@ app.post("/api/register", async (req, res) => {
 // LOGIN
 app.post("/api/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = req.body.password || "";
 
     const result = await pool.query(
       `SELECT * FROM users WHERE email = $1`,
-      [String(email || "").trim().toLowerCase()]
+      [email]
     );
 
     const user = result.rows[0];
@@ -731,11 +770,37 @@ app.post("/api/login", async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    const match = await bcrypt.compare(password || "", user.password);
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return res.status(423).json({ error: "Cuenta bloqueada temporalmente por varios intentos fallidos. Intenta más tarde." });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
-      return res.status(401).json({ error: "Contraseña incorrecta" });
+      const attempts = Number(user.failed_login_attempts || 0) + 1;
+      if (attempts >= 5) {
+        await pool.query(
+          `UPDATE users
+           SET failed_login_attempts = $1,
+               locked_until = NOW() + INTERVAL '15 minutes'
+           WHERE id = $2`,
+          [attempts, user.id]
+        );
+        return res.status(423).json({ error: "Demasiados intentos fallidos. Cuenta bloqueada 15 minutos." });
+      }
+
+      await pool.query(
+        `UPDATE users SET failed_login_attempts = $1 WHERE id = $2`,
+        [attempts, user.id]
+      );
+
+      return res.status(401).json({ error: `Contraseña incorrecta. Intentos: ${attempts}/5` });
     }
+
+    await pool.query(
+      `UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
+      [user.id]
+    );
 
     const token = generateToken(user);
 
@@ -764,6 +829,143 @@ app.get("/api/me", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando usuario" });
+  }
+});
+
+
+// CAMBIAR CONTRASEÑA
+app.post("/api/change-password", authMiddleware, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({ error: "Contraseña actual y nueva contraseña son obligatorias" });
+    }
+
+    if (String(new_password).length < 6) {
+      return res.status(400).json({ error: "La nueva contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    const result = await pool.query(`SELECT id, password FROM users WHERE id = $1`, [req.user.id]);
+    const user = result.rows[0];
+
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+
+    const ok = await bcrypt.compare(current_password, user.password);
+    if (!ok) return res.status(401).json({ error: "La contraseña actual no es correcta" });
+
+    const hashed = await bcrypt.hash(new_password, 10);
+    await pool.query(`UPDATE users SET password = $1 WHERE id = $2`, [hashed, req.user.id]);
+
+    if (req.user.role === "admin") {
+      await logAdminActivity(req.user.id, "Cambio de contraseña", "El admin cambió su contraseña");
+    }
+
+    res.json({ message: "Contraseña actualizada correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cambiando contraseña" });
+  }
+});
+
+// RECUPERAR CONTRASEÑA: SOLICITAR ENLACE
+app.post("/api/request-password-reset", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({ error: "Correo obligatorio" });
+    }
+
+    const userResult = await pool.query(`SELECT id, name, email FROM users WHERE email = $1`, [email]);
+    const user = userResult.rows[0];
+
+    // Respuesta neutral para no revelar si existe o no.
+    if (!user) {
+      return res.json({ message: "Si el correo existe, se enviará un enlace de recuperación." });
+    }
+
+    const resetToken = crypto.randomBytes(24).toString("hex");
+    await pool.query(
+      `UPDATE users
+       SET password_reset_token = $1,
+           password_reset_expires = NOW() + INTERVAL '30 minutes'
+       WHERE id = $2`,
+      [resetToken, user.id]
+    );
+
+    if (isMailConfigured()) {
+      const { apiKey, fromEmail } = getMailConfig();
+      const resetUrl = `${req.protocol}://${req.get("host")}/?resetToken=${resetToken}&resetEmail=${encodeURIComponent(user.email)}`;
+
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: `Servicios Digitales Peters <${fromEmail}>`,
+          to: [user.email],
+          subject: "Recuperar contraseña",
+          text: `Hola ${user.name || ""}, usa este enlace para cambiar tu contraseña. Caduca en 30 minutos:\n\n${resetUrl}`
+        })
+      }).catch(err => console.error("Error enviando recuperación:", err.message));
+    } else {
+      console.log("Token de recuperación generado, pero falta configurar correo.");
+    }
+
+    res.json({ message: "Si el correo existe, se enviará un enlace de recuperación." });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error solicitando recuperación" });
+  }
+});
+
+// RECUPERAR CONTRASEÑA: CONFIRMAR
+app.post("/api/reset-password", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const token = String(req.body.token || "").trim();
+    const newPassword = String(req.body.new_password || "");
+
+    if (!email || !token || !newPassword) {
+      return res.status(400).json({ error: "Correo, token y nueva contraseña son obligatorios" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "La nueva contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    const result = await pool.query(
+      `SELECT id FROM users
+       WHERE email = $1
+         AND password_reset_token = $2
+         AND password_reset_expires > NOW()`,
+      [email, token]
+    );
+
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(400).json({ error: "Token inválido o vencido" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.query(
+      `UPDATE users
+       SET password = $1,
+           password_reset_token = NULL,
+           password_reset_expires = NULL,
+           failed_login_attempts = 0,
+           locked_until = NULL
+       WHERE id = $2`,
+      [hashed, user.id]
+    );
+
+    res.json({ message: "Contraseña restablecida correctamente. Ya puedes iniciar sesión." });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error restableciendo contraseña" });
   }
 });
 
@@ -1201,6 +1403,103 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error guardando cuenta de plataforma" });
+  }
+});
+
+
+app.patch("/api/admin/platform-accounts/:accountId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const accountId = req.params.accountId;
+    const {
+      platform,
+      product_name,
+      account_email,
+      account_password,
+      profile_name,
+      profile_pin,
+      access_url,
+      status
+    } = req.body;
+
+    const allowedStatuses = ["available", "delivered", "failed", "sold_outside", "replaced", "reserved"];
+    const finalStatus = allowedStatuses.includes(String(status || "")) ? status : "available";
+
+    if (!platform || !product_name || !account_email || !account_password) {
+      return res.status(400).json({ error: "Plataforma, producto, correo y contraseña son obligatorios" });
+    }
+
+    const result = await pool.query(
+      `UPDATE platform_accounts
+       SET platform = $1,
+           product_name = $2,
+           account_email = $3,
+           account_password = $4,
+           profile_name = $5,
+           profile_pin = $6,
+           access_url = $7,
+           status = $8,
+           assigned_order_id = CASE WHEN $8 = 'available' OR $8 = 'sold_outside' THEN NULL ELSE assigned_order_id END,
+           assigned_user_id = CASE WHEN $8 = 'available' OR $8 = 'sold_outside' THEN NULL ELSE assigned_user_id END,
+           delivered_at = CASE WHEN $8 = 'available' THEN NULL WHEN $8 = 'sold_outside' THEN COALESCE(delivered_at, NOW()) ELSE delivered_at END
+       WHERE id = $9
+       RETURNING *`,
+      [
+        String(platform).trim(),
+        String(product_name).trim(),
+        String(account_email).trim(),
+        String(account_password).trim(),
+        String(profile_name || "").trim(),
+        String(profile_pin || "").trim(),
+        String(access_url || "").trim(),
+        finalStatus,
+        accountId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    await logAdminActivity(req.user.id, "Editar cuenta de plataforma", `Cuenta ID ${accountId} actualizada. Estado: ${finalStatus}`);
+
+    res.json({ message: "Cuenta actualizada correctamente", account: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando cuenta de plataforma" });
+  }
+});
+
+app.patch("/api/admin/platform-accounts/:accountId/status", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const accountId = req.params.accountId;
+    const status = String(req.body.status || "").trim();
+
+    const allowedStatuses = ["available", "delivered", "failed", "sold_outside", "replaced", "reserved"];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: "Estado inválido" });
+    }
+
+    const result = await pool.query(
+      `UPDATE platform_accounts
+       SET status = $1,
+           assigned_order_id = CASE WHEN $1 = 'available' OR $1 = 'sold_outside' THEN NULL ELSE assigned_order_id END,
+           assigned_user_id = CASE WHEN $1 = 'available' OR $1 = 'sold_outside' THEN NULL ELSE assigned_user_id END,
+           delivered_at = CASE WHEN $1 = 'available' THEN NULL WHEN $1 = 'sold_outside' THEN COALESCE(delivered_at, NOW()) ELSE delivered_at END
+       WHERE id = $2
+       RETURNING *`,
+      [status, accountId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Cuenta no encontrada" });
+    }
+
+    await logAdminActivity(req.user.id, "Cambiar estado de cuenta", `Cuenta ID ${accountId} marcada como ${status}`);
+
+    res.json({ message: "Estado actualizado correctamente", account: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cambiando estado de cuenta" });
   }
 });
 
@@ -2404,6 +2703,151 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 });
 
 // ADMIN: PROBAR CORREO DE NOTIFICACIÓN
+
+// ADMIN: CORTE DIARIO
+app.get("/api/admin/daily-summary", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+
+    const sales = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_orders,
+         COALESCE(SUM(o.amount),0)::numeric AS total_sales,
+         COALESCE(SUM(COALESCE(NULLIF(o.product_cost_snapshot,0), p.cost_price, 0)),0)::numeric AS total_cost
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+       WHERE o.status = 'exito'
+         AND DATE(o.created_at AT TIME ZONE 'America/Mexico_City') = $1`,
+      [date]
+    );
+
+    const refunds = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_refunds,
+         COALESCE(SUM(refund_amount),0)::numeric AS total_refunded
+       FROM account_reports
+       WHERE resolution_type = 'reembolso'
+         AND DATE(reviewed_at AT TIME ZONE 'America/Mexico_City') = $1`,
+      [date]
+    );
+
+    const replacements = await pool.query(
+      `SELECT COUNT(*)::int AS total_replacements
+       FROM account_reports
+       WHERE resolution_type = 'reemplazo'
+         AND DATE(reviewed_at AT TIME ZONE 'America/Mexico_City') = $1`,
+      [date]
+    );
+
+    const balances = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_balance_requests,
+         COALESCE(SUM(amount),0)::numeric AS total_balance_approved
+       FROM balance_requests
+       WHERE status IN ('aprobado','aprobada')
+         AND DATE(COALESCE(reviewed_at, created_at) AT TIME ZONE 'America/Mexico_City') = $1`,
+      [date]
+    );
+
+    const pending = await pool.query(
+      `SELECT COUNT(*)::int AS pending_reports
+       FROM account_reports
+       WHERE status = 'pendiente'`
+    );
+
+    const row = sales.rows[0] || {};
+    const cost = Number(row.total_cost || 0);
+    const totalSales = Number(row.total_sales || 0);
+    const refunded = Number((refunds.rows[0] || {}).total_refunded || 0);
+
+    res.json({
+      date,
+      total_orders: Number(row.total_orders || 0),
+      total_sales: totalSales,
+      total_cost: cost,
+      gross_profit: totalSales - cost,
+      total_refunded: refunded,
+      net_profit: totalSales - cost - refunded,
+      total_refunds: Number((refunds.rows[0] || {}).total_refunds || 0),
+      total_replacements: Number((replacements.rows[0] || {}).total_replacements || 0),
+      total_balance_requests: Number((balances.rows[0] || {}).total_balance_requests || 0),
+      total_balance_approved: Number((balances.rows[0] || {}).total_balance_approved || 0),
+      pending_reports: Number((pending.rows[0] || {}).pending_reports || 0)
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error generando corte diario" });
+  }
+});
+
+// ADMIN: REPORTE MENSUAL CSV
+app.get("/api/admin/monthly-report.csv", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const month = String(req.query.month || new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" }).slice(0,7));
+    const result = await pool.query(
+      `SELECT
+         o.id,
+         u.name AS customer_name,
+         u.email AS customer_email,
+         COALESCE(NULLIF(o.product_name_snapshot,''), p.name) AS product_name,
+         COALESCE(NULLIF(o.product_category_snapshot,''), p.category) AS product_category,
+         o.amount,
+         COALESCE(NULLIF(o.product_cost_snapshot,0), p.cost_price, 0) AS cost,
+         (o.amount - COALESCE(NULLIF(o.product_cost_snapshot,0), p.cost_price, 0)) AS profit,
+         o.status,
+         o.created_at AT TIME ZONE 'America/Mexico_City' AS created_at_mx
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       JOIN products p ON p.id = o.product_id
+       WHERE TO_CHAR(o.created_at AT TIME ZONE 'America/Mexico_City', 'YYYY-MM') = $1
+       ORDER BY o.created_at ASC`,
+      [month]
+    );
+
+    const header = ["pedido","cliente","correo","producto","categoria","monto","costo","ganancia","estado","fecha_mexico"];
+    const rows = result.rows.map(r => [
+      r.id,
+      r.customer_name,
+      r.customer_email,
+      r.product_name,
+      r.product_category,
+      Number(r.amount || 0).toFixed(2),
+      Number(r.cost || 0).toFixed(2),
+      Number(r.profit || 0).toFixed(2),
+      r.status,
+      r.created_at_mx
+    ]);
+
+    const csv = [header, ...rows].map(row => row.map(csvEscape).join(",")).join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="reporte-${month}.csv"`);
+    res.send("\ufeff" + csv);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error generando reporte mensual" });
+  }
+});
+
+// ADMIN: ACTIVIDAD
+app.get("/api/admin/activity-logs", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT l.id, l.action, l.details, l.created_at,
+              u.name AS admin_name, u.email AS admin_email
+       FROM admin_activity_logs l
+       LEFT JOIN users u ON u.id = l.admin_user_id
+       ORDER BY l.id DESC
+       LIMIT 80`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando actividad admin" });
+  }
+});
+
 app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     await sendNewOrderEmail({
