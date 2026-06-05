@@ -1640,10 +1640,6 @@ function renderDashboardSalesCharts(byUser=[], byProduct=[]){
   }
 }
 
-loadApp();
-</script>
-</body>
-</html>
 async function changePassword(){
   try{
     const current=(document.getElementById('currentPassword')?.value||'');
@@ -1754,3 +1750,74 @@ async function loadAdminActivity(){
 
 resetPasswordFromUrl();
 
+loadApp();
+</script>
+
+<script>
+// Fix de navegación del dashboard y panel admin
+(function(){
+  function safeShow(sectionName){
+    try{
+      document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+      const sec=document.getElementById('section-'+sectionName);
+      if(sec) sec.classList.add('active');
+      document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===sectionName));
+      const sidebar=document.getElementById('sidebar');
+      if(sidebar) sidebar.classList.remove('show');
+      if(sectionName==='shop' && typeof loadProducts==='function') loadProducts();
+      if(sectionName==='orders' && typeof loadMyOrders==='function') loadMyOrders();
+      if(sectionName==='admin' && window.currentUser && window.currentUser.role==='admin'){
+        if(typeof loadUsers==='function') loadUsers();
+        if(typeof loadAdminProducts==='function') loadAdminProducts();
+        if(typeof loadAdminOrders==='function') loadAdminOrders();
+        if(typeof loadSalesReport==='function') loadSalesReport();
+        if(typeof loadPlatformInventory==='function') loadPlatformInventory();
+        if(typeof loadAccountReports==='function') loadAccountReports();
+        if(typeof loadDailySummary==='function') loadDailySummary();
+        if(typeof loadAdminActivity==='function') loadAdminActivity();
+      }
+    }catch(e){console.warn('Navegación:',e);}
+  }
+  window.showSection=safeShow;
+  window.goToAdminPanel=function(panelId){
+    safeShow('admin');
+    setTimeout(function(){
+      const el=document.getElementById(panelId);
+      if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    },180);
+  };
+  window.scrollToAdmin=function(panelId){ window.goToAdminPanel(panelId); };
+  window.openUsersFromDashboard=function(){
+    if(window.currentUser && window.currentUser.role==='admin') window.goToAdminPanel('adminUsersPanel');
+    else safeShow('account');
+  };
+  window.openProductsFromDashboard=function(){
+    if(window.currentUser && window.currentUser.role==='admin') window.goToAdminPanel('adminProductsPanel');
+    else safeShow('shop');
+  };
+  window.openOrdersFromDashboard=function(){
+    if(window.currentUser && window.currentUser.role==='admin') window.goToAdminPanel('adminOrdersPanel');
+    else safeShow('orders');
+  };
+  window.openBalanceRequests=function(){
+    if(window.currentUser && window.currentUser.role==='admin') window.goToAdminPanel('adminBalanceRequestsPanel');
+    else safeShow('balance');
+  };
+  window.openSalesReport=function(){
+    if(window.currentUser && window.currentUser.role==='admin'){
+      window.goToAdminPanel('adminSalesReportPanel');
+      setTimeout(function(){ if(typeof loadSalesReport==='function') loadSalesReport(); },220);
+    }
+  };
+  window.openAccountReportsFromDashboard=function(){
+    if(window.currentUser && window.currentUser.role==='admin'){
+      window.goToAdminPanel('adminAccountReportsPanel');
+      setTimeout(function(){ if(typeof loadAccountReports==='function') loadAccountReports(); },220);
+    }else{
+      safeShow('reports');
+    }
+  };
+})();
+</script>
+</body>
+</html>
