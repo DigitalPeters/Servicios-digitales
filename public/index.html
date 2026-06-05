@@ -57,7 +57,7 @@
         <button class="menu-btn" data-section="orders" onclick="showSection('orders')">▤ Mis pedidos</button>
         <button class="menu-btn" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
         <button class="menu-btn" data-section="reports" onclick="showSection('reports')">⚠ Reportar falla</button>
-        <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('dashboard')">⚙ Admin</button>
+        <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
         <button id="adminSalesMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openSalesReport()">📊 Reporte ventas</button>
         <button id="distributorMenuBtn" class="menu-btn hidden" data-section="distributor" onclick="showSection('distributor')">🏪 Mis vendedores</button>
       </nav>
@@ -74,6 +74,7 @@
         <div class="grid-cards">
           <div class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
+          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
           <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
@@ -92,17 +93,7 @@
           </div>
         </div>
         <div id="recentOrdersList" class="hidden"></div>
-        <div id="adminQuickActionsPanel" class="panel hidden">
-          <div class="panel-head"><h2>Accesos de admin</h2><button class="outline-btn" style="width:auto" onclick="refreshAdminDashboardData()">Actualizar todo</button></div>
-          <div class="grid-cards">
-            <div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Lista usuarios</div><div class="small-text">Ver y cargar saldo</div></div></div>
-            <div class="dash-card clickable" onclick="scrollToAdmin('adminBalanceRequestsPanel')"><div class="dash-icon">💰</div><div><div class="dash-label">Saldos por aprobar</div><div class="small-text">Solicitudes pendientes</div></div></div>
-            <div class="dash-card clickable" onclick="scrollToAdmin('adminAccountReportsPanel')"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes de falla</div><div class="small-text">Reemplazo / reembolso</div></div></div>
-            <div class="dash-card clickable" onclick="scrollToAdmin('adminSalesReportPanel')"><div class="dash-icon">📊</div><div><div class="dash-label">Reporte ventas</div><div class="small-text">Ventas y ganancias</div></div></div>
-            <div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div class="small-text">Todos los pedidos</div></div></div>
-            <div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div class="small-text">Cuentas disponibles</div></div></div>
-          </div>
-        </div>
+        <div id="dashboardAdminPanelsHost" class="hidden"></div>
       </section>
 
       <section id="section-account" class="section">
@@ -181,9 +172,7 @@
         </div>
       </section>
 
-      <section id="section-admin" class="section">
-        <h1 class="section-title">Panel admin</h1>
-        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
+      <section id="section-admin" class="section"><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
         <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
         <div id="adminSubadminPricesPanel" class="panel">
           <div class="panel-head">
@@ -276,68 +265,33 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-function mountAdminPanelsOnDashboard(){
-  if(!currentUser || currentUser.role!=='admin') return;
-  const dashboard=document.getElementById('section-dashboard');
-  const adminSection=document.getElementById('section-admin');
-  if(!dashboard || !adminSection) return;
-  let host=document.getElementById('dashboardAdminPanelsHost');
-  if(!host){
-    host=document.createElement('div');
-    host.id='dashboardAdminPanelsHost';
-    host.style.marginTop='24px';
-    dashboard.appendChild(host);
-  }
-  if(!host.dataset.mounted){
-    while(adminSection.firstChild){host.appendChild(adminSection.firstChild)}
-    host.dataset.mounted='1';
-  }
-  adminSection.classList.add('hidden');
-  document.getElementById('adminMenuBtn')?.classList.add('hidden');
-  document.getElementById('adminQuickActionsPanel')?.classList.remove('hidden');
-}
-async function refreshAdminDashboardData(){
-  if(!currentUser || currentUser.role!=='admin') return;
-  mountAdminPanelsOnDashboard();
-  await Promise.allSettled([
-    typeof loadUsers==='function'?loadUsers():Promise.resolve(),
-    typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
-    typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
-    typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-    typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve(),
-    typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
-    typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
-    typeof loadDailySummary==='function'?loadDailySummary():Promise.resolve(),
-    typeof loadAdminActivity==='function'?loadAdminActivity():Promise.resolve()
-  ]);
-}
-function showSection(name){
-  if(name==='admin' && currentUser?.role==='admin') name='dashboard';
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  const sec=document.getElementById('section-'+name);
-  if(sec)sec.classList.add('active');
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));
-  document.getElementById('sidebar').classList.remove('show');
-  if(currentUser?.role==='admin'){
-    mountAdminPanelsOnDashboard();
-    document.getElementById('adminMenuBtn')?.classList.add('hidden');
-  }
-  if(name==='shop')loadProducts();
-  if(name==='orders')loadMyOrders();
-  if(name==='dashboard'&&currentUser?.role==='admin')refreshAdminDashboardData();
-}
-function scrollToAdmin(id){
-  showSection('dashboard');
-  mountAdminPanelsOnDashboard();
-  setTimeout(()=>{
-    const el=document.getElementById(id);
-    if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
-  },120)
-}
+function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports()}}
+function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
-function openUsersFromDashboard(){currentUser?.role==='admin'?scrollToAdmin('adminUsersPanel'):showSection('account')}
-function openProductsFromDashboard(){currentUser?.role==='admin'?scrollToAdmin('adminProductsPanel'):showSection('shop')}
-function openOrdersFromDashboard(){currentUser?.role==='admin'?scrollToAdmin('adminOrdersPanel'):showSection('orders')}
+function openUsersFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminUsersPanel'),80);
+  }else{
+    showSection('account');
+  }
+}
+function openProductsFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminProductsPanel'),80);
+  }else{
+    showSection('shop');
+  }
+}
+function openOrdersFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminOrdersPanel'),80);
+  }else{
+    showSection('orders');
+  }
+}
 
 function showMessage(text,type='success'){document.getElementById('message').innerHTML=`<p class="${type}">${safeText(text)}</p>`;setTimeout(()=>{document.getElementById('message').innerHTML=''},4500)}
 function safeText(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
@@ -352,7 +306,7 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn')?.classList.add('hidden');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();mountAdminPanelsOnDashboard();await refreshAdminDashboardData()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
@@ -363,7 +317,7 @@ function renderProductInputs(product){const fields=parseJsonArray(product.requir
 async function buyProduct(productId){try{const product=allProducts.find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));if(!product)throw new Error('Producto no encontrado');if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`))return;const fields=parseJsonArray(product.required_fields);const order_data={};fields.forEach(f=>{const input=document.getElementById(`field-${productId}-${f}`);order_data[f]=input?input.value.trim():''});const data=await api('/api/buy/'+productId,{method:'POST',body:JSON.stringify({order_data})});showMessage(data.message||'Compra realizada');await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -537,7 +491,7 @@ async function updateBalanceRequestStatus(requestId,status){
     await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -596,14 +550,14 @@ async function loadSalesReport(){
 
 
 loadApp();
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),120);
   }catch(e){
     showMessage(e.message,'error');
   }
 }
 
-function openBalanceRequests(){if(currentUser?.role==='admin'){scrollToAdmin('adminBalanceRequestsPanel'); if(typeof loadBalanceRequests==='function')loadBalanceRequests()}else{showSection('balance')}}
+function openBalanceRequests(){if(currentUser?.role==='admin'){showSection('admin');setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),80)}else{showSection('balance')}}
 function copyText(t){
   copyToClipboard(t,'Copiado');
 }
@@ -673,7 +627,7 @@ function toggleCreateProduct(){createProductBox.classList.toggle('hidden')}
 async function createProduct(){try{const data=await api('/api/admin/create-product',{method:'POST',body:JSON.stringify({name:productName.value,description:productDescription.value,price:productPrice.value,cost_price:(document.getElementById('productCostPrice')?.value||0),category:productCategory.value,required_fields:getRequiredFieldsFromInput('productRequiredFields'),charge_mode:productChargeMode.value,stock_enabled:productStockEnabled.checked,stock:productStock.value})});showMessage(data.message||'Producto creado');productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';if(document.getElementById('productCostPrice'))productCostPrice.value='0';productStock.value='0';productStockEnabled.checked=false;await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -731,12 +685,12 @@ async function loadSalesReport(){
 
 
 
-loadApp();showSection('dashboard')}catch(e){showMessage(e.message,'error')}}
+loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function loadUsers(){allUsers=await api('/api/admin/users');statUsers.textContent=allUsers.length;adminUsersCount.textContent=allUsers.length;balanceUserSelect.innerHTML='<option value="">Selecciona usuario</option>'+allUsers.map(u=>`<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)}) - $${formatMoney(u.balance)}</option>`).join('');balanceUserSelect.onchange=()=>{balanceUserId.value=balanceUserSelect.value};usersList.innerHTML=allUsers.map(u=>`<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p></div>`).join('')||'No hay usuarios.'}
 async function addBalance(){try{const data=await api('/api/admin/add-balance',{method:'POST',body:JSON.stringify({user_id:Number(balanceUserId.value),amount:balanceAmount.value,note:balanceNote.value})});showMessage(data.message||'Saldo agregado');balanceAmount.value=balanceNote.value='';await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -794,13 +748,13 @@ async function loadSalesReport(){
 
 
 
-loadApp();showSection('dashboard')}catch(e){showMessage(e.message,'error')}}
+loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function loadAdminProducts(){const products=allProducts.length?allProducts:await api('/api/products');adminProductsCount.textContent=products.length;adminProductsList.innerHTML=products.map(p=>{const rf=parseJsonArray(p.required_fields);const se=Number(p.stock_enabled||0)===1;return `<div class="item" id="admin-product-${p.id}"><div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id})"><b>${safeText(p.name)}</b><span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')}</span></div><div class="admin-product-body"><label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" /><label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo de compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div><label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea><label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/><div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div></div></div>`}).join('')||'No hay productos.'}
 function toggleAdminProduct(id){document.getElementById('admin-product-'+id)?.classList.toggle('open')}
 async function updateProduct(id){try{const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:document.getElementById('editName-'+id).value,description:document.getElementById('editDescription-'+id).value,price:document.getElementById('editPrice-'+id).value,cost_price:(document.getElementById('editCostPrice-'+id)?.value||0),category:document.getElementById('editCategory-'+id).value,required_fields,charge_mode:document.getElementById('editChargeMode-'+id).value,stock_enabled:document.getElementById('editStockEnabled-'+id).checked,stock:document.getElementById('editStock-'+id).value})});showMessage(data.message||'Producto actualizado');await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -858,11 +812,11 @@ async function loadSalesReport(){
 
 
 
-loadApp();showSection('dashboard')}catch(e){showMessage(e.message,'error')}}
+loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function deleteProduct(id){if(!confirm('¿Seguro que quieres eliminar este producto?'))return;try{const data=await api('/api/admin/products/'+id,{method:'DELETE'});showMessage(data.message||'Producto eliminado');await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -920,7 +874,7 @@ async function loadSalesReport(){
 
 
 
-loadApp();showSection('dashboard')}catch(e){showMessage(e.message,'error')}}
+loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 async function loadAdminOrders(){
   adminOrders=await api('/api/admin/orders');
   adminOrdersCount.textContent=adminOrders.length;
@@ -934,7 +888,7 @@ async function loadAdminOrders(){
 async function updateOrderStatus(id){try{const data=await api('/api/admin/orders/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('status-'+id).value,response_message:document.getElementById('response-'+id).value,refund_if_rejected:document.getElementById('refund-'+id).checked})});showMessage(data.message||'Pedido actualizado');await 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -992,11 +946,11 @@ async function loadSalesReport(){
 
 
 
-loadApp();showSection('dashboard')}catch(e){showMessage(e.message,'error')}}
+loadApp();showSection('admin')}catch(e){showMessage(e.message,'error')}}
 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    showSection('dashboard');
+    showSection('admin');
     setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport();
   }
@@ -1109,7 +1063,8 @@ async function loadSalesReport(forceToday=false){
 
 function openSalesReport(){
   if(currentUser?.role==='admin'){
-    scrollToAdmin('adminSalesReportPanel');
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
     loadSalesReport(true);
   }
 }
@@ -1388,7 +1343,15 @@ async function createPlatformAccount(){
 
 
 
-function openAccountReportsFromDashboard(){if(currentUser?.role==='admin'){scrollToAdmin('adminAccountReportsPanel'); if(typeof loadAccountReports==='function')loadAccountReports()}else{showSection('reports')}}
+function openAccountReportsFromDashboard(){
+  if(currentUser?.role==='admin'){
+    showSection('admin');
+    setTimeout(()=>scrollToAdmin('adminAccountReportsPanel'),80);
+    loadAccountReports();
+  }else{
+    showSection('reports');
+  }
+}
 
 function calculateReportRefundInfo(report){
   const amount=Number(report.order_amount||0);
@@ -1520,6 +1483,156 @@ function renderDashboardSalesCharts(byUser=[], byProduct=[]){
 }
 
 loadApp();
+
+
+// ===============================
+// FIX FINAL: Dashboard admin único, sin tarjetas duplicadas.
+// Mantiene todos los paneles admin en la pantalla principal.
+// ===============================
+function mountAdminPanelsOnDashboardFinal(){
+  if(!currentUser || currentUser.role !== 'admin') return;
+  const dashboard = document.getElementById('section-dashboard');
+  const adminSection = document.getElementById('section-admin');
+  let host = document.getElementById('dashboardAdminPanelsHost');
+  if(!dashboard || !adminSection) return;
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'dashboardAdminPanelsHost';
+    dashboard.appendChild(host);
+  }
+  host.classList.remove('hidden');
+  if(!host.dataset.mounted){
+    const panelIds = [
+      'adminUsersPanel',
+      'adminSubadminPricesPanel',
+      'adminBalanceRequestsPanel',
+      'adminAccountReportsPanel',
+      'adminSalesReportPanel',
+      'adminPlatformAccountsPanel',
+      'adminProductsPanel',
+      'adminOrdersPanel',
+      'adminDailySummaryPanel',
+      'adminMonthlyReportPanel',
+      'adminActivityPanel'
+    ];
+    panelIds.forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) host.appendChild(el);
+    });
+    host.dataset.mounted = '1';
+  }
+  adminSection.classList.add('hidden');
+  document.getElementById('adminMenuBtn')?.classList.add('hidden');
+  document.getElementById('adminSalesMenuBtn')?.classList.add('hidden');
+  document.getElementById('dashInventoryCard')?.classList.remove('hidden');
+  document.getElementById('dashSalesTodayCard')?.classList.remove('hidden');
+  document.getElementById('dashboardChartsPanel')?.classList.remove('hidden');
+}
+
+function scrollToAdmin(id){
+  if(currentUser?.role !== 'admin') return;
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('section-dashboard')?.classList.add('active');
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section === 'dashboard'));
+  mountAdminPanelsOnDashboardFinal();
+  setTimeout(()=>{
+    const el = document.getElementById(id);
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  },120);
+}
+
+function showSection(name){
+  if(name === 'admin' && currentUser?.role === 'admin') name = 'dashboard';
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  const sec=document.getElementById('section-'+name);
+  if(sec)sec.classList.add('active');
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));
+  document.getElementById('sidebar')?.classList.remove('show');
+  if(name==='shop')loadProducts();
+  if(name==='orders')loadMyOrders();
+  if(name==='reports')setTimeout(()=>document.getElementById('reporteCorreo')?.focus(),80);
+  if(name==='distributor' && isDistributorUser && isDistributorUser()){
+    loadDistributorPanel();
+    loadDistributorPrices();
+  }
+  if(name==='dashboard' && currentUser?.role==='admin'){
+    mountAdminPanelsOnDashboardFinal();
+    refreshAdminDashboardDataFinal();
+  }
+}
+
+async function refreshAdminDashboardDataFinal(){
+  if(currentUser?.role !== 'admin') return;
+  mountAdminPanelsOnDashboardFinal();
+  await Promise.allSettled([
+    typeof loadUsers === 'function' ? loadUsers() : Promise.resolve(),
+    typeof loadAdminProducts === 'function' ? loadAdminProducts() : Promise.resolve(),
+    typeof loadAdminOrders === 'function' ? loadAdminOrders() : Promise.resolve(),
+    typeof loadBalanceRequests === 'function' ? loadBalanceRequests() : Promise.resolve(),
+    typeof loadAccountReports === 'function' ? loadAccountReports() : Promise.resolve(),
+    typeof loadPlatformInventory === 'function' ? loadPlatformInventory() : Promise.resolve(),
+    typeof loadSalesReport === 'function' ? loadSalesReport(true) : Promise.resolve(),
+    typeof loadDailySummary === 'function' ? loadDailySummary() : Promise.resolve(),
+    typeof loadAdminActivity === 'function' ? loadAdminActivity() : Promise.resolve()
+  ]);
+}
+
+function openUsersFromDashboard(){
+  if(currentUser?.role==='admin') scrollToAdmin('adminUsersPanel');
+  else showSection('account');
+}
+function openProductsFromDashboard(){
+  if(currentUser?.role==='admin') scrollToAdmin('adminProductsPanel');
+  else showSection('shop');
+}
+function openOrdersFromDashboard(){
+  if(currentUser?.role==='admin') scrollToAdmin('adminOrdersPanel');
+  else showSection('orders');
+}
+function openBalanceRequests(){
+  if(currentUser?.role==='admin'){
+    scrollToAdmin('adminBalanceRequestsPanel');
+    if(typeof loadBalanceRequests === 'function') loadBalanceRequests();
+  }else showSection('balance');
+}
+function openAccountReportsFromDashboard(){
+  if(currentUser?.role==='admin'){
+    scrollToAdmin('adminAccountReportsPanel');
+    if(typeof loadAccountReports === 'function') loadAccountReports();
+  }else showSection('reports');
+}
+function openSalesReport(){
+  if(currentUser?.role==='admin'){
+    scrollToAdmin('adminSalesReportPanel');
+    if(typeof loadSalesReport === 'function') loadSalesReport(true);
+  }
+}
+
+const __loadPlatformInventoryFinal = typeof loadPlatformInventory === 'function' ? loadPlatformInventory : null;
+if(__loadPlatformInventoryFinal){
+  loadPlatformInventory = async function(){
+    await __loadPlatformInventoryFinal();
+    const src = document.getElementById('adminPlatformAccountsCount');
+    const inv = document.getElementById('statInventory');
+    if(src && inv) inv.textContent = src.textContent || '0';
+  };
+}
+
+const __loadAppFinal = typeof loadApp === 'function' ? loadApp : null;
+if(__loadAppFinal){
+  loadApp = async function(){
+    await __loadAppFinal();
+    if(currentUser?.role === 'admin'){
+      document.getElementById('adminMenuBtn')?.classList.add('hidden');
+      document.getElementById('adminSalesMenuBtn')?.classList.add('hidden');
+      document.getElementById('dashInventoryCard')?.classList.remove('hidden');
+      mountAdminPanelsOnDashboardFinal();
+      await refreshAdminDashboardDataFinal();
+      showSection('dashboard');
+    }
+  };
+}
+
 </script>
 </body>
 </html>
