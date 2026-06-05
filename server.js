@@ -1698,7 +1698,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
        JOIN products p ON p.id = o.product_id
        LEFT JOIN platform_accounts pa ON pa.id = ar.reported_account_id
        WHERE ar.id = $1
-       FOR UPDATE`,
+       FOR UPDATE OF ar, o`,
       [reportId]
     );
 
@@ -1775,10 +1775,9 @@ ${deliveredAccountData}`;
        SET status = 'reemplazo',
            resolution_type = 'reemplazo',
            admin_response = $1,
-           reported_account_id = $2,
            reviewed_at = NOW()
-       WHERE id = $3`,
-      [replacementResponse, newAccount.id, reportId]
+       WHERE id = $2`,
+      [replacementResponse, reportId]
     );
 
     await client.query("COMMIT");
