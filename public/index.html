@@ -74,9 +74,9 @@
         <div class="grid-cards">
           <div class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
-          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value">0</div></div></div>
+          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
-          <div class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
+          <div id="dashBalanceCard" class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
           <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
@@ -93,7 +93,6 @@
           </div>
         </div>
         <div id="recentOrdersList" class="hidden"></div>
-        <div id="dashboardAdminPanelsHost" class="hidden"></div>
       </section>
 
       <section id="section-account" class="section">
@@ -172,7 +171,9 @@
         </div>
       </section>
 
-      <section id="section-admin" class="section"><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
+      <section id="section-admin" class="section">
+        <h1 class="section-title">Panel admin</h1>
+        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
         <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
         <div id="adminSubadminPricesPanel" class="panel">
           <div class="panel-head">
@@ -549,7 +550,7 @@ async function loadSalesReport(){
 
 
 
-loadApp();
+// loadApp automático movido al final seguro
     showSection('admin');
     setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),120);
   }catch(e){
@@ -1482,156 +1483,143 @@ function renderDashboardSalesCharts(byUser=[], byProduct=[]){
   }
 }
 
-loadApp();
+// loadApp automático movido al final seguro
 
 
 // ===============================
-// FIX FINAL: Dashboard admin único, sin tarjetas duplicadas.
-// Mantiene todos los paneles admin en la pantalla principal.
+// FIX SEGURO: permisos de dashboard/admin y botones funcionales
 // ===============================
-function mountAdminPanelsOnDashboardFinal(){
-  if(!currentUser || currentUser.role !== 'admin') return;
-  const dashboard = document.getElementById('section-dashboard');
-  const adminSection = document.getElementById('section-admin');
-  let host = document.getElementById('dashboardAdminPanelsHost');
-  if(!dashboard || !adminSection) return;
-  if(!host){
-    host = document.createElement('div');
-    host.id = 'dashboardAdminPanelsHost';
-    dashboard.appendChild(host);
-  }
-  host.classList.remove('hidden');
-  if(!host.dataset.mounted){
-    const panelIds = [
-      'adminUsersPanel',
-      'adminSubadminPricesPanel',
-      'adminBalanceRequestsPanel',
-      'adminAccountReportsPanel',
-      'adminSalesReportPanel',
-      'adminPlatformAccountsPanel',
-      'adminProductsPanel',
-      'adminOrdersPanel',
-      'adminDailySummaryPanel',
-      'adminMonthlyReportPanel',
-      'adminActivityPanel'
-    ];
-    panelIds.forEach(id=>{
-      const el = document.getElementById(id);
-      if(el) host.appendChild(el);
-    });
-    host.dataset.mounted = '1';
-  }
-  adminSection.classList.add('hidden');
-  document.getElementById('adminMenuBtn')?.classList.add('hidden');
-  document.getElementById('adminSalesMenuBtn')?.classList.add('hidden');
-  document.getElementById('dashInventoryCard')?.classList.remove('hidden');
-  document.getElementById('dashSalesTodayCard')?.classList.remove('hidden');
-  document.getElementById('dashboardChartsPanel')?.classList.remove('hidden');
+function isAdminUserSafe(){ return currentUser && currentUser.role === 'admin'; }
+
+function setHiddenSafe(id, hidden){
+  const el=document.getElementById(id);
+  if(el) el.classList.toggle('hidden', !!hidden);
 }
 
-function scrollToAdmin(id){
-  if(currentUser?.role !== 'admin') return;
+function syncAdminVisibilitySafe(){
+  const isAdmin=isAdminUserSafe();
+  // Ocultamos el menú Admin separado para que no haya duplicados.
+  setHiddenSafe('adminMenuBtn', true);
+  setHiddenSafe('adminSalesMenuBtn', true);
+  setHiddenSafe('dashInventoryCard', !isAdmin);
+  setHiddenSafe('dashSalesTodayCard', !isAdmin);
+  setHiddenSafe('dashboardChartsPanel', !isAdmin);
+  // Para admin ocultamos la tarjeta Saldo personal; para usuarios normales sí se queda.
+  setHiddenSafe('dashBalanceCard', isAdmin);
+  if(!isAdmin){
+    setHiddenSafe('section-admin', true);
+  }else{
+    const adminSection=document.getElementById('section-admin');
+    if(adminSection) adminSection.classList.remove('hidden');
+  }
+}
+
+function setDashboardMenuActiveSafe(){
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
+}
+
+const __originalShowSectionStable = typeof showSection === 'function' ? showSection : null;
+showSection = function(name){
+  if(name==='admin' && !isAdminUserSafe()) name='dashboard';
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.getElementById('section-dashboard')?.classList.add('active');
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section === 'dashboard'));
-  mountAdminPanelsOnDashboardFinal();
+  const sec=document.getElementById('section-'+name);
+  if(sec) sec.classList.add('active');
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section===name));
+  document.getElementById('sidebar')?.classList.remove('show');
+  syncAdminVisibilitySafe();
+  if(name==='shop' && typeof loadProducts==='function') loadProducts();
+  if(name==='orders' && typeof loadMyOrders==='function') loadMyOrders();
+  if(name==='reports') setTimeout(()=>document.getElementById('reporteCorreo')?.focus(),80);
+  if(name==='admin' && isAdminUserSafe()){
+    Promise.allSettled([
+      typeof loadUsers==='function'?loadUsers():Promise.resolve(),
+      typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
+      typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
+      typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
+      typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
+      typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
+      typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve()
+    ]);
+  }
+};
+
+function scrollToAdmin(id){
+  if(!isAdminUserSafe()) return showSection('dashboard');
+  showSection('admin');
   setTimeout(()=>{
-    const el = document.getElementById(id);
+    const el=document.getElementById(id);
     if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
   },120);
 }
 
-function showSection(name){
-  if(name === 'admin' && currentUser?.role === 'admin') name = 'dashboard';
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  const sec=document.getElementById('section-'+name);
-  if(sec)sec.classList.add('active');
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));
-  document.getElementById('sidebar')?.classList.remove('show');
-  if(name==='shop')loadProducts();
-  if(name==='orders')loadMyOrders();
-  if(name==='reports')setTimeout(()=>document.getElementById('reporteCorreo')?.focus(),80);
-  if(name==='distributor' && isDistributorUser && isDistributorUser()){
-    loadDistributorPanel();
-    loadDistributorPrices();
-  }
-  if(name==='dashboard' && currentUser?.role==='admin'){
-    mountAdminPanelsOnDashboardFinal();
-    refreshAdminDashboardDataFinal();
-  }
-}
+function openUsersFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminUsersPanel') : showSection('account'); }
+function openProductsFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminProductsPanel') : showSection('shop'); }
+function openInventoryFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminPlatformAccountsPanel') : showSection('shop'); }
+function openOrdersFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminOrdersPanel') : showSection('orders'); }
+function openBalanceRequests(){ isAdminUserSafe() ? scrollToAdmin('adminBalanceRequestsPanel') : showSection('balance'); }
+function openAccountReportsFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminAccountReportsPanel') : showSection('reports'); }
+function openSalesReport(){ if(isAdminUserSafe()) scrollToAdmin('adminSalesReportPanel'); }
 
-async function refreshAdminDashboardDataFinal(){
-  if(currentUser?.role !== 'admin') return;
-  mountAdminPanelsOnDashboardFinal();
-  await Promise.allSettled([
-    typeof loadUsers === 'function' ? loadUsers() : Promise.resolve(),
-    typeof loadAdminProducts === 'function' ? loadAdminProducts() : Promise.resolve(),
-    typeof loadAdminOrders === 'function' ? loadAdminOrders() : Promise.resolve(),
-    typeof loadBalanceRequests === 'function' ? loadBalanceRequests() : Promise.resolve(),
-    typeof loadAccountReports === 'function' ? loadAccountReports() : Promise.resolve(),
-    typeof loadPlatformInventory === 'function' ? loadPlatformInventory() : Promise.resolve(),
-    typeof loadSalesReport === 'function' ? loadSalesReport(true) : Promise.resolve(),
-    typeof loadDailySummary === 'function' ? loadDailySummary() : Promise.resolve(),
-    typeof loadAdminActivity === 'function' ? loadAdminActivity() : Promise.resolve()
-  ]);
-}
-
-function openUsersFromDashboard(){
-  if(currentUser?.role==='admin') scrollToAdmin('adminUsersPanel');
-  else showSection('account');
-}
-function openProductsFromDashboard(){
-  if(currentUser?.role==='admin') scrollToAdmin('adminProductsPanel');
-  else showSection('shop');
-}
-function openOrdersFromDashboard(){
-  if(currentUser?.role==='admin') scrollToAdmin('adminOrdersPanel');
-  else showSection('orders');
-}
-function openBalanceRequests(){
-  if(currentUser?.role==='admin'){
-    scrollToAdmin('adminBalanceRequestsPanel');
-    if(typeof loadBalanceRequests === 'function') loadBalanceRequests();
-  }else showSection('balance');
-}
-function openAccountReportsFromDashboard(){
-  if(currentUser?.role==='admin'){
-    scrollToAdmin('adminAccountReportsPanel');
-    if(typeof loadAccountReports === 'function') loadAccountReports();
-  }else showSection('reports');
-}
-function openSalesReport(){
-  if(currentUser?.role==='admin'){
-    scrollToAdmin('adminSalesReportPanel');
-    if(typeof loadSalesReport === 'function') loadSalesReport(true);
-  }
-}
-
-const __loadPlatformInventoryFinal = typeof loadPlatformInventory === 'function' ? loadPlatformInventory : null;
-if(__loadPlatformInventoryFinal){
+const __baseLoadPlatformInventorySafe = typeof loadPlatformInventory === 'function' ? loadPlatformInventory : null;
+if(__baseLoadPlatformInventorySafe){
   loadPlatformInventory = async function(){
-    await __loadPlatformInventoryFinal();
-    const src = document.getElementById('adminPlatformAccountsCount');
-    const inv = document.getElementById('statInventory');
-    if(src && inv) inv.textContent = src.textContent || '0';
+    await __baseLoadPlatformInventorySafe();
+    const src=document.getElementById('adminPlatformAccountsCount');
+    const dst=document.getElementById('statInventory');
+    if(src && dst) dst.textContent = src.textContent || '0';
   };
 }
 
-const __loadAppFinal = typeof loadApp === 'function' ? loadApp : null;
-if(__loadAppFinal){
-  loadApp = async function(){
-    await __loadAppFinal();
-    if(currentUser?.role === 'admin'){
-      document.getElementById('adminMenuBtn')?.classList.add('hidden');
-      document.getElementById('adminSalesMenuBtn')?.classList.add('hidden');
-      document.getElementById('dashInventoryCard')?.classList.remove('hidden');
-      mountAdminPanelsOnDashboardFinal();
-      await refreshAdminDashboardDataFinal();
-      showSection('dashboard');
-    }
-  };
-}
+loadApp = async function(){
+  if(!token) return;
+  try{
+    currentUser = await api('/api/me');
+  }catch(e){
+    console.error('Sesión inválida', e);
+    localStorage.removeItem('token'); token=null; currentUser=null;
+    document.getElementById('authSection')?.classList.remove('hidden');
+    document.getElementById('appSection')?.classList.add('hidden');
+    return;
+  }
+
+  document.getElementById('authSection')?.classList.add('hidden');
+  document.getElementById('appSection')?.classList.remove('hidden');
+  const set=(id,val)=>{const el=document.getElementById(id); if(el) el.textContent=val;};
+  set('userName', currentUser.name||'');
+  set('userEmail', currentUser.email||'');
+  set('userRole', currentUser.role||'user');
+  set('userBalance', formatMoney(currentUser.balance));
+  set('sideEmail', currentUser.email||'');
+  set('topUserName', currentUser.name||'Usuario');
+  set('statBalance', formatMoney(currentUser.balance));
+
+  syncAdminVisibilitySafe();
+
+  await Promise.allSettled([
+    typeof loadProducts==='function'?loadProducts():Promise.resolve(),
+    typeof loadMyOrders==='function'?loadMyOrders():Promise.resolve(),
+    typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve()
+  ]);
+
+  if(isAdminUserSafe()){
+    if(typeof setTodaySalesDate==='function') setTodaySalesDate();
+    await Promise.allSettled([
+      typeof loadUsers==='function'?loadUsers():Promise.resolve(),
+      typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
+      typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
+      typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
+      typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
+      typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
+      typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve(),
+      typeof loadDailySummary==='function'?loadDailySummary():Promise.resolve(),
+      typeof loadAdminActivity==='function'?loadAdminActivity():Promise.resolve()
+    ]);
+  }
+
+  showSection('dashboard');
+};
+
+loadApp();
 
 </script>
 </body>
