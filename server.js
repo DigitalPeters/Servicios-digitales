@@ -660,12 +660,7 @@ function buildDeliveredAccountData(assignedAccount, productName = "", productCat
 }
 
 async function findReportedPurchase(client, userId, accountEmail) {
-  const cleanEmail = String(accountEmail || "").trim().toLowerCase();
-
-  if (!cleanEmail) return null;
-
-  // 1) Cuentas entregadas automáticamente desde inventario.
-  const automaticResult = await client.query(
+  const result = await client.query(
     `SELECT
        o.id AS order_id,
        o.user_id,
@@ -679,53 +674,20 @@ async function findReportedPurchase(client, userId, accountEmail) {
        pa.platform,
        pa.product_name AS account_product_name,
        pa.account_email,
-       pa.status AS account_status,
-       'automatic' AS delivery_type
+       pa.status AS account_status
      FROM platform_accounts pa
      JOIN orders o ON o.id = pa.assigned_order_id
      JOIN products p ON p.id = o.product_id
      WHERE pa.assigned_user_id = $1
-       AND lower(trim(pa.account_email)) = $2
+       AND lower(pa.account_email) = lower($2)
        AND o.status = 'exito'
        AND pa.status IN ('delivered','failed')
      ORDER BY o.id DESC
      LIMIT 1`,
-    [userId, cleanEmail]
+    [userId, String(accountEmail || "").trim()]
   );
 
-  if (automaticResult.rows[0]) {
-    return automaticResult.rows[0];
-  }
-
-  // 2) Cuentas entregadas manualmente. En estos casos el correo queda guardado
-  // dentro del texto de respuesta del pedido, no dentro de platform_accounts.
-  const manualResult = await client.query(
-    `SELECT
-       o.id AS order_id,
-       o.user_id,
-       o.amount,
-       o.created_at AS order_created_at,
-       o.refunded,
-       p.id AS product_id,
-       p.name AS product_name,
-       p.category AS product_category,
-       NULL::integer AS account_id,
-       p.category AS platform,
-       p.name AS account_product_name,
-       $2::text AS account_email,
-       'manual' AS account_status,
-       'manual' AS delivery_type
-     FROM orders o
-     JOIN products p ON p.id = o.product_id
-     WHERE o.user_id = $1
-       AND o.status = 'exito'
-       AND lower(COALESCE(o.delivered_account_data, '') || ' ' || COALESCE(o.admin_response, '')) LIKE '%' || $2 || '%'
-     ORDER BY o.id DESC
-     LIMIT 1`,
-    [userId, cleanEmail]
-  );
-
-  return manualResult.rows[0] || null;
+  return result.rows[0] || null;
 }
 
 
@@ -1789,7 +1751,7 @@ async function createAccountReportHandler(req, res) {
 
     if (!purchase) {
       return res.status(400).json({
-        error: "Solo puedes reportar un correo que hayas comprado y que fue entregado por el sistema o manualmente. Revisa que el correo esté escrito igual al de Mis pedidos."
+        error: "Solo puedes reportar un correo que hayas comprado y que fue entregado por el sistema. Revisa que el correo esté escrito igual al de Mis pedidos."
       });
     }
 
@@ -1904,7 +1866,6 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
     const reportResult = await client.query(
       `SELECT ar.*, o.amount, o.product_id, o.created_at AS order_created_at,
-              o.delivered_account_data, o.admin_response AS order_admin_response,
               p.name AS product_name, p.category AS product_category,
               pa.platform, pa.product_name AS account_product_name, pa.account_email
        FROM account_reports ar
@@ -1923,9 +1884,9 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       return res.status(404).json({ error: "Reporte no encontrado" });
     }
 
-    if (!report.order_id) {
+    if (!report.order_id || !report.reported_account_id) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado" });
+      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado automáticamente" });
     }
 
     const matchProduct = report.account_product_name || report.product_name;
@@ -1956,14 +1917,12 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
     const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category);
 
-    if (report.reported_account_id) {
-      await client.query(
-        `UPDATE platform_accounts
-         SET status = 'failed'
-         WHERE id = $1`,
-        [report.reported_account_id]
-      );
-    }
+    await client.query(
+      `UPDATE platform_accounts
+       SET status = 'failed'
+       WHERE id = $1`,
+      [report.reported_account_id]
+    );
 
     await client.query(
       `UPDATE platform_accounts
@@ -2037,9 +1996,9 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
       return res.status(404).json({ error: "Reporte no encontrado" });
     }
 
-    if (!report.order_id) {
+    if (!report.order_id || !report.reported_account_id) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado" });
+      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado automáticamente" });
     }
 
     if (Number(report.refund_amount || 0) > 0 || String(report.resolution_type || "") === "reembolso" || Number(report.refunded || 0) === 1) {
@@ -2070,12 +2029,10 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
       [report.order_id]
     );
 
-    if (report.reported_account_id) {
-      await client.query(
-        `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
-        [report.reported_account_id]
-      );
-    }
+    await client.query(
+      `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
+      [report.reported_account_id]
+    );
 
     await client.query(
       `UPDATE account_reports
