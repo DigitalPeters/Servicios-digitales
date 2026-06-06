@@ -1157,9 +1157,10 @@ showSection = function(name){
   }
 };
 
-setInterval(()=>{
-  if(currentUser?.role==='admin') loadSalesReport(true);
-}, 60000);
+// Auto-refresh periódico desactivado: las secciones se actualizan solo después de acciones.
+// setInterval(()=>{
+//   if(currentUser?.role==='admin') loadSalesReport(true);
+// }, 60000);
 
 
 function isDistributorUser(){
@@ -2293,16 +2294,18 @@ async function autoRefreshPanel(){
 }
 
 function startAutoRefreshPanel(){
+  // Solo carga inicial. No hay refresco automático para no interrumpir compras o formularios.
   ensureManualPendingCard();
   ensureAnnouncementsUI();
   loadAnnouncements();
   if(currentUser?.role === 'admin') loadAdminAnnouncements();
   if(__autoRefreshTimer) clearInterval(__autoRefreshTimer);
-  __autoRefreshTimer = setInterval(autoRefreshPanel, 5000);
+  __autoRefreshTimer = null;
 }
 
 setTimeout(startAutoRefreshPanel, 1200);
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoRefreshPanel(); });
+// Auto-refresh por visibilidad desactivado. Las acciones del panel ya recargan su sección al guardar.
+// document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoRefreshPanel(); });
 
 
 
@@ -2579,7 +2582,8 @@ if(__showSectionBeforeFinalFix){
 }
 
 setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},800);
-setInterval(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},5000);
+// Auto-refresh de comunicados desactivado para no interrumpir formularios.
+// setInterval(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},5000);
 
 
 
@@ -2755,7 +2759,7 @@ setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal(
     };
   }
 
-  setInterval(removeLegacyAnnouncementTicker, 1000);
+  // setInterval(removeLegacyAnnouncementTicker, 1000);
   setTimeout(removeLegacyAnnouncementTicker, 50);
   setTimeout(removeLegacyAnnouncementTicker, 500);
   setTimeout(removeLegacyAnnouncementTicker, 1500);
