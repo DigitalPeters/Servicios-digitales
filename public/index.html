@@ -17,6 +17,8 @@
     .tools{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}.tools input,.tools select{margin:0}.products-list{display:flex;flex-direction:column;gap:10px}.category-title{font-weight:900;background:var(--primary);color:#fff;border-radius:16px;padding:12px 16px;margin:16px 0 8px}.product-row{border:1px solid var(--border);border-radius:18px;background:#fff;overflow:hidden}.product-header{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:16px;cursor:pointer}.product-name{font-weight:900;font-size:18px}.chip{display:inline-flex;background:#eef2ff;color:#3730a3;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900}.price{font-size:18px;font-weight:900;color:var(--success)}.stock{font-size:13px;font-weight:900;color:var(--success)}.stock.out{color:var(--danger)}.product-details{display:none;border-top:1px solid var(--border);padding:16px;background:#fbfdff}.product-row.open .product-details{display:block}.product-description{color:#334155;line-height:1.45}.order-data{background:#fff;border:1px dashed #cbd5e1;border-radius:14px;padding:12px;margin:10px 0}.response-text{white-space:pre-line;line-height:1.5}.status{font-weight:900;color:var(--warning)}.item{border:1px solid var(--border);padding:16px;border-radius:18px;background:#fbfdff;margin-bottom:12px}.admin-product-body{display:none;margin-top:14px}.item.open .admin-product-body{display:block}.table-wrap{overflow-x:auto}.mini-table{width:100%;border-collapse:collapse}.mini-table th,.mini-table td{padding:12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}.mini-table th{background:#f1f5f9;color:#475569}.copy-btn{background:#e0f2fe!important;color:#075985!important;border-radius:10px;padding:8px 10px;width:auto;margin:0 0 0 8px}.copy-account-btn{background:#048848!important;color:#fff!important;border-radius:12px;padding:11px 14px;width:auto;margin-top:10px}.bank-box{background:#e9fff7;border:1px solid #a7f3d0;border-radius:18px;padding:18px;margin:12px 0}
 
     .dashboard-chart-card{min-height:360px}.chart-note{color:var(--muted);font-size:13px;margin:4px 0 16px}.bar-chart{display:flex;flex-direction:column;gap:14px}.bar-row{display:grid;grid-template-columns:minmax(120px,210px) 1fr auto;gap:12px;align-items:center}.bar-label{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar-track{height:18px;background:#eef2ff;border-radius:999px;overflow:hidden}.bar-fill{height:100%;background:linear-gradient(90deg,var(--primary),#f00662);border-radius:999px;min-width:4px}.bar-value{font-weight:900;color:var(--primary);min-width:72px;text-align:right}.empty-chart{color:var(--muted);padding:28px 0;text-align:center}.chart-footer{margin-top:18px;text-align:right}.chart-footer button{width:auto;padding:10px 14px}.donut-summary{display:grid;grid-template-columns:170px 1fr;gap:18px;align-items:center}.donut{width:160px;height:160px;border-radius:50%;background:conic-gradient(var(--primary) 0deg 0deg,#e5e7eb 0deg 360deg);display:grid;place-items:center;position:relative}.donut:after{content:'';position:absolute;width:86px;height:86px;background:#fff;border-radius:50%;box-shadow:inset 0 0 0 1px var(--border)}.donut-center{position:relative;z-index:1;text-align:center;font-weight:900;color:var(--primary)}.donut-center span{display:block;font-size:12px;color:var(--muted);font-weight:800}.legend-list{display:flex;flex-direction:column;gap:10px}.legend-item{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center}.legend-dot{width:12px;height:12px;border-radius:50%;background:var(--primary)}.legend-name{font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.legend-value{font-weight:900;color:var(--primary)}
+
+    .dash-card.stock-alert{border:2px solid var(--danger)}.dash-card.stock-alert .dash-icon{background:var(--danger)}
     @media(max-width:1000px){.grid-cards{grid-template-columns:repeat(2,1fr)}.account-grid,.row{grid-template-columns:1fr 1fr}.topbar{height:auto;padding:15px;gap:12px;flex-wrap:wrap}.searchbox{max-width:none;min-width:250px}}
     @media(max-width:760px){.donut-summary{grid-template-columns:1fr}.donut{margin:auto}.bar-row{grid-template-columns:1fr;gap:6px}.bar-value{text-align:left}.mobile-header{display:flex;position:sticky;top:0;z-index:1100}.app{display:block}.sidebar{transform:translateX(-105%);width:285px;transition:.2s}.sidebar.show{transform:translateX(0)}.main{margin-left:0;width:100%;padding:14px}.topbar{border-radius:18px;margin:0 0 18px}.grid-cards,.account-grid,.row,.three-row,.two-row{grid-template-columns:1fr}.dash-card{min-height:96px}.dash-icon{width:56px;height:56px;font-size:25px}.dash-value{font-size:30px}.section-title{font-size:25px}.product-header{grid-template-columns:1fr;gap:6px}.panel{padding:18px}.auth-card{padding:28px 20px}.auth-card h1{font-size:27px}.auth-logo{width:86px;height:86px;font-size:46px;margin:-70px auto 18px}.tabs{gap:8px}.tab-btn{font-size:15px;padding:12px}.message{left:12px;right:12px;max-width:none}}
   </style>
@@ -74,6 +76,7 @@
         <div class="grid-cards">
           <div class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
+          <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()"><div class="dash-icon">🚫</div><div><div class="dash-label">Sin stock</div><div id="statOutOfStock" class="dash-value">0</div></div></div>
           <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
           <div id="dashBalanceCard" class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
@@ -1948,6 +1951,90 @@ function renderMyOrders(){
     const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
     return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`;
   }).join('')||'No hay pedidos con esos filtros.';
+}
+
+
+// ===============================
+// INDICADOR: PRODUCTOS SIN STOCK
+// ===============================
+function isProductOutOfStock(product){
+  return Number(product?.stock_enabled || 0) === 1 && Number(product?.stock || 0) <= 0;
+}
+
+function getOutOfStockProducts(){
+  return (allProducts || []).filter(isProductOutOfStock);
+}
+
+function updateOutOfStockStats(){
+  const count = getOutOfStockProducts().length;
+  const isAdmin = isAdminUserSafe();
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if(el) el.textContent = value;
+  };
+  const setVisible = (id, visible) => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', !visible);
+  };
+
+  setText('statOutOfStock', count);
+  setText('adminOutOfStockCount', count);
+  setVisible('dashOutOfStockCard', isAdmin);
+  setVisible('adminOutOfStockCard', isAdmin);
+
+  ['dashOutOfStockCard','adminOutOfStockCard'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('stock-alert', count > 0);
+  });
+}
+
+function openOutOfStockFromDashboard(){
+  if(!isAdminUserSafe()) return showSection('shop');
+
+  updateOutOfStockStats();
+  const outProducts = getOutOfStockProducts();
+
+  scrollToAdmin('adminProductsPanel');
+
+  setTimeout(() => {
+    outProducts.forEach(product => {
+      const item = document.getElementById('admin-product-' + product.id);
+      if(item) item.classList.add('open');
+    });
+
+    if(outProducts[0]){
+      document.getElementById('admin-product-' + outProducts[0].id)?.scrollIntoView({behavior:'smooth', block:'center'});
+      showMessage(`Hay ${outProducts.length} producto${outProducts.length === 1 ? '' : 's'} sin stock.`);
+    }else{
+      showMessage('No tienes productos sin stock.');
+    }
+  }, 450);
+}
+
+const __baseLoadProductsOutOfStock = typeof loadProducts === 'function' ? loadProducts : null;
+if(__baseLoadProductsOutOfStock){
+  loadProducts = async function(){
+    const result = await __baseLoadProductsOutOfStock();
+    updateOutOfStockStats();
+    return result;
+  };
+}
+
+const __baseLoadAdminProductsOutOfStock = typeof loadAdminProducts === 'function' ? loadAdminProducts : null;
+if(__baseLoadAdminProductsOutOfStock){
+  loadAdminProducts = async function(){
+    const result = await __baseLoadAdminProductsOutOfStock();
+    updateOutOfStockStats();
+    return result;
+  };
+}
+
+const __baseSyncAdminVisibilityOutOfStock = typeof syncAdminVisibilitySafe === 'function' ? syncAdminVisibilitySafe : null;
+if(__baseSyncAdminVisibilityOutOfStock){
+  syncAdminVisibilitySafe = function(){
+    __baseSyncAdminVisibilityOutOfStock();
+    updateOutOfStockStats();
+  };
 }
 
 
