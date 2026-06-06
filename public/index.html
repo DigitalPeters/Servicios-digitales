@@ -2301,6 +2301,401 @@ function startAutoRefreshPanel(){
 setTimeout(startAutoRefreshPanel, 1200);
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoRefreshPanel(); });
 
+
+
+// ===============================
+// FIX FINAL REAL: Comunicados visibles + listas compactas
+// ===============================
+function __isAdminUserFinal(){
+  return currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
+}
+
+function ensureCompactAndAnnouncementsStyles(){
+  if(document.getElementById('finalPanelStyles')) return;
+  const st=document.createElement('style');
+  st.id='finalPanelStyles';
+  st.textContent=`
+    .compact-item{padding:0;overflow:hidden;background:#fff}
+    .compact-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 16px;cursor:pointer;background:#fbfdff;border-radius:18px}
+    .compact-title{font-size:18px;font-weight:900;color:var(--primary)}
+    .compact-meta{font-size:13px;color:var(--muted);font-weight:800;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%}
+    .compact-details{display:none;border-top:1px solid var(--border);padding:16px;background:#fff}
+    .compact-item.open .compact-details{display:block}
+    .compact-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .compact-actions button{width:auto;padding:10px 13px;border-radius:12px}
+    .global-announcement-ticker{background:linear-gradient(90deg,var(--primary),var(--primary2));color:#fff;border-radius:18px;margin:0 0 18px;overflow:hidden;box-shadow:var(--shadow);display:none;align-items:center;min-height:48px}
+    .global-announcement-ticker.show{display:flex}
+    .global-announcement-badge{background:rgba(255,255,255,.16);font-weight:900;padding:14px 18px;white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)}
+    .global-announcement-track{flex:1;overflow:hidden;white-space:nowrap}
+    .global-announcement-marquee{display:inline-block;padding-left:100%;animation:globalAnnouncementScroll 24s linear infinite;font-weight:900}
+    .global-announcement-marquee span{margin-right:45px}
+    @keyframes globalAnnouncementScroll{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
+    .announcement-mini{border:1px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px;background:#fbfdff}
+    .announcement-mini p{margin:0 0 8px}
+    @media(max-width:760px){.compact-header{align-items:flex-start}.compact-meta{max-width:52%;white-space:normal}.global-announcement-badge{padding:13px 12px}.global-announcement-marquee{animation-duration:18s}}
+  `;
+  document.head.appendChild(st);
+}
+
+function ensureGlobalAnnouncementsUIFinal(){
+  ensureCompactAndAnnouncementsStyles();
+  const topbar=document.querySelector('.topbar');
+  if(topbar && !document.getElementById('globalAnnouncementTicker')){
+    const ticker=document.createElement('div');
+    ticker.id='globalAnnouncementTicker';
+    ticker.className='global-announcement-ticker';
+    ticker.innerHTML=`<div class="global-announcement-badge">📢 Comunicado</div><div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
+    topbar.insertAdjacentElement('afterend', ticker);
+  }
+
+  if(__isAdminUserFinal()){
+    const menu=document.querySelector('.menu');
+    if(menu && !document.getElementById('announcementsMenuBtn')){
+      const btn=document.createElement('button');
+      btn.id='announcementsMenuBtn';
+      btn.className='menu-btn';
+      btn.dataset.section='admin';
+      btn.type='button';
+      btn.innerHTML='📢 Comunicados';
+      btn.onclick=function(){ showSection('admin'); setTimeout(()=>document.getElementById('adminAnnouncementsPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),120); };
+      const adminBtn=document.getElementById('adminMenuBtn');
+      if(adminBtn && adminBtn.parentNode===menu) adminBtn.insertAdjacentElement('afterend', btn); else menu.appendChild(btn);
+    }
+
+    const admin=document.getElementById('section-admin');
+    if(admin && !document.getElementById('adminAnnouncementsPanel')){
+      const panel=document.createElement('div');
+      panel.id='adminAnnouncementsPanel';
+      panel.className='panel';
+      panel.innerHTML=`
+        <div class="panel-head">
+          <div><h2>Comunicados globales</h2><p class="small-text">Publica avisos para que aparezcan en una tira superior para todos los usuarios y administradores.</p></div>
+          <button class="outline-btn" style="width:auto" onclick="loadAdminAnnouncementsFinal()">Actualizar</button>
+        </div>
+        <div class="row">
+          <div>
+            <label class="field-label">Nuevo comunicado</label>
+            <textarea id="announcementTextFinal" placeholder="Ejemplo: Hoy Disney puede tardar de 5 a 10 minutos en entregar códigos."></textarea>
+            <button class="primary-btn" onclick="createAnnouncementFinal()">Publicar comunicado</button>
+          </div>
+          <div>
+            <h3>Comunicados publicados</h3>
+            <div id="adminAnnouncementsListFinal">Sin comunicados.</div>
+          </div>
+        </div>`;
+      const salesPanel=document.getElementById('adminSalesReportPanel');
+      const firstPanel=admin.querySelector('.panel');
+      if(salesPanel) admin.insertBefore(panel, salesPanel);
+      else if(firstPanel) admin.insertBefore(panel, firstPanel);
+      else admin.appendChild(panel);
+    }
+  }
+}
+
+async function loadGlobalAnnouncementsFinal(){
+  try{
+    ensureGlobalAnnouncementsUIFinal();
+    const list=await api('/api/announcements');
+    const ticker=document.getElementById('globalAnnouncementTicker');
+    const marquee=document.getElementById('globalAnnouncementMarquee');
+    if(!ticker || !marquee) return;
+    const active=(Array.isArray(list)?list:[]).filter(a=>String(a.message||'').trim());
+    if(!active.length){ticker.classList.remove('show');marquee.innerHTML='';return;}
+    marquee.innerHTML=active.map(a=>`<span>${safeText(a.message)}</span>`).join('');
+    ticker.classList.add('show');
+  }catch(e){console.warn('No se pudieron cargar comunicados globales',e)}
+}
+
+async function loadAdminAnnouncementsFinal(){
+  if(!__isAdminUserFinal()) return;
+  try{
+    ensureGlobalAnnouncementsUIFinal();
+    const list=await api('/api/admin/announcements');
+    const box=document.getElementById('adminAnnouncementsListFinal');
+    if(!box) return;
+    box.innerHTML=(Array.isArray(list)&&list.length)?list.map(a=>{
+      const active=Number(a.active)===1 || a.active===true;
+      return `<div class="announcement-mini">
+        <p><b>#${a.id}</b> ${safeText(a.message)}</p>
+        <p><b>Estado:</b> <span class="status">${active?'Activo':'Oculto'}</span></p>
+        <div class="compact-actions">
+          <button class="outline-btn" onclick="toggleAnnouncementFinal(${a.id}, ${active?0:1})">${active?'Ocultar':'Activar'}</button>
+          <button class="danger-btn" onclick="deleteAnnouncementFinal(${a.id})">Eliminar</button>
+        </div>
+      </div>`;
+    }).join(''):'Sin comunicados publicados.';
+  }catch(e){showMessage(e.message||'Error cargando comunicados','error')}
+}
+
+async function createAnnouncementFinal(){
+  try{
+    const text=(document.getElementById('announcementTextFinal')?.value||'').trim();
+    if(!text) throw new Error('Escribe el comunicado');
+    const data=await api('/api/admin/announcements',{method:'POST',body:JSON.stringify({message:text})});
+    showMessage(data.message||'Comunicado publicado');
+    document.getElementById('announcementTextFinal').value='';
+    await loadGlobalAnnouncementsFinal();
+    await loadAdminAnnouncementsFinal();
+  }catch(e){showMessage(e.message||'Error publicando comunicado','error')}
+}
+
+async function toggleAnnouncementFinal(id,active){
+  try{
+    const data=await api('/api/admin/announcements/'+id,{method:'PATCH',body:JSON.stringify({active})});
+    showMessage(data.message||'Comunicado actualizado');
+    await loadGlobalAnnouncementsFinal();
+    await loadAdminAnnouncementsFinal();
+  }catch(e){showMessage(e.message||'Error actualizando comunicado','error')}
+}
+
+async function deleteAnnouncementFinal(id){
+  if(!confirm('¿Eliminar este comunicado?')) return;
+  try{
+    const data=await api('/api/admin/announcements/'+id,{method:'DELETE'});
+    showMessage(data.message||'Comunicado eliminado');
+    await loadGlobalAnnouncementsFinal();
+    await loadAdminAnnouncementsFinal();
+  }catch(e){showMessage(e.message||'Error eliminando comunicado','error')}
+}
+
+function toggleCompactItemFinal(id){
+  document.getElementById(id)?.classList.toggle('open');
+}
+
+function renderAdminOrderCompactFinal(o){
+  const od=parseJsonObject(o.order_data);
+  const itemId=`admin-order-compact-${o.id}`;
+  const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
+  return `<div class="item compact-item" id="${itemId}">
+    <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
+      <div class="compact-title">Pedido #${o.id}</div>
+      <div class="compact-meta">${safeText(o.customer_name||'Cliente')} · ${safeText(o.product_name||'Producto')} · ${safeText(getStatusText(o.status))}</div>
+    </div>
+    <div class="compact-details">
+      <p><b>Pedido:</b> #${o.id}</p>
+      <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
+      <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
+      <p><b>Producto:</b> ${safeText(o.product_name)} ${String(o.product_type||'').toLowerCase()==='manual'?'<span class="chip">Manual</span>':''}</p>
+      <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
+      <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
+      <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
+      ${renderOrderData(od)}
+      <label class="field-label">Estado</label>
+      <select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select>
+      <label class="field-label">Respuesta para el cliente</label>
+      <textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>
+      ${copyButton}
+      <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
+      <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
+    </div>
+  </div>`;
+}
+
+async function loadAdminOrders(){
+  try{
+    adminOrders=await api('/api/admin/orders');
+    const adminCount=document.getElementById('adminOrdersCount');
+    if(adminCount)adminCount.textContent=adminOrders.length;
+    const stat=document.getElementById('statOrders');
+    if(stat)stat.textContent=currentUser?.role==='admin'?adminOrders.length:(myOrders||[]).length;
+    const list=document.getElementById('adminOrdersList');
+    const oldNotice=document.getElementById('manualPendingNotice');
+    if(oldNotice)oldNotice.remove();
+    if(list)list.innerHTML=adminOrders.length?adminOrders.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos.';
+    if(typeof updateManualPendingCount==='function') updateManualPendingCount();
+  }catch(e){showMessage(e.message||'Error cargando pedidos','error')}
+}
+
+function renderAdminOrdersManualPendingOnly(){
+  const box=document.getElementById('adminOrdersList');
+  if(!box || !Array.isArray(adminOrders)) return;
+  const rows=adminOrders.filter(isManualPendingOrder);
+  const oldNotice=document.getElementById('manualPendingNotice');
+  if(oldNotice)oldNotice.remove();
+  const notice=document.createElement('div');
+  notice.id='manualPendingNotice';
+  notice.className='bank-box';
+  notice.innerHTML=`<b>Mostrando pedidos pendientes manuales.</b> <button class="outline-btn" style="width:auto;margin-left:10px" onclick="loadAdminOrders()">Ver todos los pedidos</button>`;
+  box.parentNode.insertBefore(notice,box);
+  box.innerHTML=rows.length?rows.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos manuales pendientes.';
+}
+
+function renderAdminReportCompactFinal(r){
+  const info=calculateReportRefundInfo(r);
+  const canAct=String(r.status||'').toLowerCase()==='pendiente';
+  const itemId=`admin-report-compact-${r.id}`;
+  return `<div class="item compact-item" id="${itemId}">
+    <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
+      <div class="compact-title">Reporte #${r.id}</div>
+      <div class="compact-meta">${safeText(r.customer_name||'Cliente')} · ${safeText(r.email||'correo reportado')} · ${safeText(r.status||'pendiente')}</div>
+    </div>
+    <div class="compact-details">
+      <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
+      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
+      <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+      <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
+      <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
+      <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+      <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
+      ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
+      <div class="two-row">
+        <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
+        <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+      </div>
+      <div class="two-row" style="margin-top:10px">
+        <select id="reportStatus-${r.id}"><option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option><option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option></select>
+        <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
+      </div>
+      <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+    </div>
+  </div>`;
+}
+
+async function loadAccountReports(){
+  if(!__isAdminUserFinal()) return;
+  try{
+    const reports=await api('/api/admin/account-reports');
+    const pending=reports.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
+    const stat=document.getElementById('statReports');
+    if(stat)stat.textContent=pending.length;
+    const box=document.getElementById('adminAccountReportsList');
+    if(box)box.innerHTML=reports.length?reports.map(renderAdminReportCompactFinal).join(''):'Sin reportes de falla.';
+  }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
+}
+
+const __showSectionBeforeFinalFix=typeof showSection==='function'?showSection:null;
+if(__showSectionBeforeFinalFix){
+  showSection=function(name){
+    __showSectionBeforeFinalFix(name);
+    setTimeout(()=>{
+      ensureGlobalAnnouncementsUIFinal();
+      loadGlobalAnnouncementsFinal();
+      if(name==='admin' && __isAdminUserFinal()) loadAdminAnnouncementsFinal();
+    },120);
+  }
+}
+
+setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},800);
+setInterval(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},5000);
+
+
+
+// ===============================
+// FIX: Comunicados como opción directa del menú lateral
+// ===============================
+function ensureGlobalAnnouncementsUIFinal(){
+  ensureCompactAndAnnouncementsStyles();
+
+  const topbar=document.querySelector('.topbar');
+  if(topbar && !document.getElementById('globalAnnouncementTicker')){
+    const ticker=document.createElement('div');
+    ticker.id='globalAnnouncementTicker';
+    ticker.className='global-announcement-ticker';
+    ticker.innerHTML=`<div class="global-announcement-badge">📢 Comunicado</div><div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
+    topbar.insertAdjacentElement('afterend', ticker);
+  }
+
+  const menu=document.querySelector('.menu');
+  if(menu && !document.getElementById('announcementsMenuBtn')){
+    const btn=document.createElement('button');
+    btn.id='announcementsMenuBtn';
+    btn.className='menu-btn';
+    btn.dataset.section='comunicados';
+    btn.type='button';
+    btn.innerHTML='📢 Comunicados';
+    btn.onclick=function(){ showSection('comunicados'); loadComunicadosSectionFinal(); };
+
+    const reportsBtn=document.querySelector('[data-section="reports"]');
+    if(reportsBtn && reportsBtn.parentNode===menu){
+      reportsBtn.insertAdjacentElement('afterend', btn);
+    }else{
+      menu.appendChild(btn);
+    }
+  }
+
+  const main=document.querySelector('.main');
+  if(main && !document.getElementById('section-comunicados')){
+    const section=document.createElement('section');
+    section.id='section-comunicados';
+    section.className='section';
+    section.innerHTML=`
+      <h1 class="section-title">Comunicados</h1>
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Comunicados globales</h2>
+            <p class="small-text">Avisos importantes visibles para todos los usuarios del panel.</p>
+          </div>
+          <button class="outline-btn" style="width:auto" onclick="loadComunicadosSectionFinal()">Actualizar</button>
+        </div>
+        <div id="announcementsCreateBoxFinal" class="hidden">
+          <label class="field-label">Nuevo comunicado</label>
+          <textarea id="announcementTextFinal" placeholder="Ejemplo: Hoy Disney puede tardar de 5 a 10 minutos en entregar códigos."></textarea>
+          <button class="primary-btn" onclick="createAnnouncementFinal()">Publicar comunicado</button>
+          <hr class="divider">
+        </div>
+        <div id="adminAnnouncementsListFinal">Cargando comunicados...</div>
+      </div>`;
+    main.appendChild(section);
+  }
+
+  const oldAdminPanel=document.getElementById('adminAnnouncementsPanel');
+  if(oldAdminPanel) oldAdminPanel.remove();
+}
+
+async function loadAdminAnnouncementsFinal(){
+  await loadComunicadosSectionFinal();
+}
+
+async function loadComunicadosSectionFinal(){
+  try{
+    ensureGlobalAnnouncementsUIFinal();
+    const isAdmin=__isAdminUserFinal();
+    const createBox=document.getElementById('announcementsCreateBoxFinal');
+    if(createBox) createBox.classList.toggle('hidden', !isAdmin);
+
+    const endpoint=isAdmin?'/api/admin/announcements':'/api/announcements';
+    const list=await api(endpoint);
+    const box=document.getElementById('adminAnnouncementsListFinal');
+    if(!box) return;
+
+    if(!Array.isArray(list) || !list.length){
+      box.innerHTML='Sin comunicados publicados.';
+      return;
+    }
+
+    box.innerHTML=list.map(a=>{
+      const active=Number(a.active)===1 || a.active===true;
+      if(isAdmin){
+        return `<div class="announcement-mini">
+          <p><b>#${a.id}</b> ${safeText(a.message)}</p>
+          <p><b>Estado:</b> <span class="status">${active?'Activo':'Oculto'}</span></p>
+          <div class="compact-actions">
+            <button class="outline-btn" onclick="toggleAnnouncementFinal(${a.id}, ${active?0:1})">${active?'Ocultar':'Activar'}</button>
+            <button class="danger-btn" onclick="deleteAnnouncementFinal(${a.id})">Eliminar</button>
+          </div>
+        </div>`;
+      }
+      return `<div class="announcement-mini"><p>${safeText(a.message)}</p></div>`;
+    }).join('');
+  }catch(e){
+    const box=document.getElementById('adminAnnouncementsListFinal');
+    if(box) box.innerHTML='No se pudieron cargar los comunicados.';
+    console.warn('Error cargando comunicados',e);
+  }
+}
+
+const __showSectionBeforeComunicadosMenuFix=typeof showSection==='function'?showSection:null;
+if(__showSectionBeforeComunicadosMenuFix){
+  showSection=function(name){
+    __showSectionBeforeComunicadosMenuFix(name);
+    if(name==='comunicados'){
+      setTimeout(()=>loadComunicadosSectionFinal(),80);
+    }
+  }
+}
+
+setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();},400);
 </script>
 </body>
 </html>
