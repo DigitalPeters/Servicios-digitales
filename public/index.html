@@ -21,6 +21,19 @@
     .dash-card.stock-alert{border:2px solid var(--danger)}.dash-card.stock-alert .dash-icon{background:var(--danger)}
     @media(max-width:1000px){.grid-cards{grid-template-columns:repeat(2,1fr)}.account-grid,.row{grid-template-columns:1fr 1fr}.topbar{height:auto;padding:15px;gap:12px;flex-wrap:wrap}.searchbox{max-width:none;min-width:250px}}
     @media(max-width:760px){.donut-summary{grid-template-columns:1fr}.donut{margin:auto}.bar-row{grid-template-columns:1fr;gap:6px}.bar-value{text-align:left}.mobile-header{display:flex;position:sticky;top:0;z-index:1100}.app{display:block}.sidebar{transform:translateX(-105%);width:285px;transition:.2s}.sidebar.show{transform:translateX(0)}.main{margin-left:0;width:100%;padding:14px}.topbar{border-radius:18px;margin:0 0 18px}.grid-cards,.account-grid,.row,.three-row,.two-row{grid-template-columns:1fr}.dash-card{min-height:96px}.dash-icon{width:56px;height:56px;font-size:25px}.dash-value{font-size:30px}.section-title{font-size:25px}.product-header{grid-template-columns:1fr;gap:6px}.panel{padding:18px}.auth-card{padding:28px 20px}.auth-card h1{font-size:27px}.auth-logo{width:86px;height:86px;font-size:46px;margin:-70px auto 18px}.tabs{gap:8px}.tab-btn{font-size:15px;padding:12px}.message{left:12px;right:12px;max-width:none}}
+
+    /* ===============================
+       COMUNICADOS + AUTOREFRESH + PEDIDOS PENDIENTES
+       =============================== */
+    .announcement-ticker{background:linear-gradient(90deg,var(--primary),var(--primary2));color:#fff;border-radius:18px;margin:0 0 18px;padding:0;overflow:hidden;box-shadow:var(--shadow);display:none;align-items:center;min-height:46px}
+    .announcement-ticker.show{display:flex}
+    .announcement-badge{background:rgba(255,255,255,.16);font-weight:900;padding:14px 18px;white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)}
+    .announcement-track{flex:1;overflow:hidden;white-space:nowrap}
+    .announcement-marquee{display:inline-block;padding-left:100%;animation:announcement-scroll 22s linear infinite;font-weight:900}
+    .announcement-marquee span{margin-right:42px}
+    @keyframes announcement-scroll{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
+    .announcement-admin-list .item{background:#fff}
+    .urgent-card{border:2px solid #ef4444!important}
   </style>
 </head>
 <body>
@@ -2039,6 +2052,254 @@ if(__baseSyncAdminVisibilityOutOfStock){
 
 
 loadApp();
+
+
+// ===============================
+// FIX REAL: Pedidos pendientes + Comunicados globales + Auto refresh
+// ===============================
+let __autoRefreshRunning = false;
+let __autoRefreshTimer = null;
+let __announcementTimer = null;
+
+function isManualPendingOrder(order){
+  const type = String(order?.product_type || '').toLowerCase();
+  const status = String(order?.status || '').toLowerCase();
+  return type === 'manual' && ['accion_en_espera','en_proceso','pendiente'].includes(status);
+}
+
+function ensureManualPendingCard(){
+  const grid = document.querySelector('#section-dashboard .grid-cards');
+  if(!grid) return;
+  let card = document.getElementById('dashManualPendingCard');
+  if(!card){
+    card = document.createElement('div');
+    card.id = 'dashManualPendingCard';
+    card.className = 'dash-card clickable';
+    card.onclick = openManualPendingOrdersFromDashboard;
+    card.innerHTML = `<div class="dash-icon">📝</div><div><div class="dash-label">Pedidos pendientes</div><div id="statManualPending" class="dash-value">0</div></div>`;
+    const salesCard = document.getElementById('dashSalesTodayCard');
+    if(salesCard && salesCard.parentNode === grid){
+      grid.insertBefore(card, salesCard);
+    }else{
+      grid.appendChild(card);
+    }
+  }
+  const label = card.querySelector('.dash-label');
+  if(label) label.textContent = 'Pedidos pendientes';
+}
+
+function updateManualPendingCount(){
+  ensureManualPendingCard();
+  const count = (adminOrders || []).filter(isManualPendingOrder).length;
+  const el = document.getElementById('statManualPending');
+  if(el) el.textContent = count;
+  const card = document.getElementById('dashManualPendingCard');
+  if(card) card.classList.toggle('urgent-card', count > 0);
+}
+
+function openManualPendingOrdersFromDashboard(){
+  if(currentUser?.role !== 'admin') return showSection('orders');
+  showSection('admin');
+  setTimeout(()=>{
+    const panel = document.getElementById('adminOrdersPanel');
+    if(panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+    if(typeof renderAdminOrdersManualPendingOnly === 'function') renderAdminOrdersManualPendingOnly();
+  },120);
+}
+
+function renderAdminOrdersManualPendingOnly(){
+  const box = document.getElementById('adminOrdersList');
+  if(!box || !Array.isArray(adminOrders)) return;
+  const rows = adminOrders.filter(isManualPendingOrder);
+  const oldNotice = document.getElementById('manualPendingNotice');
+  if(oldNotice) oldNotice.remove();
+  const notice = document.createElement('div');
+  notice.id = 'manualPendingNotice';
+  notice.className = 'bank-box';
+  notice.innerHTML = `<b>Mostrando pedidos pendientes manuales.</b> <button class="outline-btn" style="width:auto;margin-left:10px" onclick="loadAdminOrders()">Ver todos los pedidos</button>`;
+  box.parentNode.insertBefore(notice, box);
+  if(!rows.length){ box.innerHTML='No hay pedidos manuales pendientes.'; return; }
+  box.innerHTML = rows.map(o=>{
+    const od=parseJsonObject(o.order_data);
+    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Cliente:</b> ${safeText(o.customer_name)}</p><p><b>Correo:</b> ${safeText(o.customer_email)}</p><p><b>Producto:</b> ${safeText(o.product_name)} <span class="chip">Manual</span></p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p><p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>${renderOrderData(od)}<label class="field-label">Estado</label><select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select><label class="field-label">Respuesta para el cliente</label><textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>${copyButton}<label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label><button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button></div>`;
+  }).join('');
+}
+
+function ensureAnnouncementsUI(){
+  const topbar = document.querySelector('.topbar');
+  if(topbar && !document.getElementById('announcementTicker')){
+    const ticker = document.createElement('div');
+    ticker.id = 'announcementTicker';
+    ticker.className = 'announcement-ticker';
+    ticker.innerHTML = `<div class="announcement-badge">📢 Comunicado</div><div class="announcement-track"><div id="announcementMarquee" class="announcement-marquee"></div></div>`;
+    topbar.insertAdjacentElement('afterend', ticker);
+  }
+  if(currentUser?.role === 'admin') ensureAnnouncementAdminPanel();
+}
+
+function ensureAnnouncementAdminPanel(){
+  const admin = document.getElementById('section-admin');
+  if(!admin || document.getElementById('adminAnnouncementsPanel')) return;
+  const panel = document.createElement('div');
+  panel.id = 'adminAnnouncementsPanel';
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-head"><div><h2>Comunicados globales</h2><p class="small-text">Estos avisos aparecen arriba del panel para todos los usuarios y administradores.</p></div><button class="outline-btn" style="width:auto" onclick="loadAdminAnnouncements()">Actualizar</button></div>
+    <div class="row">
+      <div>
+        <label class="field-label">Nuevo comunicado</label>
+        <textarea id="announcementText" placeholder="Ejemplo: Servicio de Disney con demoras, favor de avisar a tus clientes."></textarea>
+        <button class="primary-btn" onclick="createAnnouncement()">Publicar comunicado</button>
+      </div>
+      <div>
+        <h3>Comunicados publicados</h3>
+        <div id="adminAnnouncementsList" class="announcement-admin-list">Sin comunicados.</div>
+      </div>
+    </div>`;
+  const firstPanel = admin.querySelector('.panel');
+  if(firstPanel) admin.insertBefore(panel, firstPanel); else admin.appendChild(panel);
+}
+
+async function loadAnnouncements(){
+  try{
+    ensureAnnouncementsUI();
+    const list = await api('/api/announcements');
+    const ticker = document.getElementById('announcementTicker');
+    const marquee = document.getElementById('announcementMarquee');
+    if(!ticker || !marquee) return;
+    if(!Array.isArray(list) || !list.length){
+      ticker.classList.remove('show');
+      marquee.innerHTML = '';
+      return;
+    }
+    marquee.innerHTML = list.map(a=>`<span>${safeText(a.message || a.text || '')}</span>`).join('');
+    ticker.classList.add('show');
+  }catch(e){
+    console.warn('No se pudieron cargar comunicados', e);
+  }
+}
+
+async function loadAdminAnnouncements(){
+  if(currentUser?.role !== 'admin') return;
+  try{
+    ensureAnnouncementsUI();
+    const list = await api('/api/admin/announcements');
+    const box = document.getElementById('adminAnnouncementsList');
+    if(!box) return;
+    box.innerHTML = Array.isArray(list) && list.length ? list.map(a=>`
+      <div class="item">
+        <p><b>#${a.id}</b> ${safeText(a.message)}</p>
+        <p><b>Estado:</b> <span class="status">${Number(a.active)===1 || a.active===true?'Activo':'Oculto'}</span></p>
+        <div class="two-row">
+          <button class="outline-btn" onclick="toggleAnnouncement(${a.id}, ${Number(a.active)===1 || a.active===true ? 0 : 1})">${Number(a.active)===1 || a.active===true?'Ocultar':'Activar'}</button>
+          <button class="danger-btn" onclick="deleteAnnouncement(${a.id})">Eliminar</button>
+        </div>
+      </div>`).join('') : 'Sin comunicados.';
+  }catch(e){showMessage(e.message || 'Error cargando comunicados', 'error')}
+}
+
+async function createAnnouncement(){
+  try{
+    const text = (document.getElementById('announcementText')?.value || '').trim();
+    if(!text) throw new Error('Escribe el comunicado');
+    const data = await api('/api/admin/announcements', {method:'POST', body:JSON.stringify({message:text})});
+    showMessage(data.message || 'Comunicado publicado');
+    document.getElementById('announcementText').value='';
+    await loadAnnouncements();
+    await loadAdminAnnouncements();
+  }catch(e){showMessage(e.message, 'error')}
+}
+
+async function toggleAnnouncement(id, active){
+  try{
+    const data = await api('/api/admin/announcements/'+id, {method:'PATCH', body:JSON.stringify({active})});
+    showMessage(data.message || 'Comunicado actualizado');
+    await loadAnnouncements();
+    await loadAdminAnnouncements();
+  }catch(e){showMessage(e.message, 'error')}
+}
+
+async function deleteAnnouncement(id){
+  if(!confirm('¿Eliminar este comunicado?')) return;
+  try{
+    const data = await api('/api/admin/announcements/'+id, {method:'DELETE'});
+    showMessage(data.message || 'Comunicado eliminado');
+    await loadAnnouncements();
+    await loadAdminAnnouncements();
+  }catch(e){showMessage(e.message, 'error')}
+}
+
+const __originalLoadAdminOrdersForPending = typeof loadAdminOrders === 'function' ? loadAdminOrders : null;
+if(__originalLoadAdminOrdersForPending){
+  loadAdminOrders = async function(){
+    const oldNotice = document.getElementById('manualPendingNotice');
+    if(oldNotice) oldNotice.remove();
+    await __originalLoadAdminOrdersForPending();
+    updateManualPendingCount();
+  }
+}
+
+const __originalLoadProductsForPending = typeof loadProducts === 'function' ? loadProducts : null;
+if(__originalLoadProductsForPending){
+  loadProducts = async function(){
+    await __originalLoadProductsForPending();
+    ensureManualPendingCard();
+  }
+}
+
+const __originalShowSectionForAnnouncements = typeof showSection === 'function' ? showSection : null;
+if(__originalShowSectionForAnnouncements){
+  showSection = function(name){
+    __originalShowSectionForAnnouncements(name);
+    ensureManualPendingCard();
+    ensureAnnouncementsUI();
+    if(name === 'admin' && currentUser?.role === 'admin') loadAdminAnnouncements();
+  }
+}
+
+async function autoRefreshPanel(){
+  if(__autoRefreshRunning || !currentUser || document.hidden) return;
+  __autoRefreshRunning = true;
+  try{
+    ensureManualPendingCard();
+    ensureAnnouncementsUI();
+    await loadAnnouncements();
+    if(currentUser.role === 'admin'){
+      await Promise.allSettled([
+        typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
+        typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
+        typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
+        typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
+        typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve(),
+        typeof loadProducts==='function'?loadProducts():Promise.resolve(),
+        typeof loadAdminAnnouncements==='function'?loadAdminAnnouncements():Promise.resolve()
+      ]);
+    }else{
+      await Promise.allSettled([
+        typeof loadMyOrders==='function'?loadMyOrders():Promise.resolve(),
+        typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
+        typeof loadProducts==='function'?loadProducts():Promise.resolve()
+      ]);
+    }
+  }catch(e){
+    console.warn('Error autoactualizando panel', e);
+  }finally{
+    __autoRefreshRunning = false;
+  }
+}
+
+function startAutoRefreshPanel(){
+  ensureManualPendingCard();
+  ensureAnnouncementsUI();
+  loadAnnouncements();
+  if(currentUser?.role === 'admin') loadAdminAnnouncements();
+  if(__autoRefreshTimer) clearInterval(__autoRefreshTimer);
+  __autoRefreshTimer = setInterval(autoRefreshPanel, 5000);
+}
+
+setTimeout(startAutoRefreshPanel, 1200);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoRefreshPanel(); });
 
 </script>
 </body>

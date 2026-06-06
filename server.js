@@ -573,6 +573,17 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
 
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS announcements (
+      id SERIAL PRIMARY KEY,
+      message TEXT NOT NULL,
+      active INTEGER DEFAULT 1,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
@@ -1398,7 +1409,8 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
         orders.created_at,
         products.name AS product_name,
         products.category AS product_category,
-        products.charge_mode AS charge_mode
+        products.charge_mode AS charge_mode,
+        products.product_type AS product_type
        FROM orders
        JOIN products ON orders.product_id = products.id
        WHERE orders.user_id = $1
@@ -2110,7 +2122,8 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
         users.email AS customer_email,
         products.name AS product_name,
         products.category AS product_category,
-        products.charge_mode AS charge_mode
+        products.charge_mode AS charge_mode,
+        products.product_type AS product_type
        FROM orders
        JOIN users ON orders.user_id = users.id
        JOIN products ON orders.product_id = products.id
@@ -2143,7 +2156,8 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
     const orderResult = await client.query(
       `SELECT
         orders.*,
-        products.charge_mode AS charge_mode
+        products.charge_mode AS charge_mode,
+        products.product_type AS product_type
        FROM orders
        JOIN products ON orders.product_id = products.id
        WHERE orders.id = $1
@@ -2575,6 +2589,87 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error generando reporte de ventas" });
+  }
+});
+
+
+
+// COMUNICADOS GLOBALES: visibles para todos los usuarios con sesión
+app.get("/api/announcements", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, message, active, created_at
+       FROM announcements
+       WHERE active = 1
+       ORDER BY id DESC
+       LIMIT 10`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando comunicados" });
+  }
+});
+
+// ADMIN: listar comunicados
+app.get("/api/admin/announcements", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, message, active, created_at
+       FROM announcements
+       ORDER BY id DESC
+       LIMIT 50`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando comunicados" });
+  }
+});
+
+// ADMIN: crear comunicado
+app.post("/api/admin/announcements", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const message = String(req.body.message || "").trim();
+    if (!message) return res.status(400).json({ error: "El comunicado es obligatorio" });
+
+    const result = await pool.query(
+      `INSERT INTO announcements (message, active) VALUES ($1, 1) RETURNING id, message, active, created_at`,
+      [message]
+    );
+    res.json({ message: "Comunicado publicado", announcement: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error creando comunicado" });
+  }
+});
+
+// ADMIN: activar / ocultar comunicado
+app.patch("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const active = Number(req.body.active) === 1 ? 1 : 0;
+    const result = await pool.query(
+      `UPDATE announcements SET active = $1 WHERE id = $2 RETURNING id, message, active, created_at`,
+      [active, id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Comunicado no encontrado" });
+    res.json({ message: "Comunicado actualizado", announcement: result.rows[0] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando comunicado" });
+  }
+});
+
+// ADMIN: eliminar comunicado
+app.delete("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query(`DELETE FROM announcements WHERE id = $1`, [id]);
+    res.json({ message: "Comunicado eliminado" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error eliminando comunicado" });
   }
 });
 
