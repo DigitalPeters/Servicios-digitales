@@ -79,7 +79,7 @@
           <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()"><div class="dash-icon">🚫</div><div><div class="dash-label">Sin stock</div><div id="statOutOfStock" class="dash-value">0</div></div></div>
           <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
-          <div id="dashManualPendingCard" class="dash-card clickable hidden" onclick="openManualPendingOrders()"><div class="dash-icon">📝</div><div><div class="dash-label">Pedidos pendientes</div><div id="statManualPending" class="dash-value">0</div></div></div>
+          <div id="dashManualPendingCard" class="dash-card clickable hidden" onclick="openManualPendingOrders()"><div class="dash-icon">📝</div><div><div class="dash-label">Manuales pendientes</div><div id="statManualPending" class="dash-value">0</div></div></div>
           <div id="dashBalanceCard" class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
           <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
@@ -193,7 +193,7 @@
 
       <section id="section-admin" class="section">
         <h1 class="section-title">Panel admin</h1>
-        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div id="adminManualPendingCard" class="dash-card clickable hidden" onclick="openManualPendingOrders()"><div class="dash-icon">📝</div><div><div class="dash-label">Pedidos pendientes</div><div id="adminManualPendingCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
+        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div id="adminManualPendingCard" class="dash-card clickable hidden" onclick="openManualPendingOrders()"><div class="dash-icon">📝</div><div><div class="dash-label">Manuales pendientes</div><div id="adminManualPendingCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
         <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
         <div id="adminSubadminPricesPanel" class="panel">
           <div class="panel-head">
@@ -2040,7 +2040,7 @@ if(__baseSyncAdminVisibilityOutOfStock){
 
 
 // ===============================
-// INDICADOR: PEDIDOS Pedidos pendientes
+// INDICADOR: PEDIDOS MANUALES PENDIENTES
 // ===============================
 function isManualPendingOrder(order){
   const type = String(order?.product_type || '').toLowerCase();
@@ -2081,13 +2081,13 @@ function renderAdminOrdersManualPendingOnly(){
   if(!box) return;
 
   if(!orders.length){
-    box.innerHTML = 'No hay pedidos Pedidos pendientes por procesar.';
+    box.innerHTML = 'No hay pedidos manuales pendientes por procesar.';
     return;
   }
 
   box.innerHTML = `
     <div class="item" style="background:#fff7ed;border-color:#fed7aa">
-      <b>Mostrando solo pedidos Pedidos pendientes:</b> ${orders.length}
+      <b>Mostrando solo pedidos manuales pendientes:</b> ${orders.length}
       <button class="outline-btn" style="width:auto;margin-left:10px" onclick="loadAdminOrders()">Ver todos los pedidos</button>
     </div>
   ` + orders.map(o => {
@@ -2121,7 +2121,7 @@ function openManualPendingOrders(){
   setTimeout(() => {
     renderAdminOrdersManualPendingOnly();
     const count = getManualPendingOrders().length;
-    showMessage(count ? `Tienes ${count} pedido${count === 1 ? '' : 's'} manual${count === 1 ? '' : 'es'} pendiente${count === 1 ? '' : 's'} por procesar.` : 'No tienes pedidos Pedidos pendientes.');
+    showMessage(count ? `Tienes ${count} pedido${count === 1 ? '' : 's'} manual${count === 1 ? '' : 'es'} pendiente${count === 1 ? '' : 's'} por procesar.` : 'No tienes pedidos manuales pendientes.');
   }, 350);
 }
 
