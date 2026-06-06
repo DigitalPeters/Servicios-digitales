@@ -2696,6 +2696,68 @@ if(__showSectionBeforeComunicadosMenuFix){
 }
 
 setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();},400);
+
+
+// ===============================
+// FIX DEFINITIVO: usar SOLO la tira nueva de Comunicados
+// Oculta y elimina la tira antigua (#announcementTicker) para evitar doble cinta.
+// ===============================
+(function(){
+  const styleId='singleAnnouncementTickerFixStyle';
+  if(!document.getElementById(styleId)){
+    const st=document.createElement('style');
+    st.id=styleId;
+    st.textContent='#announcementTicker{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;box-shadow:none!important}';
+    document.head.appendChild(st);
+  }
+
+  function removeLegacyAnnouncementTicker(){
+    const old=document.getElementById('announcementTicker');
+    if(old) old.remove();
+    const oldAdmin=document.getElementById('adminAnnouncementsPanel');
+    if(oldAdmin) oldAdmin.remove();
+  }
+
+  const originalEnsureGlobalAnnouncementsUIFinal = typeof ensureGlobalAnnouncementsUIFinal === 'function' ? ensureGlobalAnnouncementsUIFinal : null;
+  const originalLoadGlobalAnnouncementsFinal = typeof loadGlobalAnnouncementsFinal === 'function' ? loadGlobalAnnouncementsFinal : null;
+
+  // Reemplaza la función vieja que creaba #announcementTicker.
+  ensureAnnouncementsUI = function(){
+    removeLegacyAnnouncementTicker();
+    if(originalEnsureGlobalAnnouncementsUIFinal) originalEnsureGlobalAnnouncementsUIFinal();
+    removeLegacyAnnouncementTicker();
+  };
+
+  // Auto-refresh viejo llama loadAnnouncements(); lo redirigimos a la tira nueva.
+  loadAnnouncements = async function(){
+    removeLegacyAnnouncementTicker();
+    if(originalLoadGlobalAnnouncementsFinal) await originalLoadGlobalAnnouncementsFinal();
+    removeLegacyAnnouncementTicker();
+  };
+
+  // Refuerza la función nueva para limpiar cualquier legacy antes/después.
+  if(originalEnsureGlobalAnnouncementsUIFinal){
+    ensureGlobalAnnouncementsUIFinal = function(){
+      removeLegacyAnnouncementTicker();
+      originalEnsureGlobalAnnouncementsUIFinal();
+      removeLegacyAnnouncementTicker();
+    };
+  }
+
+  if(originalLoadGlobalAnnouncementsFinal){
+    loadGlobalAnnouncementsFinal = async function(){
+      removeLegacyAnnouncementTicker();
+      await originalLoadGlobalAnnouncementsFinal();
+      removeLegacyAnnouncementTicker();
+    };
+  }
+
+  setInterval(removeLegacyAnnouncementTicker, 1000);
+  setTimeout(removeLegacyAnnouncementTicker, 50);
+  setTimeout(removeLegacyAnnouncementTicker, 500);
+  setTimeout(removeLegacyAnnouncementTicker, 1500);
+})();
+
 </script>
 </body>
 </html>
