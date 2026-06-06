@@ -2761,6 +2761,122 @@ setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal(
   setTimeout(removeLegacyAnnouncementTicker, 1500);
 })();
 
+
+// ===============================
+// FIX: Entrega manual registrada en platform_accounts
+// Al marcar Éxito en un producto manual, permite elegir plataforma registrada
+// y guardar correo/contraseña para que el usuario pueda reportar fallas.
+// ===============================
+function escapeAttrManualFix(value){
+  return String(value ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+function getAdminOrderByIdManualFix(orderId){
+  return (adminOrders || []).find(o => Number(o.id) === Number(orderId));
+}
+
+function renderManualDeliveryFormFinal(o){
+  const isManual = String(o.product_type || '').toLowerCase() === 'manual';
+  if(!isManual) return '';
+
+  const productOptions = (allProducts || [])
+    .filter(p => Number(p.active ?? 1) === 1 || p.active === true || p.active === undefined)
+    .map(p => `<option value="${escapeAttrManualFix(p.id)}" ${Number(p.id)===Number(o.product_id)?'selected':''}>${safeText(p.name || 'Producto')}</option>`)
+    .join('');
+
+  return `<div class="order-data manual-delivery-box">
+    <b>Registrar cuenta manual entregada</b>
+    <p class="small-text">Si este pedido se marcará como Éxito, llena estos datos. Se guardarán en Inventario como cuenta entregada y el usuario podrá reportarla en fallas.</p>
+    <label class="field-label">Plataforma / producto registrado</label>
+    <select id="manualPlatformProduct-${o.id}">${productOptions}</select>
+    <div class="two-row">
+      <div><label class="field-label">Correo de la cuenta</label><input id="manualAccountEmail-${o.id}" placeholder="correo@ejemplo.com" /></div>
+      <div><label class="field-label">Contraseña</label><input id="manualAccountPassword-${o.id}" placeholder="Contraseña" /></div>
+    </div>
+    <div class="two-row">
+      <div><label class="field-label">Perfil</label><input id="manualProfileName-${o.id}" placeholder="Perfil 1, P1, etc." /></div>
+      <div><label class="field-label">PIN</label><input id="manualProfilePin-${o.id}" placeholder="PIN" /></div>
+    </div>
+    <label class="field-label">URL para código/soporte opcional</label>
+    <input id="manualAccessUrl-${o.id}" placeholder="https://..." />
+  </div>`;
+}
+
+function renderAdminOrderCompactFinal(o){
+  const od=parseJsonObject(o.order_data);
+  const itemId=`admin-order-compact-${o.id}`;
+  const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
+  const manualChip=String(o.product_type||'').toLowerCase()==='manual'?'<span class="chip">Manual</span>':'';
+  return `<div class="item compact-item" id="${itemId}">
+    <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
+      <div class="compact-title">Pedido #${o.id}</div>
+      <div class="compact-meta">${safeText(o.customer_name||'Cliente')} · ${safeText(o.product_name||'Producto')} · ${safeText(getStatusText(o.status))}</div>
+    </div>
+    <div class="compact-details">
+      <p><b>Pedido:</b> #${o.id}</p>
+      <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
+      <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
+      <p><b>Producto:</b> ${safeText(o.product_name)} ${manualChip}</p>
+      <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
+      <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
+      <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
+      ${renderOrderData(od)}
+      <label class="field-label">Estado</label>
+      <select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select>
+      <label class="field-label">Respuesta para el cliente</label>
+      <textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>
+      ${renderManualDeliveryFormFinal(o)}
+      ${copyButton}
+      <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
+      <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
+    </div>
+  </div>`;
+}
+
+async function updateOrderStatus(id){
+  try{
+    const order=getAdminOrderByIdManualFix(id);
+    const status=document.getElementById('status-'+id)?.value;
+    const payload={
+      status,
+      response_message:document.getElementById('response-'+id)?.value || '',
+      refund_if_rejected:document.getElementById('refund-'+id)?.checked === true
+    };
+
+    if(order && String(order.product_type||'').toLowerCase()==='manual' && status==='exito'){
+      const accountEmail=(document.getElementById('manualAccountEmail-'+id)?.value || '').trim();
+      const accountPassword=(document.getElementById('manualAccountPassword-'+id)?.value || '').trim();
+      const platformProductId=document.getElementById('manualPlatformProduct-'+id)?.value || order.product_id;
+
+      if(accountEmail || accountPassword){
+        if(!accountEmail || !accountPassword){
+          throw new Error('Para registrar la cuenta manual, correo y contraseña son obligatorios.');
+        }
+        payload.manual_account={
+          product_id:Number(platformProductId),
+          account_email:accountEmail,
+          account_password:accountPassword,
+          profile_name:(document.getElementById('manualProfileName-'+id)?.value || '').trim(),
+          profile_pin:(document.getElementById('manualProfilePin-'+id)?.value || '').trim(),
+          access_url:(document.getElementById('manualAccessUrl-'+id)?.value || '').trim()
+        };
+      }
+    }
+
+    const data=await api('/api/admin/orders/'+id+'/status',{method:'PATCH',body:JSON.stringify(payload)});
+    showMessage(data.message||'Pedido actualizado');
+    await loadAdminOrders();
+    await loadMyOrders();
+    await loadUsers();
+    await loadPlatformInventory();
+    await loadSalesReport();
+  }catch(e){showMessage(e.message||'Error actualizando pedido','error')}
+}
+
 </script>
 </body>
 </html>

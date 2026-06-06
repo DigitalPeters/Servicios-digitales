@@ -1759,11 +1759,46 @@ async function createAccountReportHandler(req, res) {
       return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
     }
 
-    const purchase = await findReportedPurchase(pool, userId, email);
+    let purchase = await findReportedPurchase(pool, userId, email);
+
+    // Si no existe en inventario automático, busca cuentas entregadas manualmente
+    // dentro del pedido del usuario. Esto permite reportar cuentas manuales
+    // siempre que el correo aparezca en delivered_account_data o admin_response.
+    if (!purchase) {
+      const manualResult = await pool.query(
+        `SELECT
+           o.id AS order_id,
+           o.user_id,
+           o.amount,
+           o.created_at AS order_created_at,
+           o.refunded,
+           p.id AS product_id,
+           p.name AS product_name,
+           p.category AS product_category,
+           NULL::integer AS account_id,
+           p.name AS platform,
+           p.name AS account_product_name,
+           $2::text AS account_email,
+           'manual' AS account_status
+         FROM orders o
+         JOIN products p ON p.id = o.product_id
+         WHERE o.user_id = $1
+           AND o.status = 'exito'
+           AND (
+             COALESCE(o.delivered_account_data, '') ILIKE $3
+             OR COALESCE(o.admin_response, '') ILIKE $3
+           )
+         ORDER BY o.id DESC
+         LIMIT 1`,
+        [userId, email, `%${email}%`]
+      );
+
+      purchase = manualResult.rows[0] || null;
+    }
 
     if (!purchase) {
       return res.status(400).json({
-        error: "Solo puedes reportar un correo que hayas comprado y que fue entregado por el sistema. Revisa que el correo esté escrito igual al de Mis pedidos."
+        error: "Solo puedes reportar un correo que hayas comprado y que fue entregado por el sistema o manualmente. Revisa que el correo esté escrito igual al de Mis pedidos."
       });
     }
 
@@ -2143,7 +2178,7 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
   try {
     const orderId = req.params.orderId;
-    const { status, response_message, refund_if_rejected } = req.body;
+    const { status, response_message, refund_if_rejected, manual_account } = req.body;
 
     const validStatuses = ["accion_en_espera", "en_proceso", "exito", "rechazado"];
 
@@ -2230,9 +2265,131 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
       );
     }
 
+    let finalResponseMessage = response_message || "";
+    let deliveredAccountDataToSave = null;
+
+    // Cuando el admin marca Éxito en un pedido manual, puede registrar la cuenta
+    // entregada en platform_accounts para que después el usuario pueda reportarla
+    // como cualquier cuenta automática.
+    if (
+      status === "exito" &&
+      String(order.product_type || "").toLowerCase() === "manual" &&
+      manual_account &&
+      String(manual_account.account_email || "").trim() &&
+      String(manual_account.account_password || "").trim()
+    ) {
+      const selectedProductId = Number(manual_account.product_id || manual_account.platform_product_id || order.product_id);
+      const platformProductResult = await client.query(
+        `SELECT id, name, category FROM products WHERE id = $1`,
+        [selectedProductId]
+      );
+
+      const platformProduct = platformProductResult.rows[0];
+
+      if (!platformProduct) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Selecciona una plataforma válida para registrar la cuenta manual." });
+      }
+
+      const accountEmail = String(manual_account.account_email || "").trim();
+      const accountPassword = String(manual_account.account_password || "").trim();
+      const profileName = String(manual_account.profile_name || "").trim();
+      const profilePin = String(manual_account.profile_pin || "").trim();
+      const accessUrl = String(manual_account.access_url || "").trim();
+      const extraData = String(manual_account.extra_data || "").trim();
+
+      const existingAccountResult = await client.query(
+        `SELECT id FROM platform_accounts WHERE assigned_order_id = $1 ORDER BY id DESC LIMIT 1`,
+        [orderId]
+      );
+
+      let platformAccountId;
+
+      if (existingAccountResult.rows[0]) {
+        platformAccountId = existingAccountResult.rows[0].id;
+        await client.query(
+          `UPDATE platform_accounts
+           SET platform = $1,
+               product_name = $2,
+               account_email = $3,
+               account_password = $4,
+               profile_name = $5,
+               profile_pin = $6,
+               access_url = $7,
+               extra_data = $8,
+               status = 'delivered',
+               assigned_order_id = $9,
+               assigned_user_id = $10,
+               delivered_at = COALESCE(delivered_at, NOW())
+           WHERE id = $11`,
+          [
+            platformProduct.name,
+            platformProduct.name,
+            accountEmail,
+            accountPassword,
+            profileName,
+            profilePin,
+            accessUrl,
+            extraData,
+            orderId,
+            order.user_id,
+            platformAccountId
+          ]
+        );
+      } else {
+        const insertedAccountResult = await client.query(
+          `INSERT INTO platform_accounts
+           (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, assigned_order_id, assigned_user_id, delivered_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, 'delivered', $9, $10, NOW())
+           RETURNING id`,
+          [
+            platformProduct.name,
+            platformProduct.name,
+            accountEmail,
+            accountPassword,
+            profileName,
+            profilePin,
+            extraData,
+            accessUrl,
+            orderId,
+            order.user_id
+          ]
+        );
+        platformAccountId = insertedAccountResult.rows[0].id;
+      }
+
+      deliveredAccountDataToSave = buildDeliveredAccountData(
+        {
+          platform: platformProduct.name,
+          product_name: platformProduct.name,
+          account_email: accountEmail,
+          account_password: accountPassword,
+          profile_name: profileName,
+          profile_pin: profilePin,
+          access_url: accessUrl
+        },
+        platformProduct.name,
+        platformProduct.category || platformProduct.name
+      );
+
+      finalResponseMessage = deliveredAccountDataToSave;
+
+      await client.query(
+        `UPDATE orders
+         SET assigned_platform_account_id = $1,
+             delivered_account_data = $2
+         WHERE id = $3`,
+        [platformAccountId, deliveredAccountDataToSave, orderId]
+      );
+    }
+
     await client.query(
-      `UPDATE orders SET status = $1, admin_response = $2 WHERE id = $3`,
-      [status, response_message || "", orderId]
+      `UPDATE orders
+       SET status = $1,
+           admin_response = $2,
+           delivered_account_data = COALESCE($4, delivered_account_data)
+       WHERE id = $3`,
+      [status, finalResponseMessage, orderId, deliveredAccountDataToSave]
     );
 
     await client.query("COMMIT");
