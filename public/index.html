@@ -32,6 +32,9 @@
     .announcement-marquee{display:inline-block;padding-left:100%;animation:announcement-scroll 22s linear infinite;font-weight:900}
     .announcement-marquee span{margin-right:42px}
     @keyframes announcement-scroll{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
+    .global-announcement-badge,.announcement-badge{display:none!important}
+    .global-announcement-track,.announcement-track{width:100%;flex:1}
+
     .announcement-admin-list .item{background:#fff}
     .urgent-card{border:2px solid #ef4444!important}
   </style>
@@ -2132,7 +2135,7 @@ function ensureAnnouncementsUI(){
     const ticker = document.createElement('div');
     ticker.id = 'announcementTicker';
     ticker.className = 'announcement-ticker';
-    ticker.innerHTML = `<div class="announcement-badge">📢 Comunicado</div><div class="announcement-track"><div id="announcementMarquee" class="announcement-marquee"></div></div>`;
+    ticker.innerHTML = `<div class="announcement-track"><div id="announcementMarquee" class="announcement-marquee"></div></div>`;
     topbar.insertAdjacentElement('afterend', ticker);
   }
   if(currentUser?.role === 'admin') ensureAnnouncementAdminPanel();
@@ -2344,7 +2347,7 @@ function ensureGlobalAnnouncementsUIFinal(){
     const ticker=document.createElement('div');
     ticker.id='globalAnnouncementTicker';
     ticker.className='global-announcement-ticker';
-    ticker.innerHTML=`<div class="global-announcement-badge">📢 Comunicado</div><div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
+    ticker.innerHTML=`<div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
     topbar.insertAdjacentElement('afterend', ticker);
   }
 
@@ -2591,7 +2594,7 @@ function ensureGlobalAnnouncementsUIFinal(){
     const ticker=document.createElement('div');
     ticker.id='globalAnnouncementTicker';
     ticker.className='global-announcement-ticker';
-    ticker.innerHTML=`<div class="global-announcement-badge">📢 Comunicado</div><div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
+    ticker.innerHTML=`<div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
     topbar.insertAdjacentElement('afterend', ticker);
   }
 
