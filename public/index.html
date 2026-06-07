@@ -3067,177 +3067,278 @@ async function loadMyFailureResponsesFinal(){
 
 
 // ===============================
-// AJUSTE FINAL: FALLAS EN DASHBOARD
-// - Quita Reportar/Respuesta de fallas del menú lateral para usuarios/subadmin.
-// - Convierte tarjetas del dashboard en accesos: Reportar falla, Cargar saldo.
-// - Agrega tarjeta Respuesta de fallas en dashboard.
+// FASE 1: Crear y administrar paneles admin secundarios
+// Esta sección es solo para el admin principal.
 // ===============================
-function isPrincipalAdminDashboardFinal(){
-  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
-}
+function ensureAdminPanelsPhase1UI(){
+  if(!currentUser || String(currentUser.role||'').toLowerCase()!=='admin') return;
 
-function ensureFailureResponsesSectionDashboardFinal(){
-  const main=document.querySelector('.main');
-  if(!main) return;
-  if(!document.getElementById('section-failure-responses')){
-    const section=document.createElement('section');
-    section.id='section-failure-responses';
-    section.className='section';
-    section.innerHTML=`
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Respuesta de fallas</h2>
-            <p class="small-text">Aquí aparecerán las respuestas del admin a tus reportes.</p>
-          </div>
-          <button class="outline-btn" style="width:auto" onclick="loadMyFailureResponsesFinalDashboard()">Actualizar</button>
-        </div>
-        <div id="myFailureResponsesList">Cargando respuestas...</div>
-      </div>`;
-    const reportsSection=document.getElementById('section-reports');
-    if(reportsSection) reportsSection.insertAdjacentElement('afterend', section);
-    else main.appendChild(section);
-  }
-}
+  const adminSection=document.getElementById('section-admin');
+  if(!adminSection) return;
 
-function hideFailureMenuItemsDashboardFinal(){
-  const principal=isPrincipalAdminDashboardFinal();
-  document.querySelectorAll('.menu-btn').forEach(btn=>{
-    const txt=(btn.textContent||'').toLowerCase();
-    const sec=btn.getAttribute('data-section')||'';
-    if(!principal && (sec==='reports' || sec==='reports-menu' || sec==='failure-responses' || txt.includes('reportar') || txt.includes('respuesta de fallas'))){
-      btn.style.display='none';
-    }
-  });
-}
-
-function buildDashboardActionCardDashboardFinal(id, icon, label, detail, onclickCode, hiddenSpanId){
-  return `<div id="${id}" class="dash-card clickable dashboard-action-card" onclick="${onclickCode}">
-    <div class="dash-icon">${icon}</div>
-    <div>
-      <div class="dash-label">${label}</div>
-      <div class="small-text">${detail}</div>
-      ${hiddenSpanId?`<span id="${hiddenSpanId}" class="hidden">0</span>`:''}
-    </div>
-  </div>`;
-}
-
-function configureDashboardFailureCardsFinal(){
-  if(!currentUser) return;
-  ensureFailureResponsesSectionDashboardFinal();
-  hideFailureMenuItemsDashboardFinal();
-
-  // Admin principal conserva sus contadores de pendientes.
-  if(isPrincipalAdminDashboardFinal()) return;
-
-  const statReports=document.getElementById('statReports');
-  const reportCard=statReports?.closest('.dash-card');
-  if(reportCard && !reportCard.dataset.convertedReportAction){
-    reportCard.dataset.convertedReportAction='1';
-    reportCard.id='dashReportFaultActionCard';
-    reportCard.setAttribute('onclick', "showSection('reports')");
-    reportCard.classList.add('dashboard-action-card');
-    reportCard.innerHTML=`<div class="dash-icon">⚠</div><div><div class="dash-label">Reportar falla</div><div class="small-text">Abrir formulario</div><span id="statReports" class="hidden">0</span></div>`;
-  }
-
-  const statBalance=document.getElementById('statBalanceRequests');
-  const balanceCard=statBalance?.closest('.dash-card');
-  if(balanceCard && !balanceCard.dataset.convertedBalanceAction){
-    balanceCard.dataset.convertedBalanceAction='1';
-    balanceCard.id='dashLoadBalanceActionCard';
-    balanceCard.setAttribute('onclick', "showSection('balance')");
-    balanceCard.classList.add('dashboard-action-card');
-    balanceCard.innerHTML=`<div class="dash-icon">💳</div><div><div class="dash-label">Cargar saldo</div><div class="small-text">Enviar datos de transferencia</div><span id="statBalanceRequests" class="hidden">0</span></div>`;
-  }
-
-  const grid=document.querySelector('#section-dashboard .grid-cards');
-  if(grid && !document.getElementById('dashFailureResponsesActionCard')){
+  const grid=adminSection.querySelector('.grid-cards');
+  if(grid && !document.getElementById('adminPanelsCardPhase1')){
     const card=document.createElement('div');
-    card.innerHTML=buildDashboardActionCardDashboardFinal(
-      'dashFailureResponsesActionCard','💬','Respuesta de fallas','Ver respuestas del admin',"openFailureResponsesFinalDashboard()",''
-    );
-    grid.appendChild(card.firstElementChild);
+    card.id='adminPanelsCardPhase1';
+    card.className='dash-card clickable';
+    card.onclick=function(){ scrollToAdmin('adminPanelsPanelPhase1'); loadAdminPanelsPhase1(); };
+    card.innerHTML=`<div class="dash-icon">🏢</div><div><div class="dash-label">Paneles admin</div><div id="adminPanelsCountPhase1" class="dash-value">0</div></div>`;
+    grid.appendChild(card);
+  }
+
+  if(!document.getElementById('adminPanelsPanelPhase1')){
+    const panel=document.createElement('div');
+    panel.id='adminPanelsPanelPhase1';
+    panel.className='panel';
+    panel.innerHTML=`
+      <div class="panel-head">
+        <div>
+          <h2>Paneles admin</h2>
+          <p class="small-text">Crea paneles para admins que renten o compren su propio acceso. En esta fase solo se registran sus datos, banco y estado.</p>
+        </div>
+        <button class="outline-btn" style="width:auto" onclick="loadAdminPanelsPhase1()">Actualizar</button>
+      </div>
+
+      <div class="row">
+        <div>
+          <h3>Crear nuevo panel</h3>
+          <label class="field-label">Nombre del negocio</label>
+          <input id="panelBusinessNamePhase1" placeholder="Ejemplo: Servicios Digitales Juan" />
+
+          <label class="field-label">Nombre del admin</label>
+          <input id="panelAdminNamePhase1" placeholder="Nombre completo" />
+
+          <label class="field-label">Correo de acceso</label>
+          <input id="panelEmailPhase1" type="email" placeholder="admin@correo.com" />
+
+          <label class="field-label">Contraseña inicial</label>
+          <input id="panelPasswordPhase1" type="password" placeholder="Mínimo 6 caracteres" />
+
+          <label class="field-label">Teléfono</label>
+          <input id="panelPhonePhase1" placeholder="Teléfono / WhatsApp" />
+        </div>
+
+        <div>
+          <h3>Datos de banco y plan</h3>
+          <label class="field-label">Banco</label>
+          <input id="panelBankNamePhase1" placeholder="BBVA, Mercado Pago, etc." />
+
+          <label class="field-label">Titular</label>
+          <input id="panelBankHolderPhase1" placeholder="Nombre del titular" />
+
+          <label class="field-label">CLABE / cuenta</label>
+          <input id="panelBankClabePhase1" placeholder="CLABE o número de cuenta" />
+
+          <label class="field-label">Concepto de pago</label>
+          <input id="panelPaymentConceptPhase1" placeholder="Ejemplo: servicios" />
+
+          <label class="field-label">Correo de notificaciones</label>
+          <input id="panelNotificationEmailPhase1" type="email" placeholder="correo para pedidos y alertas" />
+
+          <div class="two-row">
+            <div>
+              <label class="field-label">Estado</label>
+              <select id="panelStatusPhase1">
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+                <option value="suspendido">Suspendido</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Tipo de plan</label>
+              <select id="panelPlanTypePhase1">
+                <option value="renta">Renta mensual</option>
+                <option value="compra">Compra única</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="field-label">Fecha de vencimiento</label>
+          <input id="panelExpiresAtPhase1" type="date" />
+
+          <button class="primary-btn" onclick="createAdminPanelPhase1()">Crear panel admin</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+      <h3>Paneles registrados</h3>
+      <div id="adminPanelsListPhase1">Cargando paneles...</div>
+    `;
+
+    const usersPanel=document.getElementById('adminUsersPanel');
+    if(usersPanel) usersPanel.insertAdjacentElement('beforebegin', panel);
+    else adminSection.appendChild(panel);
   }
 }
 
-function openFailureResponsesFinalDashboard(){
-  ensureFailureResponsesSectionDashboardFinal();
-  showSection('failure-responses');
-  loadMyFailureResponsesFinalDashboard();
+function getAdminPanelPhase1Payload(){
+  return {
+    business_name:document.getElementById('panelBusinessNamePhase1')?.value || '',
+    admin_name:document.getElementById('panelAdminNamePhase1')?.value || '',
+    email:document.getElementById('panelEmailPhase1')?.value || '',
+    password:document.getElementById('panelPasswordPhase1')?.value || '',
+    phone:document.getElementById('panelPhonePhase1')?.value || '',
+    bank_name:document.getElementById('panelBankNamePhase1')?.value || '',
+    bank_holder:document.getElementById('panelBankHolderPhase1')?.value || '',
+    bank_clabe:document.getElementById('panelBankClabePhase1')?.value || '',
+    payment_concept:document.getElementById('panelPaymentConceptPhase1')?.value || '',
+    notification_email:document.getElementById('panelNotificationEmailPhase1')?.value || '',
+    status:document.getElementById('panelStatusPhase1')?.value || 'activo',
+    plan_type:document.getElementById('panelPlanTypePhase1')?.value || 'renta',
+    expires_at:document.getElementById('panelExpiresAtPhase1')?.value || null
+  };
 }
 
-function getReportStatusTextFinalDashboard(status){
-  const map={pendiente:'Pendiente',resuelto:'Resuelto',reemplazo:'Reemplazo',reembolso:'Reembolso',rechazado:'Rechazado'};
-  return map[String(status||'').toLowerCase()] || status || 'Pendiente';
+function clearAdminPanelPhase1Form(){
+  [
+    'panelBusinessNamePhase1','panelAdminNamePhase1','panelEmailPhase1','panelPasswordPhase1',
+    'panelPhonePhase1','panelBankNamePhase1','panelBankHolderPhase1','panelBankClabePhase1',
+    'panelPaymentConceptPhase1','panelNotificationEmailPhase1','panelExpiresAtPhase1'
+  ].forEach(id=>{const el=document.getElementById(id); if(el) el.value='';});
+  const status=document.getElementById('panelStatusPhase1'); if(status) status.value='activo';
+  const plan=document.getElementById('panelPlanTypePhase1'); if(plan) plan.value='renta';
 }
 
-async function loadMyFailureResponsesFinalDashboard(){
-  const box=document.getElementById('myFailureResponsesList');
-  if(!box) return;
+async function loadAdminPanelsPhase1(){
+  if(!currentUser || String(currentUser.role||'').toLowerCase()!=='admin') return;
+  ensureAdminPanelsPhase1UI();
+
+  const box=document.getElementById('adminPanelsListPhase1');
   try{
-    const reports=await api('/api/my-account-reports');
-    if(!Array.isArray(reports) || !reports.length){
-      box.innerHTML='Todavía no tienes reportes de falla.';
+    const panels=await api('/api/admin/admin-panels');
+    const count=document.getElementById('adminPanelsCountPhase1');
+    if(count) count.textContent=Array.isArray(panels)?panels.length:0;
+
+    if(!box) return;
+
+    if(!Array.isArray(panels) || !panels.length){
+      box.innerHTML='Todavía no hay paneles admin registrados.';
       return;
     }
-    box.innerHTML=reports.map(r=>`
-      <div class="item compact-item">
-        <div class="compact-header" onclick="this.parentNode.classList.toggle('open')">
-          <div class="compact-title">Reporte #${r.id}${r.order_id?` · Pedido #${r.order_id}`:''}</div>
-          <div class="compact-meta">${safeText(r.email||'correo reportado')} · ${safeText(getReportStatusTextFinalDashboard(r.status))}</div>
-        </div>
-        <div class="compact-details">
-          <p><b>Reporte:</b> #${r.id}</p>
-          ${r.order_id?`<p><b>Pedido:</b> #${r.order_id}</p>`:''}
-          <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
-          <p><b>Tipo de falla:</b> ${safeText(r.issue_type||'otro')}</p>
-          <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
-          <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinalDashboard(r.status))}</span></p>
-          <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
-        </div>
-      </div>`).join('');
+
+    box.innerHTML=`<div class="table-wrap"><table class="mini-table">
+      <thead>
+        <tr>
+          <th>Panel</th>
+          <th>Admin</th>
+          <th>Banco</th>
+          <th>Plan</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${panels.map(p=>`
+          <tr>
+            <td>
+              <b>${safeText(p.business_name||'Sin nombre')}</b><br>
+              <span class="small-text">${safeText(p.email||'')}</span>
+            </td>
+            <td>
+              ${safeText(p.admin_name||'')}<br>
+              <span class="small-text">${safeText(p.phone||'')}</span>
+            </td>
+            <td>
+              <b>${safeText(p.bank_name||'')}</b><br>
+              <span class="small-text">${safeText(p.bank_holder||'')}</span><br>
+              <span class="small-text">${safeText(p.bank_clabe||'')}</span>
+            </td>
+            <td>
+              ${safeText(p.plan_type||'renta')}<br>
+              <span class="small-text">Vence: ${safeText(p.expires_at ? String(p.expires_at).slice(0,10) : 'Sin fecha')}</span>
+            </td>
+            <td><span class="status">${safeText(p.status||'activo')}</span></td>
+            <td>
+              <button class="outline-btn" style="width:auto;margin-bottom:6px" onclick="updateAdminPanelStatusPhase1(${p.id}, '${String(p.status||'activo')==='activo'?'suspendido':'activo'}')">
+                ${String(p.status||'activo')==='activo'?'Suspender':'Activar'}
+              </button>
+              <button class="muted-btn" style="width:auto" onclick="copyAdminPanelInfoPhase1(${p.id})">Copiar datos</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`;
+
+    window.__adminPanelsPhase1Cache=panels;
   }catch(e){
-    box.innerHTML='No se pudieron cargar tus respuestas de fallas.';
-    console.warn('Error cargando respuestas de fallas', e);
+    if(box) box.innerHTML='No se pudieron cargar los paneles admin.';
+    showMessage(e.message||'Error cargando paneles admin','error');
   }
+}
+
+async function createAdminPanelPhase1(){
+  try{
+    const payload=getAdminPanelPhase1Payload();
+
+    if(!payload.email.trim()) throw new Error('El correo del admin es obligatorio.');
+    if(!payload.password.trim() || payload.password.trim().length<6) throw new Error('La contraseña debe tener mínimo 6 caracteres.');
+
+    const data=await api('/api/admin/admin-panels',{
+      method:'POST',
+      body:JSON.stringify(payload)
+    });
+
+    showMessage(data.message||'Panel admin creado correctamente');
+    clearAdminPanelPhase1Form();
+    await loadAdminPanelsPhase1();
+  }catch(e){
+    showMessage(e.message||'Error creando panel admin','error');
+  }
+}
+
+async function updateAdminPanelStatusPhase1(panelId,status){
+  try{
+    const data=await api('/api/admin/admin-panels/'+panelId+'/status',{
+      method:'PATCH',
+      body:JSON.stringify({status})
+    });
+    showMessage(data.message||'Estado actualizado');
+    await loadAdminPanelsPhase1();
+  }catch(e){
+    showMessage(e.message||'Error actualizando estado','error');
+  }
+}
+
+function copyAdminPanelInfoPhase1(panelId){
+  const panel=(window.__adminPanelsPhase1Cache||[]).find(p=>Number(p.id)===Number(panelId));
+  if(!panel) return;
+  const text=[
+    `Panel: ${panel.business_name||''}`,
+    `Admin: ${panel.admin_name||''}`,
+    `Correo: ${panel.email||''}`,
+    `Banco: ${panel.bank_name||''}`,
+    `Titular: ${panel.bank_holder||''}`,
+    `CLABE/Cuenta: ${panel.bank_clabe||''}`,
+    `Concepto: ${panel.payment_concept||''}`,
+    `Correo notificaciones: ${panel.notification_email||''}`,
+    `Estado: ${panel.status||''}`,
+    `Plan: ${panel.plan_type||''}`,
+    `Vence: ${panel.expires_at ? String(panel.expires_at).slice(0,10) : 'Sin fecha'}`
+  ].join('\n');
+
+  navigator.clipboard?.writeText(text).then(
+    ()=>showMessage('Datos del panel copiados'),
+    ()=>showMessage(text)
+  );
 }
 
 (function(){
-  const st=document.createElement('style');
-  st.id='dashboardFailureCardsFinalStyle';
-  st.textContent=`
-    .dashboard-action-card .small-text{font-size:15px;font-weight:800;color:var(--muted);margin-top:6px}
-    .compact-details{display:none;margin-top:12px}.compact-item.open .compact-details{display:block}
-    .compact-header{cursor:pointer;display:flex;justify-content:space-between;gap:12px;align-items:center}
-    .compact-title{font-weight:900}.compact-meta{color:var(--muted);font-size:13px;font-weight:800;text-align:right}
-    @media(max-width:760px){.compact-header{display:block}.compact-meta{text-align:left;margin-top:4px}.dashboard-action-card .small-text{font-size:13px}}
-  `;
-  if(!document.getElementById(st.id)) document.head.appendChild(st);
-
-  const oldShow=typeof showSection==='function'?showSection:null;
-  if(oldShow){
+  const previousShowPhase1=typeof showSection==='function'?showSection:null;
+  if(previousShowPhase1){
     showSection=function(name){
-      const result=oldShow(name);
-      setTimeout(()=>{
-        configureDashboardFailureCardsFinal();
-        if(name==='failure-responses') loadMyFailureResponsesFinalDashboard();
-      },60);
-      return result;
+      previousShowPhase1(name);
+      if(name==='admin' && currentUser && String(currentUser.role||'').toLowerCase()==='admin'){
+        setTimeout(()=>{ensureAdminPanelsPhase1UI();loadAdminPanelsPhase1();},120);
+      }
     };
   }
 
-  const oldLoadApp=typeof loadApp==='function'?loadApp:null;
-  if(oldLoadApp){
-    loadApp=async function(){
-      const result=await oldLoadApp.apply(this, arguments);
-      setTimeout(configureDashboardFailureCardsFinal,100);
-      setTimeout(configureDashboardFailureCardsFinal,900);
-      return result;
-    };
-  }
-
-  setTimeout(configureDashboardFailureCardsFinal,400);
-  setTimeout(configureDashboardFailureCardsFinal,1500);
+  setTimeout(()=>{
+    if(currentUser && String(currentUser.role||'').toLowerCase()==='admin'){
+      ensureAdminPanelsPhase1UI();
+      if(document.getElementById('section-admin')?.classList.contains('active')) loadAdminPanelsPhase1();
+    }
+  },1000);
 })();
 
 </script>

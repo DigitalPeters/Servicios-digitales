@@ -584,6 +584,28 @@ async function initDatabase() {
   `);
 
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_panels (
+      id SERIAL PRIMARY KEY,
+      business_name TEXT DEFAULT '',
+      admin_name TEXT DEFAULT '',
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      phone TEXT DEFAULT '',
+      bank_name TEXT DEFAULT '',
+      bank_holder TEXT DEFAULT '',
+      bank_clabe TEXT DEFAULT '',
+      payment_concept TEXT DEFAULT '',
+      notification_email TEXT DEFAULT '',
+      status TEXT DEFAULT 'activo',
+      plan_type TEXT DEFAULT 'renta',
+      expires_at DATE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
@@ -2850,6 +2872,135 @@ app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, r
     res.status(500).json({ error: "Error probando correo" });
   }
 });
+
+
+// ===============================
+// FASE 1: PANELES ADMIN SECUNDARIOS
+// Solo el admin principal puede crear/listar/suspender paneles.
+// ===============================
+app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, business_name, admin_name, email, phone, bank_name, bank_holder,
+              bank_clabe, payment_concept, notification_email, status, plan_type,
+              expires_at, created_at, updated_at
+       FROM admin_panels
+       ORDER BY id DESC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error listando paneles admin:", err.message);
+    res.status(500).json({ error: "Error cargando paneles admin" });
+  }
+});
+
+app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const {
+      business_name,
+      admin_name,
+      email,
+      password,
+      phone,
+      bank_name,
+      bank_holder,
+      bank_clabe,
+      payment_concept,
+      notification_email,
+      status,
+      plan_type,
+      expires_at
+    } = req.body;
+
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanPassword = String(password || "").trim();
+
+    if (!cleanEmail) {
+      return res.status(400).json({ error: "El correo del admin es obligatorio" });
+    }
+
+    if (!cleanPassword || cleanPassword.length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    const exists = await pool.query(`SELECT id FROM admin_panels WHERE lower(email) = lower($1)`, [cleanEmail]);
+    if (exists.rows.length) {
+      return res.status(400).json({ error: "Este correo ya tiene un panel admin registrado" });
+    }
+
+    const hashedPassword = await bcrypt.hash(cleanPassword, 10);
+
+    const result = await pool.query(
+      `INSERT INTO admin_panels
+       (business_name, admin_name, email, password, phone, bank_name, bank_holder,
+        bank_clabe, payment_concept, notification_email, status, plan_type, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING id, business_name, admin_name, email, phone, bank_name, bank_holder,
+                 bank_clabe, payment_concept, notification_email, status, plan_type,
+                 expires_at, created_at, updated_at`,
+      [
+        String(business_name || "").trim(),
+        String(admin_name || "").trim(),
+        cleanEmail,
+        hashedPassword,
+        String(phone || "").trim(),
+        String(bank_name || "").trim(),
+        String(bank_holder || "").trim(),
+        String(bank_clabe || "").trim(),
+        String(payment_concept || "").trim(),
+        String(notification_email || "").trim(),
+        String(status || "activo").trim() || "activo",
+        String(plan_type || "renta").trim() || "renta",
+        expires_at || null
+      ]
+    );
+
+    res.json({
+      message: "Panel admin creado correctamente",
+      panel: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Error creando panel admin:", err.message);
+    res.status(500).json({ error: "Error creando panel admin" });
+  }
+});
+
+app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const panelId = Number(req.params.id);
+    const status = String(req.body.status || "").trim();
+
+    if (!panelId) {
+      return res.status(400).json({ error: "Panel inválido" });
+    }
+
+    if (!["activo", "inactivo", "suspendido"].includes(status)) {
+      return res.status(400).json({ error: "Estado inválido" });
+    }
+
+    const result = await pool.query(
+      `UPDATE admin_panels
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, business_name, admin_name, email, status`,
+      [status, panelId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Panel admin no encontrado" });
+    }
+
+    res.json({
+      message: "Estado del panel actualizado",
+      panel: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Error actualizando panel admin:", err.message);
+    res.status(500).json({ error: "Error actualizando panel admin" });
+  }
+});
+
 
 initDatabase()
   .then(() => {
