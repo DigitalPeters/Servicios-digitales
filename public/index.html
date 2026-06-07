@@ -148,10 +148,10 @@
           <p class="small-text">Envía solo los datos necesarios para que el administrador valide tu transferencia.</p>
           <div class="bank-box">
             <b>Datos para transferencia:</b><br>
-            Banco: Mercado Pago<br>
-            Titular: Pedro Garcia Diaz<br>
-            CLABE: <span id="clabeText">722969020555596471</span><button class="copy-btn" onclick="copyText('722969020555596471')">Copiar</button><br>
-            Concepto: <span id="conceptText">ropa o comida</span><button class="copy-btn" onclick="copyText('ropa o comida')">Copiar</button><br><br>
+            Banco: <span id="bankNameText">Mercado Pago</span><br>
+            Titular: <span id="bankHolderText">Pedro Garcia Diaz</span><br>
+            CLABE: <span id="clabeText">722969020555596471</span><button id="copyClabeBtn" class="copy-btn" onclick="copyText(document.getElementById('clabeText')?.textContent || '')">Copiar</button><br>
+            Concepto: <span id="conceptText">ropa o comida</span><button id="copyConceptBtn" class="copy-btn" onclick="copyText(document.getElementById('conceptText')?.textContent || '')">Copiar</button><br><br>
             <b>Importante:</b> El saldo no se agrega automáticamente. Primero envías tus datos y luego se aprueba.
           </div>
           <div class="row">
@@ -2920,7 +2920,7 @@ async function updateOrderStatus(id){
 // FIX FINAL: Comunicados solo para admin principal + menú Reportar con respuestas
 // ===============================
 function isMainAdminOnlyFinal(){
-  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
+  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
 }
 
 function applyComunicadosVisibilityFinal(){
@@ -3352,6 +3352,159 @@ function copyAdminPanelInfoPhase1(panelId){
     }
   },1000);
 })();
+
+
+// ===============================
+// FASE 2 INICIO: Panel admin rentado con productos, inventario, banco y comunicados propios
+// ===============================
+function isPanelAdminRented(){
+  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+}
+function isAnyAdminUserPanel(){
+  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
+}
+function isMainAdminPrincipal(){
+  return isAnyAdminUserPanel() && !isPanelAdminRented();
+}
+function hideElementHard(el, hidden){
+  if(!el) return;
+  el.classList.toggle('hidden', !!hidden);
+  el.style.display = hidden ? 'none' : '';
+}
+function applyRentedAdminLayout(){
+  const panel = isPanelAdminRented();
+  const main = isMainAdminPrincipal();
+
+  // Menú admin: solo principal ve el panel completo. El rentado entra desde tarjetas.
+  hideElementHard(document.getElementById('adminMenuBtn'), true);
+  hideElementHard(document.getElementById('adminSalesMenuBtn'), !main);
+
+  // Tarjetas dashboard para panel rentado.
+  const userCard = document.querySelector('.dash-card[onclick="openUsersFromDashboard()"]');
+  hideElementHard(userCard, panel); // se quita Usuarios porque ya existe Mis vendedores.
+  hideElementHard(document.getElementById('dashInventoryCard'), !(main || panel));
+  hideElementHard(document.getElementById('dashSalesTodayCard'), !main); // ventas propias completas van en fase de reportes.
+  hideElementHard(document.getElementById('dashboardChartsPanel'), !main);
+  hideElementHard(document.getElementById('adminPanelsCardPhase1'), !main);
+  hideElementHard(document.getElementById('adminPanelsPanelPhase1'), !main);
+
+  // Dentro del admin rentado solo mostramos lo que necesita para operar su panel.
+  if(panel){
+    hideElementHard(document.getElementById('section-admin'), false);
+    hideElementHard(document.getElementById('adminUsersPanel'), true);
+    hideElementHard(document.getElementById('adminSubadminPricesPanel'), true);
+    hideElementHard(document.getElementById('adminBalanceRequestsPanel'), true);
+    hideElementHard(document.getElementById('adminAccountReportsPanel'), true);
+    hideElementHard(document.getElementById('adminSalesReportPanel'), true);
+    hideElementHard(document.getElementById('adminOrdersPanel'), false);
+    hideElementHard(document.getElementById('adminProductsPanel'), false);
+    hideElementHard(document.getElementById('adminPlatformAccountsPanel'), false);
+
+    const title=document.querySelector('#section-admin .section-title');
+    if(title) title.textContent='Mi panel admin';
+  }
+
+  // Comunicados: el admin principal y cada panel rentado pueden manejar sus propios avisos.
+  const commBtn=document.getElementById('announcementsMenuBtn');
+  const commSection=document.getElementById('section-comunicados');
+  if(isAnyAdminUserPanel()){
+    if(commBtn) hideElementHard(commBtn, false);
+    if(commSection) hideElementHard(commSection, false);
+  }else{
+    if(commBtn) hideElementHard(commBtn, true);
+  }
+}
+
+const __showSectionBeforeRentedAdmin = typeof showSection === 'function' ? showSection : null;
+showSection = function(name){
+  if(name === 'admin' && !isAnyAdminUserPanel()) name = 'dashboard';
+
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  const sec=document.getElementById('section-'+name);
+  if(sec) sec.classList.add('active');
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section===name));
+  document.getElementById('sidebar')?.classList.remove('show');
+
+  applyRentedAdminLayout();
+
+  if(name==='shop' && typeof loadProducts==='function') loadProducts();
+  if(name==='orders' && typeof loadMyOrders==='function') loadMyOrders();
+  if(name==='balance' && typeof loadBankInfoForPanel==='function') loadBankInfoForPanel();
+  if(name==='comunicados' && typeof loadComunicadosSectionFinal==='function') loadComunicadosSectionFinal();
+
+  if(name==='admin' && isAnyAdminUserPanel()){
+    Promise.allSettled([
+      !isPanelAdminRented() && typeof loadUsers==='function' ? loadUsers() : Promise.resolve(),
+      typeof loadAdminProducts==='function' ? loadAdminProducts() : Promise.resolve(),
+      typeof loadAdminOrders==='function' ? loadAdminOrders() : Promise.resolve(),
+      !isPanelAdminRented() && typeof loadBalanceRequests==='function' ? loadBalanceRequests() : Promise.resolve(),
+      !isPanelAdminRented() && typeof loadAccountReports==='function' ? loadAccountReports() : Promise.resolve(),
+      !isPanelAdminRented() && typeof loadSalesReport==='function' ? loadSalesReport(true) : Promise.resolve(),
+      typeof loadPlatformInventory==='function' ? loadPlatformInventory() : Promise.resolve()
+    ]).then(()=>applyRentedAdminLayout());
+  }
+};
+
+function scrollToAdmin(id){
+  if(!isAnyAdminUserPanel()) return showSection('dashboard');
+  showSection('admin');
+  setTimeout(()=>{
+    applyRentedAdminLayout();
+    const el=document.getElementById(id);
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  },160);
+}
+
+openUsersFromDashboard = function(){
+  if(isPanelAdminRented()) return showSection('distributor');
+  if(isMainAdminPrincipal()) return scrollToAdmin('adminUsersPanel');
+  showSection('account');
+};
+openProductsFromDashboard = function(){
+  if(isAnyAdminUserPanel()) return scrollToAdmin('adminProductsPanel');
+  showSection('shop');
+};
+openInventoryFromDashboard = function(){
+  if(isAnyAdminUserPanel()) return scrollToAdmin('adminPlatformAccountsPanel');
+  showSection('shop');
+};
+openOrdersFromDashboard = function(){
+  if(isAnyAdminUserPanel()) return scrollToAdmin('adminOrdersPanel');
+  showSection('orders');
+};
+
+async function loadBankInfoForPanel(){
+  try{
+    const info=await api('/api/bank-info');
+    const setText=(id,val)=>{const el=document.getElementById(id); if(el) el.textContent=val || '';};
+    setText('bankNameText', info.bank_name || '');
+    setText('bankHolderText', info.bank_holder || '');
+    setText('clabeText', info.bank_clabe || '');
+    setText('conceptText', info.payment_concept || '');
+  }catch(e){
+    console.warn('No se pudieron cargar datos bancarios', e);
+  }
+}
+
+const __loadAppBeforeRentedAdmin = typeof loadApp === 'function' ? loadApp : null;
+if(__loadAppBeforeRentedAdmin){
+  loadApp = async function(){
+    await __loadAppBeforeRentedAdmin();
+    await loadBankInfoForPanel();
+    applyRentedAdminLayout();
+    if(isPanelAdminRented()){
+      const statUsersEl=document.getElementById('statUsers'); if(statUsersEl) statUsersEl.textContent='0';
+      await Promise.allSettled([
+        typeof loadProducts==='function'?loadProducts():Promise.resolve(),
+        typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve()
+      ]);
+      applyRentedAdminLayout();
+    }
+  };
+}
+
+setTimeout(()=>{loadBankInfoForPanel();applyRentedAdminLayout();},800);
+setTimeout(()=>applyRentedAdminLayout(),1800);
 
 </script>
 </body>

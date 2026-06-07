@@ -289,7 +289,15 @@ async function adminMiddleware(req, res, next) {
     }
 
     const userResult = await pool.query(
-      `SELECT id, email FROM users WHERE id = $1`,
+      `SELECT u.id, u.email, u.name, u.role, u.balance,
+              COALESCE(u.is_subadmin, false) AS is_subadmin,
+              u.owner_user_id,
+              ap.id AS admin_panel_id,
+              ap.business_name AS admin_panel_business_name,
+              ap.status AS admin_panel_status
+       FROM users u
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       WHERE u.id = $1`,
       [req.user.id]
     );
 
@@ -298,20 +306,25 @@ async function adminMiddleware(req, res, next) {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    const panelResult = await pool.query(
-      `SELECT id FROM admin_panels WHERE lower(email) = lower($1) LIMIT 1`,
-      [user.email]
-    );
-
-    if (panelResult.rows.length) {
-      return res.status(403).json({ error: "Admin principal requerido" });
+    if (user.admin_panel_id && String(user.admin_panel_status || "activo").toLowerCase() !== "activo") {
+      return res.status(403).json({ error: "Panel suspendido o inactivo" });
     }
 
+    req.adminUser = user;
+    req.isPanelAdmin = Boolean(user.admin_panel_id);
+    req.isMainAdmin = !req.isPanelAdmin;
     next();
   } catch (err) {
-    console.error("Error validando admin principal:", err.message);
+    console.error("Error validando admin:", err.message);
     return res.status(500).json({ error: "Error validando permisos" });
   }
+}
+
+function mainAdminMiddleware(req, res, next) {
+  if (!req.isMainAdmin) {
+    return res.status(403).json({ error: "Admin principal requerido" });
+  }
+  next();
 }
 
 
@@ -363,6 +376,39 @@ async function getAdminPanelForEmail(email, client = pool) {
   );
 
   return result.rows[0] || null;
+}
+
+
+async function getViewerContext(userId, client = pool) {
+  const result = await client.query(
+    `SELECT u.id, u.name, u.email, u.role, u.balance,
+            COALESCE(u.is_subadmin, false) AS is_subadmin,
+            u.owner_user_id,
+            ap.id AS admin_panel_id,
+            ap.business_name AS admin_panel_business_name,
+            ap.bank_name, ap.bank_holder, ap.bank_clabe, ap.payment_concept,
+            ap.notification_email, ap.status AS admin_panel_status
+     FROM users u
+     LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+     WHERE u.id = $1`,
+    [userId]
+  );
+  const viewer = result.rows[0] || null;
+  if (!viewer) return null;
+  viewer.is_panel_admin = Boolean(viewer.admin_panel_id);
+  viewer.owner_admin_id = viewer.is_panel_admin ? viewer.id : (viewer.owner_user_id || null);
+  return viewer;
+}
+
+function adminOwnedWhere(viewer, alias = "") {
+  const prefix = alias ? alias + "." : "";
+  if (viewer && viewer.is_panel_admin) {
+    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.id] };
+  }
+  if (viewer && viewer.owner_user_id) {
+    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.owner_user_id] };
+  }
+  return { clause: `(${prefix}owner_admin_id IS NULL OR ${prefix}owner_admin_id = 0)`, params: [] };
 }
 
 async function getEffectiveProductPrice(client, user, product) {
@@ -561,6 +607,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type TEXT DEFAULT 'streaming_auto'`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS combo_items TEXT DEFAULT '[]'`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS combo_discount NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_data TEXT DEFAULT '{}'`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accion_en_espera'`);
@@ -574,6 +621,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_category_snapshot TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_cost_snapshot NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
@@ -589,6 +637,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
 
 
@@ -619,9 +668,11 @@ async function initDatabase() {
       id SERIAL PRIMARY KEY,
       message TEXT NOT NULL,
       active INTEGER DEFAULT 1,
+      owner_admin_id INTEGER,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
 
   await pool.query(`
@@ -821,10 +872,12 @@ async function findAvailableAccountForProduct(client, product, userId) {
   const productName = String(product.name || '').trim();
   const productCategory = String(product.category || '').trim();
 
+  const ownerId = product.owner_admin_id || null;
   const result = await client.query(
     `SELECT *
      FROM platform_accounts
      WHERE status = 'available'
+       AND ($3::int IS NULL OR owner_admin_id = $3)
        AND (
          lower(product_name) = lower($1)
          OR lower(platform) = lower($1)
@@ -833,7 +886,7 @@ async function findAvailableAccountForProduct(client, product, userId) {
      ORDER BY id ASC
      LIMIT 1
      FOR UPDATE SKIP LOCKED`,
-    [productName, productCategory]
+    [productName, productCategory, ownerId]
   );
 
   return result.rows[0] || null;
@@ -966,20 +1019,15 @@ app.get("/api/me", authMiddleware, async (req, res) => {
 // PRODUCTOS ACTIVOS
 app.get("/api/products", authMiddleware, async (req, res) => {
   try {
-    const viewer = await getFullUser(req.user.id);
-
-    // Fase 1.8: un panel admin rentado no debe ver los productos del admin principal.
-    // En Fase 2 se habilitarán productos propios por owner_admin_id.
-    const panelViewer = await getAdminPanelForEmail(viewer?.email);
-    if (panelViewer) {
-      return res.json([]);
-    }
+    const viewer = await getViewerContext(req.user.id);
+    const owner = adminOwnedWhere(viewer, "products");
 
     const result = await pool.query(
-      `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount
+      `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id
        FROM products
-       WHERE active = 1
-       ORDER BY category ASC, name ASC`
+       WHERE active = 1 AND ${owner.clause}
+       ORDER BY category ASC, name ASC`,
+      owner.params
     );
 
     const products = [];
@@ -1032,8 +1080,8 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 
     await pool.query(
       `INSERT INTO products
-       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $12)`,
+       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $12, $13)`,
       [
         name.trim(),
         description || "",
@@ -1046,7 +1094,8 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
         Math.max(0, Number(stock || 0)),
         ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
-        Math.max(0, Number(combo_discount || 0))
+        Math.max(0, Number(combo_discount || 0)),
+        req.isPanelAdmin ? req.user.id : null
       ]
     );
 
@@ -1094,7 +1143,7 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
            product_type = $10,
            combo_items = $11,
            combo_discount = $12
-       WHERE id = $13 AND active = 1`,
+       WHERE id = $13 AND active = 1 AND ($14::int IS NULL OR owner_admin_id = $14)`,
       [
         name.trim(),
         description || "",
@@ -1108,7 +1157,8 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
         ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
-        productId
+        productId,
+        req.isPanelAdmin ? req.user.id : null
       ]
     );
 
@@ -1129,8 +1179,8 @@ app.delete("/api/admin/products/:productId", authMiddleware, adminMiddleware, as
     const productId = req.params.productId;
 
     const result = await pool.query(
-      `UPDATE products SET active = 0 WHERE id = $1 AND active = 1`,
-      [productId]
+      `UPDATE products SET active = 0 WHERE id = $1 AND active = 1 AND ($2::int IS NULL OR owner_admin_id = $2)`,
+      [productId, req.isPanelAdmin ? req.user.id : null]
     );
 
     if (result.rowCount === 0) {
@@ -1155,9 +1205,11 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     await client.query("BEGIN");
 
+    const viewerContext = await getViewerContext(userId, client);
+    const ownerFilter = adminOwnedWhere(viewerContext, "products");
     const productResult = await client.query(
-      `SELECT * FROM products WHERE id = $1 AND active = 1 FOR UPDATE`,
-      [productId]
+      `SELECT * FROM products WHERE id = $1 AND active = 1 AND ${ownerFilter.clause} FOR UPDATE`,
+      [productId, ...ownerFilter.params]
     );
 
     const product = productResult.rows[0];
@@ -1239,8 +1291,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
       const orderInsertResult = await client.query(
         `INSERT INTO orders
-         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot)
-         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10)
+         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
+         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11)
          RETURNING id`,
         [
           userId,
@@ -1252,7 +1304,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
           assignedAccounts[0]?.id || null,
           product.name || 'Combo',
           product.category || 'Combo',
-          comboCost
+          comboCost,
+          viewerContext?.owner_admin_id || null
         ]
       );
 
@@ -1380,8 +1433,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id`,
       [
         userId,
@@ -1396,7 +1449,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         deliveredAccountData,
         product.name || productName,
         product.category || productCategory,
-        Math.max(0, Number(product.cost_price || 0))
+        Math.max(0, Number(product.cost_price || 0)),
+        viewerContext?.owner_admin_id || null
       ]
     );
 
@@ -1457,8 +1511,12 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const owner = req.isPanelAdmin
+      ? { clause: "owner_admin_id = $1", params: [req.user.id] }
+      : { clause: "(owner_admin_id IS NULL OR owner_admin_id = 0)", params: [] };
     const result = await pool.query(
-      `SELECT * FROM platform_accounts ORDER BY id DESC`
+      `SELECT * FROM platform_accounts WHERE ${owner.clause} ORDER BY id DESC`,
+      owner.params
     );
     res.json(result.rows);
   } catch (err) {
@@ -1487,10 +1545,10 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
 
     const result = await pool.query(
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available')
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10)
        RETURNING *`,
-      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || "", access_url || ""]
+      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || "", access_url || "", req.isPanelAdmin ? req.user.id : null]
     );
 
     res.json(result.rows[0]);
@@ -1538,9 +1596,20 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
 // ADMIN: USUARIOS
 app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users ORDER BY id DESC`
-    );
+    let result;
+    if (req.isPanelAdmin) {
+      result = await pool.query(
+        `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id
+         FROM users
+         WHERE owner_user_id = $1
+         ORDER BY id DESC`,
+        [req.user.id]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users ORDER BY id DESC`
+      );
+    }
 
     res.json(result.rows);
   } catch (err) {
@@ -1565,8 +1634,8 @@ app.post("/api/admin/add-balance", authMiddleware, adminMiddleware, async (req, 
     }
 
     const result = await pool.query(
-      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
-      [amountNumber, user_id]
+      `UPDATE users SET balance = balance + $1 WHERE id = $2 AND ($3::int IS NULL OR owner_user_id = $3)`,
+      [amountNumber, user_id, req.isPanelAdmin ? req.user.id : null]
     );
 
     if (result.rowCount === 0) {
@@ -2272,7 +2341,9 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
        FROM orders
        JOIN users ON orders.user_id = users.id
        JOIN products ON orders.product_id = products.id
-       ORDER BY orders.id DESC`
+       WHERE ($1::int IS NULL OR orders.owner_admin_id = $1)
+       ORDER BY orders.id DESC`,
+      [req.isPanelAdmin ? req.user.id : null]
     );
 
     res.json(result.rows);
@@ -2390,8 +2461,8 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
     ) {
       const selectedProductId = Number(manual_account.product_id || manual_account.platform_product_id || order.product_id);
       const platformProductResult = await client.query(
-        `SELECT id, name, category FROM products WHERE id = $1`,
-        [selectedProductId]
+        `SELECT id, name, category FROM products WHERE id = $1 AND ($2::int IS NULL OR owner_admin_id = $2)`,
+        [selectedProductId, req.isPanelAdmin ? req.user.id : null]
       );
 
       const platformProduct = platformProductResult.rows[0];
@@ -2861,15 +2932,54 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 
 
 
+
+// DATOS BANCARIOS SEGÚN PANEL / ADMIN
+app.get("/api/bank-info", authMiddleware, async (req, res) => {
+  try {
+    const viewer = await getViewerContext(req.user.id);
+    let panel = null;
+
+    if (viewer?.is_panel_admin) {
+      panel = await getAdminPanelForEmail(viewer.email);
+    } else if (viewer?.owner_user_id) {
+      const ownerResult = await pool.query(`SELECT email FROM users WHERE id = $1`, [viewer.owner_user_id]);
+      panel = await getAdminPanelForEmail(ownerResult.rows[0]?.email || "");
+    }
+
+    if (panel) {
+      return res.json({
+        bank_name: panel.bank_name || "",
+        bank_holder: panel.bank_holder || "",
+        bank_clabe: panel.bank_clabe || "",
+        payment_concept: panel.payment_concept || ""
+      });
+    }
+
+    res.json({
+      bank_name: "Mercado Pago",
+      bank_holder: "Pedro Garcia Diaz",
+      bank_clabe: "722969020555596471",
+      payment_concept: "ropa o comida"
+    });
+  } catch (err) {
+    console.error("Error cargando datos bancarios:", err.message);
+    res.status(500).json({ error: "Error cargando datos bancarios" });
+  }
+});
+
 // COMUNICADOS GLOBALES: visibles para todos los usuarios con sesión
 app.get("/api/announcements", authMiddleware, async (req, res) => {
   try {
+    const viewer = await getViewerContext(req.user.id);
+    const owner = viewer?.owner_admin_id || null;
     const result = await pool.query(
       `SELECT id, message, active, created_at
        FROM announcements
        WHERE active = 1
+         AND (($1::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $1)
        ORDER BY id DESC
-       LIMIT 10`
+       LIMIT 10`,
+      [owner]
     );
     res.json(result.rows);
   } catch (err) {
@@ -2881,11 +2991,14 @@ app.get("/api/announcements", authMiddleware, async (req, res) => {
 // ADMIN: listar comunicados
 app.get("/api/admin/announcements", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const owner = req.isPanelAdmin ? req.user.id : null;
     const result = await pool.query(
       `SELECT id, message, active, created_at
        FROM announcements
+       WHERE (($1::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $1)
        ORDER BY id DESC
-       LIMIT 50`
+       LIMIT 50`,
+      [owner]
     );
     res.json(result.rows);
   } catch (err) {
@@ -2901,8 +3014,8 @@ app.post("/api/admin/announcements", authMiddleware, adminMiddleware, async (req
     if (!message) return res.status(400).json({ error: "El comunicado es obligatorio" });
 
     const result = await pool.query(
-      `INSERT INTO announcements (message, active) VALUES ($1, 1) RETURNING id, message, active, created_at`,
-      [message]
+      `INSERT INTO announcements (message, active, owner_admin_id) VALUES ($1, 1, $2) RETURNING id, message, active, created_at`,
+      [message, req.isPanelAdmin ? req.user.id : null]
     );
     res.json({ message: "Comunicado publicado", announcement: result.rows[0] });
   } catch (err) {
@@ -2917,8 +3030,8 @@ app.patch("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async
     const id = Number(req.params.id);
     const active = Number(req.body.active) === 1 ? 1 : 0;
     const result = await pool.query(
-      `UPDATE announcements SET active = $1 WHERE id = $2 RETURNING id, message, active, created_at`,
-      [active, id]
+      `UPDATE announcements SET active = $1 WHERE id = $2 AND (($3::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $3) RETURNING id, message, active, created_at`,
+      [active, id, req.isPanelAdmin ? req.user.id : null]
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Comunicado no encontrado" });
     res.json({ message: "Comunicado actualizado", announcement: result.rows[0] });
@@ -2932,7 +3045,7 @@ app.patch("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async
 app.delete("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    await pool.query(`DELETE FROM announcements WHERE id = $1`, [id]);
+    await pool.query(`DELETE FROM announcements WHERE id = $1 AND (($2::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $2)`, [id, req.isPanelAdmin ? req.user.id : null]);
     res.json({ message: "Comunicado eliminado" });
   } catch (err) {
     console.error(err.message);
@@ -2966,7 +3079,7 @@ app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, r
 // FASE 1: PANELES ADMIN SECUNDARIOS
 // Solo el admin principal puede crear/listar/suspender paneles.
 // ===============================
-app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, res) => {
+app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, business_name, admin_name, email, phone, bank_name, bank_holder,
@@ -2983,7 +3096,7 @@ app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, 
   }
 });
 
-app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, res) => {
+app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const {
       business_name,
@@ -3066,7 +3179,7 @@ app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req,
   }
 });
 
-app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware, async (req, res) => {
+app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const panelId = Number(req.params.id);
     const status = String(req.body.status || "").trim();
