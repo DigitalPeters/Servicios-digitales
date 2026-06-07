@@ -606,6 +606,25 @@ async function initDatabase() {
   `);
 
 
+  // Asegura columnas de Fase 1 aunque admin_panels se haya creado manualmente antes
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS business_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS admin_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS email TEXT`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS password TEXT`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS bank_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS bank_holder TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS bank_clabe TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS payment_concept TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS notification_email TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'activo'`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS plan_type TEXT DEFAULT 'renta'`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS expires_at DATE`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_panels_email_unique ON admin_panels (lower(email)) WHERE email IS NOT NULL AND email <> ''`);
+
+
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
