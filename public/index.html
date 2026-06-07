@@ -1167,7 +1167,7 @@ function isDistributorUser(){
   return currentUser && (currentUser.role === 'admin' || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
 }
 function isSubadminOnly(){
-  return currentUser && currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' || (currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')));
 }
 
 const __oldShowSectionForDistributor = showSection;
@@ -1609,7 +1609,7 @@ function renderDashboardSalesCharts(byUser=[], byProduct=[]){
 // ===============================
 // FIX SEGURO: permisos de dashboard/admin y botones funcionales
 // ===============================
-function isAdminUserSafe(){ return currentUser && currentUser.role === 'admin'; }
+function isAdminUserSafe(){ return currentUser && currentUser.role === 'admin' && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true'); }
 
 function setHiddenSafe(id, hidden){
   const el=document.getElementById(id);
@@ -1714,6 +1714,18 @@ loadApp = async function(){
   set('statBalance', formatMoney(currentUser.balance));
 
   syncAdminVisibilitySafe();
+
+  const panelAdminVisible = currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+  const distributorVisibleFinal = panelAdminVisible || (currentUser && currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true'));
+  setHiddenSafe('distributorMenuBtn', !distributorVisibleFinal);
+  setHiddenSafe('dashDistributorCard', !distributorVisibleFinal);
+  setHiddenSafe('adminMenuBtn', true);
+  setHiddenSafe('adminSalesMenuBtn', true);
+
+  if(panelAdminVisible){
+    const statUsersEl=document.getElementById('statUsers'); if(statUsersEl) statUsersEl.textContent='0';
+    const statProductsEl=document.getElementById('statProducts'); if(statProductsEl) statProductsEl.textContent='0';
+  }
 
   await Promise.allSettled([
     typeof loadProducts==='function'?loadProducts():Promise.resolve(),
@@ -2313,7 +2325,7 @@ setTimeout(startAutoRefreshPanel, 1200);
 // FIX FINAL REAL: Comunicados visibles + listas compactas
 // ===============================
 function __isAdminUserFinal(){
-  return currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
+  return currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin') && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
 }
 
 function ensureCompactAndAnnouncementsStyles(){
@@ -3200,7 +3212,7 @@ function clearAdminPanelPhase1Form(){
 }
 
 async function loadAdminPanelsPhase1(){
-  if(!currentUser || String(currentUser.role||'').toLowerCase()!=='admin') return;
+  if(!isAdminUserSafe()) return;
   ensureAdminPanelsPhase1UI();
 
   const box=document.getElementById('adminPanelsListPhase1');
@@ -3327,298 +3339,19 @@ function copyAdminPanelInfoPhase1(panelId){
   if(previousShowPhase1){
     showSection=function(name){
       previousShowPhase1(name);
-      if(name==='admin' && currentUser && String(currentUser.role||'').toLowerCase()==='admin'){
+      if(name==='admin' && isAdminUserSafe()){
         setTimeout(()=>{ensureAdminPanelsPhase1UI();loadAdminPanelsPhase1();},120);
       }
     };
   }
 
   setTimeout(()=>{
-    if(currentUser && String(currentUser.role||'').toLowerCase()==='admin'){
+    if(isAdminUserSafe()){
       ensureAdminPanelsPhase1UI();
       if(document.getElementById('section-admin')?.classList.contains('active')) loadAdminPanelsPhase1();
     }
   },1000);
 })();
-
-
-// ===============================
-// FASE 1.6: proteger admin principal y tratar paneles rentados como independientes
-// ===============================
-function isPanelAdminRentedFinal(){
-  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
-}
-
-function isMainAdminOnlyFinal(){
-  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !isPanelAdminRentedFinal();
-}
-
-function isDistributorUser(){
-  return currentUser && (isMainAdminOnlyFinal() || isPanelAdminRentedFinal() || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
-}
-
-function isSubadminOnly(){
-  return currentUser && !isMainAdminOnlyFinal() && (isPanelAdminRentedFinal() || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
-}
-
-function applyComunicadosVisibilityFinal(){
-  const btn=document.getElementById('announcementsMenuBtn');
-  const section=document.getElementById('section-comunicados');
-  if(!isMainAdminOnlyFinal()){
-    if(btn) btn.remove();
-    if(section) section.classList.add('hidden');
-    return;
-  }
-  if(section) section.classList.remove('hidden');
-}
-
-loadApp = async function(){
-  if(!token) return;
-  try{
-    currentUser = await api('/api/me');
-
-    authSection.classList.add('hidden');
-    appSection.classList.remove('hidden');
-
-    userName.textContent = currentUser.name || '';
-    userEmail.textContent = currentUser.email || '';
-    userRole.textContent = isPanelAdminRentedFinal() ? 'admin independiente' : (currentUser.role || 'user');
-    userBalance.textContent = formatMoney(currentUser.balance);
-    sideEmail.textContent = currentUser.email || '';
-    topUserName.textContent = currentUser.name || '';
-    statBalance.textContent = formatMoney(currentUser.balance);
-    statUsers.textContent = '0';
-
-    const mainAdmin = isMainAdminOnlyFinal();
-    const distributorVisible = isSubadminOnly();
-
-    document.getElementById('adminMenuBtn')?.classList.toggle('hidden', !mainAdmin);
-    document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden', !mainAdmin);
-    document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden', !mainAdmin);
-    document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden', !mainAdmin);
-    document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !distributorVisible);
-    document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
-
-    applyComunicadosVisibilityFinal();
-
-    await loadProducts();
-    await loadMyOrders();
-    await loadBalanceRequests();
-
-    if(mainAdmin){
-      setTodaySalesDate();
-      await loadUsers();
-      await loadAdminProducts();
-      await loadAdminOrders();
-      await loadSalesReport();
-      await loadPlatformInventory();
-      await loadAccountReports();
-      ensureAdminPanelsPhase1UI?.();
-      await loadAdminPanelsPhase1?.();
-    }
-
-    showSection('dashboard');
-  }catch(e){
-    console.error(e);
-    logout();
-  }
-};
-
-// Evita que un admin de panel rentado fuerce la sección Admin desde la interfaz.
-const __showSectionBeforePanelGuard = showSection;
-showSection = function(name){
-  if(name === 'admin' && !isMainAdminOnlyFinal()){
-    showMessage('Esta sección es solo para el admin principal.','error');
-    name = 'dashboard';
-  }
-  __showSectionBeforePanelGuard(name);
-  if(name === 'distributor' && isDistributorUser()){
-    loadDistributorPanel?.();
-    loadDistributorPrices?.();
-  }
-};
-
-const __loadAdminPanelsPhase1BeforeGuard = typeof loadAdminPanelsPhase1 === 'function' ? loadAdminPanelsPhase1 : null;
-if(__loadAdminPanelsPhase1BeforeGuard){
-  loadAdminPanelsPhase1 = async function(){
-    if(!isMainAdminOnlyFinal()) return;
-    return __loadAdminPanelsPhase1BeforeGuard();
-  };
-}
-
-
-
-
-// ===============================
-// FASE 1.7: panel admin rentado SIN llamadas al admin principal
-// ===============================
-// El problema era que el panel rentado tiene role='admin', pero NO es admin principal.
-// Algunas funciones viejas seguían usando currentUser.role==='admin' y llamaban endpoints /api/admin/*.
-// Eso provocaba el aviso "Admin principal requerido".
-
-function isPanelAdminRented17(){
-  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
-}
-function isMainAdmin17(){
-  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !isPanelAdminRented17();
-}
-function isDistributorPanel17(){
-  return currentUser && !isMainAdmin17() && (
-    isPanelAdminRented17() ||
-    currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true'
-  );
-}
-
-// Desde este punto, cualquier función antigua que pregunte "es admin" solo será admin principal.
-isAdminUserSafe = function(){ return !!isMainAdmin17(); };
-isMainAdminOnlyFinal = function(){ return !!isMainAdmin17(); };
-isPanelAdminRentedFinal = function(){ return !!isPanelAdminRented17(); };
-isDistributorUser = function(){ return !!(isMainAdmin17() || isDistributorPanel17()); };
-isSubadminOnly = function(){ return !!isDistributorPanel17(); };
-
-function applyPanelAdminDashboard17(){
-  if(!currentUser) return;
-  const mainAdmin = isMainAdmin17();
-  const panelAdmin = isDistributorPanel17();
-
-  // Menú lateral
-  document.getElementById('adminMenuBtn')?.classList.toggle('hidden', !mainAdmin);
-  document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden', !mainAdmin);
-  document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !panelAdmin);
-
-  // Tarjetas solo del admin principal
-  document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden', !mainAdmin);
-  document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden', !mainAdmin);
-  document.getElementById('dashInventoryCard')?.classList.toggle('hidden', !mainAdmin);
-  document.getElementById('dashDailyCutCard')?.classList.toggle('hidden', !mainAdmin);
-  document.getElementById('dashMonthlyReportCard')?.classList.toggle('hidden', !mainAdmin);
-
-  // Paneles admin solo dueño principal
-  document.getElementById('dashAdminPanelsCardPhase1')?.classList.toggle('hidden', !mainAdmin);
-
-  // Panel rentado/independiente: no debe mostrar contadores globales del admin principal.
-  if(panelAdmin){
-    if(typeof statUsers !== 'undefined' && statUsers) statUsers.textContent = '0';
-    const adminUsersCountEl = document.getElementById('adminUsersCount');
-    if(adminUsersCountEl) adminUsersCountEl.textContent = '0';
-
-    // Muestra acceso a sus vendedores.
-    document.getElementById('dashDistributorCard')?.classList.remove('hidden');
-  }
-}
-
-// Reemplaza carga de solicitudes de saldo para que paneles rentados NO llamen /api/admin/balance-requests.
-loadBalanceRequests = async function(){
-  try{
-    let requests=[];
-    if(isMainAdmin17()){
-      requests = await api('/api/admin/balance-requests');
-      const pending = requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
-      if(typeof statBalanceRequests !== 'undefined' && statBalanceRequests) statBalanceRequests.textContent = pending.length;
-      const box=document.getElementById('adminBalanceRequestsList');
-      if(box){
-        box.innerHTML = pending.length ? pending.map(r=>`
-          <div class="item">
-            <p><b>Solicitud:</b> #${r.id}</p>
-            <p><b>Cliente:</b> ${safeText(r.customer_name||r.name||'Cliente')}</p>
-            <p><b>Correo:</b> ${safeText(r.customer_email||r.email||'')}</p>
-            <p><b>Nombre transferencia:</b> ${safeText(r.account_holder||r.titular||'')}</p>
-            <p><b>Banco:</b> ${safeText(r.bank||r.banco||'')}</p>
-            <p><b>Monto:</b> $${formatMoney(r.amount||r.monto)}</p>
-            <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(r.status||'pendiente'))}</span></p>
-            <label class="field-label">Respuesta para el cliente</label>
-            <textarea id="balance-response-${r.id}" placeholder="Ejemplo: Saldo aprobado y agregado a tu cuenta.">${safeText(r.admin_response||'')}</textarea>
-            <div class="two-row">
-              <button class="green-btn" onclick="updateBalanceRequestStatus(${r.id}, 'aprobado')">Aprobar y sumar saldo</button>
-              <button class="danger-btn" onclick="updateBalanceRequestStatus(${r.id}, 'rechazado')">Rechazar</button>
-            </div>
-          </div>
-        `).join('') : 'Sin solicitudes pendientes.';
-      }
-    }else{
-      try{ requests = await api('/api/my-balance-requests'); }catch(_){ requests=[]; }
-      const pending = requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
-      if(typeof statBalanceRequests !== 'undefined' && statBalanceRequests) statBalanceRequests.textContent = pending.length;
-    }
-  }catch(e){
-    console.warn('No se pudieron cargar solicitudes de saldo', e);
-    if(typeof statBalanceRequests !== 'undefined' && statBalanceRequests) statBalanceRequests.textContent='0';
-  }
-};
-
-// Evita que los clics del dashboard de panel rentado manden a secciones del admin principal.
-openUsersFromDashboard = function(){ isMainAdmin17() ? scrollToAdmin('adminUsersPanel') : showSection('account'); };
-openProductsFromDashboard = function(){ isMainAdmin17() ? scrollToAdmin('adminProductsPanel') : showSection('shop'); };
-openInventoryFromDashboard = function(){ isMainAdmin17() ? scrollToAdmin('adminPlatformAccountsPanel') : showSection('shop'); };
-openOrdersFromDashboard = function(){ isMainAdmin17() ? scrollToAdmin('adminOrdersPanel') : showSection('orders'); };
-openBalanceRequests = function(){ isMainAdmin17() ? scrollToAdmin('adminBalanceRequestsPanel') : showSection('balance'); };
-openAccountReportsFromDashboard = function(){ isMainAdmin17() ? scrollToAdmin('adminAccountReportsPanel') : showSection('reports'); };
-openSalesReport = function(){ if(isMainAdmin17()) scrollToAdmin('adminSalesReportPanel'); };
-
-// Reemplaza loadApp final para evitar llamadas admin en paneles rentados.
-loadApp = async function(){
-  if(!token) return;
-  try{
-    currentUser = await api('/api/me');
-
-    authSection.classList.add('hidden');
-    appSection.classList.remove('hidden');
-
-    userName.textContent = currentUser.name || '';
-    userEmail.textContent = currentUser.email || '';
-    userRole.textContent = isPanelAdminRented17() ? 'admin independiente' : (currentUser.role || 'user');
-    userBalance.textContent = formatMoney(currentUser.balance || 0);
-    sideEmail.textContent = currentUser.email || '';
-    topUserName.textContent = currentUser.name || '';
-    statBalance.textContent = formatMoney(currentUser.balance || 0);
-    statUsers.textContent = '0';
-
-    applyPanelAdminDashboard17();
-    applyComunicadosVisibilityFinal?.();
-
-    await loadProducts();
-    await loadMyOrders();
-    await loadBalanceRequests();
-
-    if(isMainAdmin17()){
-      setTodaySalesDate?.();
-      await loadUsers();
-      await loadAdminProducts();
-      await loadAdminOrders();
-      await loadSalesReport();
-      await loadPlatformInventory();
-      await loadAccountReports();
-      ensureAdminPanelsPhase1UI?.();
-      await loadAdminPanelsPhase1?.();
-    }
-
-    if(isDistributorPanel17()){
-      try{ await loadDistributorPanel?.(); }catch(e){ console.warn('No se pudo cargar panel distribuidor', e); }
-      try{ await loadDistributorPrices?.(); }catch(e){ console.warn('No se pudieron cargar precios distribuidor', e); }
-    }
-
-    showSection('dashboard');
-    applyPanelAdminDashboard17();
-  }catch(e){
-    console.error(e);
-    logout();
-  }
-};
-
-// Guardia final para la sección admin.
-const __showSectionBefore17 = showSection;
-showSection = function(name){
-  if(name === 'admin' && !isMainAdmin17()){
-    showMessage('Esta sección es solo para el admin principal.','error');
-    name = 'dashboard';
-  }
-  __showSectionBefore17(name);
-  applyPanelAdminDashboard17();
-  if(name === 'distributor' && isDistributorPanel17()){
-    loadDistributorPanel?.();
-    loadDistributorPrices?.();
-  }
-};
 
 </script>
 </body>
