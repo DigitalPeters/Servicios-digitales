@@ -102,14 +102,15 @@ Entra al panel de administrador para revisar el pedido.
 }
 
 
-async function sendBalanceRequestEmail({ requestId, customerName, customerEmail, amount, bank, reference, accountHolder, proof }) {
+async function sendBalanceRequestEmail({ requestId, customerName, customerEmail, amount, bank, reference, accountHolder, proof, notifyToOverride }) {
   try {
     if (!isMailConfigured()) {
       console.log("Correo NO enviado: faltan variables RESEND_API_KEY, NOTIFY_EMAIL o FROM_EMAIL.");
       return;
     }
 
-    const { apiKey, notifyTo, fromEmail } = getMailConfig();
+    const { apiKey, notifyTo: defaultNotifyTo, fromEmail } = getMailConfig();
+    const notifyTo = notifyToOverride || defaultNotifyTo;
 
     const subject = `Nueva solicitud de saldo #${requestId} - $${Number(amount || 0).toFixed(2)}`;
     const text = `
@@ -400,6 +401,34 @@ async function getViewerContext(userId, client = pool) {
   return viewer;
 }
 
+
+async function getOwnerAndNotificationForUser(userId, client = pool) {
+  const result = await client.query(
+    `SELECT
+       u.id,
+       u.email,
+       u.owner_user_id,
+       owner.email AS owner_email,
+       own_panel.id AS owner_panel_id,
+       own_panel.notification_email AS owner_notification_email,
+       self_panel.id AS self_panel_id,
+       self_panel.notification_email AS self_notification_email
+     FROM users u
+     LEFT JOIN users owner ON owner.id = u.owner_user_id
+     LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
+     LEFT JOIN admin_panels self_panel ON lower(self_panel.email) = lower(u.email)
+     WHERE u.id = $1
+     LIMIT 1`,
+    [userId]
+  );
+
+  const row = result.rows[0] || {};
+  const ownerAdminId = row.owner_user_id || (row.self_panel_id ? row.id : null);
+  const notificationEmail = row.owner_notification_email || row.self_notification_email || "";
+
+  return { ownerAdminId, notificationEmail };
+}
+
 function adminOwnedWhere(viewer, alias = "") {
   const prefix = alias ? alias + "." : "";
   if (viewer && viewer.is_panel_admin) {
@@ -649,6 +678,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS issue_type TEXT DEFAULT 'otro'`);
@@ -1668,10 +1698,12 @@ app.post("/api/balance-requests", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Banco, referencia y titular son obligatorios" });
     }
 
+    const ownerInfo = await getOwnerAndNotificationForUser(userId);
+
     const insertResult = await pool.query(
       `INSERT INTO balance_requests
-       (user_id, amount, bank, reference, account_holder, proof, status, admin_response)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', '')
+       (user_id, amount, bank, reference, account_holder, proof, status, admin_response, owner_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', '', $7)
        RETURNING id`,
       [
         userId,
@@ -1679,7 +1711,8 @@ app.post("/api/balance-requests", authMiddleware, async (req, res) => {
         String(bank).trim(),
         String(reference).trim(),
         String(account_holder).trim(),
-        String(proof || '').trim()
+        String(proof || '').trim(),
+        ownerInfo.ownerAdminId
       ]
     );
 
@@ -1700,7 +1733,8 @@ app.post("/api/balance-requests", authMiddleware, async (req, res) => {
       bank,
       reference,
       accountHolder: account_holder,
-      proof: proof || ""
+      proof: proof || "",
+      notifyToOverride: ownerInfo.notificationEmail
     });
 
     res.json({
@@ -1732,12 +1766,14 @@ app.post("/api/user/solicitud-saldo", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Banco y nombre de quien transfirió son obligatorios" });
     }
 
+    const ownerInfo = await getOwnerAndNotificationForUser(userId);
+
     const insertResult = await pool.query(
       `INSERT INTO balance_requests
-       (user_id, amount, bank, reference, account_holder, proof, status, admin_response)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', '')
+       (user_id, amount, bank, reference, account_holder, proof, status, admin_response, owner_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', '', $7)
        RETURNING id`,
-      [userId, amountNumber, bank, reference || "No proporcionada", accountHolder, proof]
+      [userId, amountNumber, bank, reference || "No proporcionada", accountHolder, proof, ownerInfo.ownerAdminId]
     );
 
     const requestId = insertResult.rows[0].id;
@@ -1752,7 +1788,8 @@ app.post("/api/user/solicitud-saldo", authMiddleware, async (req, res) => {
       bank,
       reference: reference || "No proporcionada",
       accountHolder,
-      proof
+      proof,
+      notifyToOverride: ownerInfo.notificationEmail
     });
 
     res.json({ message: "Solicitud enviada. El administrador revisará tu transferencia y aprobará el saldo si el pago llegó." });
@@ -1800,7 +1837,9 @@ app.get("/api/admin/balance-requests", authMiddleware, adminMiddleware, async (r
         users.email AS customer_email
        FROM balance_requests
        JOIN users ON balance_requests.user_id = users.id
-       ORDER BY balance_requests.id DESC`
+       WHERE ($1::int IS NULL OR balance_requests.owner_admin_id = $1)
+       ORDER BY balance_requests.id DESC`,
+      [req.isPanelAdmin ? req.user.id : null]
     );
 
     res.json(result.rows);
@@ -1842,8 +1881,8 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
     transactionStarted = true;
 
     const requestResult = await client.query(
-      `SELECT * FROM balance_requests WHERE id = $1 FOR UPDATE`,
-      [requestId]
+      `SELECT * FROM balance_requests WHERE id = $1 AND ($2::int IS NULL OR owner_admin_id = $2) FOR UPDATE`,
+      [requestId, req.isPanelAdmin ? req.user.id : null]
     );
 
     const request = requestResult.rows[0];
