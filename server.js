@@ -960,7 +960,7 @@ app.post("/api/login", async (req, res) => {
     const cleanEmail = String(email || "").trim().toLowerCase();
 
     const result = await pool.query(
-      `SELECT * FROM users WHERE lower(email) = lower($1)`,
+      `SELECT * FROM users WHERE lower(trim(email)) = lower($1)`,
       [cleanEmail]
     );
 
@@ -2745,26 +2745,102 @@ app.get("/api/distributor/resellers", authMiddleware, distributorMiddleware, asy
 app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
     const { name, email, password } = req.body;
+    const cleanName = String(name || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
 
-    if (!name || !email || !password) {
+    if (!cleanName || !cleanEmail || !password) {
       return res.status(400).json({ error: "Nombre, correo y contraseña son obligatorios" });
     }
 
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Si el correo ya existe, no lo duplicamos. Lo validamos y, si pertenece al mismo panel,
+    // actualizamos su acceso para que pueda iniciar sesión correctamente.
+    const existing = await pool.query(
+      `SELECT id, name, email, owner_user_id
+       FROM users
+       WHERE lower(trim(email)) = lower($1)
+       LIMIT 1`,
+      [cleanEmail]
+    );
+
+    let user;
+
+    if (existing.rows[0]) {
+      const existingUser = existing.rows[0];
+
+      if (existingUser.owner_user_id && Number(existingUser.owner_user_id) !== Number(req.user.id)) {
+        return res.status(400).json({ error: "Ese correo ya pertenece a otro panel" });
+      }
+
+      const updated = await pool.query(
+        `UPDATE users
+         SET name = $1,
+             password = $2,
+             role = 'user',
+             owner_user_id = $3,
+             is_subadmin = FALSE
+         WHERE id = $4
+         RETURNING id, name, email, role, balance, owner_user_id`,
+        [cleanName, hashedPassword, req.user.id, existingUser.id]
+      );
+
+      user = updated.rows[0];
+      return res.json({ message: "Vendedor actualizado y acceso habilitado correctamente", user });
+    }
 
     const result = await pool.query(
       `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
        VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
        RETURNING id, name, email, role, balance, owner_user_id`,
-      [name.trim(), email.trim().toLowerCase(), hashedPassword, req.user.id]
+      [cleanName, cleanEmail, hashedPassword, req.user.id]
     );
 
-    res.json({ message: "Vendedor creado correctamente", user: result.rows[0] });
+    user = result.rows[0];
+    res.json({ message: "Vendedor creado correctamente y acceso de login habilitado", user });
   } catch (err) {
-    console.error(err.message);
+    console.error("Error creando vendedor:", err.message);
     res.status(400).json({ error: "No se pudo crear vendedor. Revisa si el correo ya existe." });
   }
 });
+
+app.post("/api/distributor/resellers/:id/reset-access", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const resellerId = Number(req.params.id);
+    const { password } = req.body;
+
+    if (!resellerId || !password || String(password).length < 6) {
+      return res.status(400).json({ error: "ID y contraseña mínima de 6 caracteres son obligatorios" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `UPDATE users
+       SET password = $1,
+           role = 'user',
+           owner_user_id = $2,
+           is_subadmin = FALSE
+       WHERE id = $3 AND owner_user_id = $2
+       RETURNING id, name, email, role, balance, owner_user_id`,
+      [hashedPassword, req.user.id, resellerId]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "Vendedor no encontrado en tu panel" });
+    }
+
+    res.json({ message: "Acceso del vendedor reparado correctamente", user: result.rows[0] });
+  } catch (err) {
+    console.error("Error reparando acceso de vendedor:", err.message);
+    res.status(500).json({ error: "Error reparando acceso del vendedor" });
+  }
+});
+
 
 app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
   try {

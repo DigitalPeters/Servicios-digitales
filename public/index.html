@@ -1218,9 +1218,22 @@ async function loadDistributorPanel(){
     }
     const box = document.getElementById('resellersList');
     if(box){
-      box.innerHTML = sellers.length ? sellers.map(s=>`<div class="item"><p><b>ID:</b> ${s.id}</p><p><b>Nombre:</b> ${safeText(s.name)}</p><p><b>Correo:</b> ${safeText(s.email)}</p><p><b>Saldo:</b> $${formatMoney(s.balance)}</p></div>`).join('') : 'Sin vendedores.';
+      box.innerHTML = sellers.length ? sellers.map(s=>`<div class="item"><p><b>ID:</b> ${s.id}</p><p><b>Nombre:</b> ${safeText(s.name)}</p><p><b>Correo:</b> ${safeText(s.email)}</p><p><b>Saldo:</b> $${formatMoney(s.balance)}</p><button class="outline-btn" style="width:auto" onclick="resetResellerAccess(${s.id})">Reparar acceso</button></div>`).join('') : 'Sin vendedores.';
     }
   }catch(e){ showMessage(e.message || 'Error cargando vendedores','error'); }
+}
+
+async function resetResellerAccess(id){
+  try{
+    const password = prompt('Escribe una nueva contraseña para este vendedor (mínimo 6 caracteres):');
+    if(!password) return;
+    const data = await api('/api/distributor/resellers/'+id+'/reset-access', {
+      method:'POST',
+      body: JSON.stringify({ password })
+    });
+    showMessage(data.message || 'Acceso reparado');
+    await loadDistributorPanel();
+  }catch(e){ showMessage(e.message || 'Error reparando acceso','error'); }
 }
 
 async function addResellerBalance(){
