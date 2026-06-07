@@ -2329,6 +2329,8 @@ function ensureCompactAndAnnouncementsStyles(){
     .compact-item.open .compact-details{display:block}
     .compact-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     .compact-actions button{width:auto;padding:10px 13px;border-radius:12px}
+    .important-announcements-label{display:none;background:linear-gradient(90deg,#ef4444,#b91c1c);color:#fff;text-align:center;font-weight:900;letter-spacing:.8px;border-radius:16px;margin:0 0 8px;padding:10px 14px;box-shadow:var(--shadow);font-size:15px}
+    .important-announcements-label.show{display:block}
     .global-announcement-ticker{background:linear-gradient(90deg,var(--primary),var(--primary2));color:#fff;border-radius:18px;margin:0 0 18px;overflow:hidden;box-shadow:var(--shadow);display:none;align-items:center;min-height:48px}
     .global-announcement-ticker.show{display:flex}
     .global-announcement-badge{background:rgba(255,255,255,.16);font-weight:900;padding:14px 18px;white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)}
@@ -2346,12 +2348,20 @@ function ensureCompactAndAnnouncementsStyles(){
 function ensureGlobalAnnouncementsUIFinal(){
   ensureCompactAndAnnouncementsStyles();
   const topbar=document.querySelector('.topbar');
+  if(topbar && !document.getElementById('importantAnnouncementsLabel')){
+    const label=document.createElement('div');
+    label.id='importantAnnouncementsLabel';
+    label.className='important-announcements-label';
+    label.textContent='ANUNCIOS IMPORTANTES';
+    topbar.insertAdjacentElement('afterend', label);
+  }
+  const label=document.getElementById('importantAnnouncementsLabel');
   if(topbar && !document.getElementById('globalAnnouncementTicker')){
     const ticker=document.createElement('div');
     ticker.id='globalAnnouncementTicker';
     ticker.className='global-announcement-ticker';
     ticker.innerHTML=`<div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
-    topbar.insertAdjacentElement('afterend', ticker);
+    (label || topbar).insertAdjacentElement('afterend', ticker);
   }
 
   if(__isAdminUserFinal()){
@@ -2404,11 +2414,13 @@ async function loadGlobalAnnouncementsFinal(){
     const list=await api('/api/announcements');
     const ticker=document.getElementById('globalAnnouncementTicker');
     const marquee=document.getElementById('globalAnnouncementMarquee');
+    const label=document.getElementById('importantAnnouncementsLabel');
     if(!ticker || !marquee) return;
     const active=(Array.isArray(list)?list:[]).filter(a=>String(a.message||'').trim());
-    if(!active.length){ticker.classList.remove('show');marquee.innerHTML='';return;}
+    if(!active.length){ticker.classList.remove('show'); if(label)label.classList.remove('show'); marquee.innerHTML='';return;}
     marquee.innerHTML=active.map(a=>`<span>${safeText(a.message)}</span>`).join('');
     ticker.classList.add('show');
+    if(label)label.classList.add('show');
   }catch(e){console.warn('No se pudieron cargar comunicados globales',e)}
 }
 
@@ -2485,6 +2497,7 @@ function renderAdminOrderCompactFinal(o){
       <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
       <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
       <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
+      ${typeof renderWarrantyNotice === 'function' ? renderWarrantyNotice(o) : ''}
       ${renderOrderData(od)}
       <label class="field-label">Estado</label>
       <select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select>
@@ -2594,12 +2607,20 @@ function ensureGlobalAnnouncementsUIFinal(){
   ensureCompactAndAnnouncementsStyles();
 
   const topbar=document.querySelector('.topbar');
+  if(topbar && !document.getElementById('importantAnnouncementsLabel')){
+    const label=document.createElement('div');
+    label.id='importantAnnouncementsLabel';
+    label.className='important-announcements-label';
+    label.textContent='ANUNCIOS IMPORTANTES';
+    topbar.insertAdjacentElement('afterend', label);
+  }
+  const label=document.getElementById('importantAnnouncementsLabel');
   if(topbar && !document.getElementById('globalAnnouncementTicker')){
     const ticker=document.createElement('div');
     ticker.id='globalAnnouncementTicker';
     ticker.className='global-announcement-ticker';
     ticker.innerHTML=`<div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
-    topbar.insertAdjacentElement('afterend', ticker);
+    (label || topbar).insertAdjacentElement('afterend', ticker);
   }
 
   const menu=document.querySelector('.menu');
@@ -2828,6 +2849,7 @@ function renderAdminOrderCompactFinal(o){
       <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
       <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
       <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
+      ${typeof renderWarrantyNotice === 'function' ? renderWarrantyNotice(o) : ''}
       ${renderOrderData(od)}
       <label class="field-label">Estado</label>
       <select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select>
@@ -2880,6 +2902,167 @@ async function updateOrderStatus(id){
     await loadSalesReport();
   }catch(e){showMessage(e.message||'Error actualizando pedido','error')}
 }
+
+
+// ===============================
+// FIX FINAL: Comunicados solo para admin principal + menú Reportar con respuestas
+// ===============================
+function isMainAdminOnlyFinal(){
+  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
+}
+
+function applyComunicadosVisibilityFinal(){
+  const btn=document.getElementById('announcementsMenuBtn');
+  const section=document.getElementById('section-comunicados');
+  if(!isMainAdminOnlyFinal()){
+    if(btn) btn.remove();
+    if(section) section.classList.add('hidden');
+    return;
+  }
+  if(section) section.classList.remove('hidden');
+}
+
+(function(){
+  const previousEnsure=typeof ensureGlobalAnnouncementsUIFinal==='function'?ensureGlobalAnnouncementsUIFinal:null;
+  if(previousEnsure){
+    ensureGlobalAnnouncementsUIFinal=function(){
+      previousEnsure();
+      applyComunicadosVisibilityFinal();
+    };
+  }
+})();
+
+function ensureReportMenuFinal(){
+  const menu=document.querySelector('.menu');
+  const reportsBtn=document.querySelector('[data-section="reports"]');
+  if(reportsBtn){
+    reportsBtn.innerHTML='⚠ Reportar';
+    reportsBtn.onclick=function(){showSection('reports-menu')};
+  }
+
+  const main=document.querySelector('.main');
+  if(main && !document.getElementById('section-reports-menu')){
+    const section=document.createElement('section');
+    section.id='section-reports-menu';
+    section.className='section';
+    section.innerHTML=`
+      <h1 class="section-title">Reportar</h1>
+      <div class="row">
+        <div class="panel report-option-card" onclick="openReportFaultFormFinal()" style="cursor:pointer">
+          <div class="dash-icon" style="margin-bottom:14px">⚠</div>
+          <h2>Reportar fallo</h2>
+          <p class="small-text">Reporta una cuenta que presente problema para que el admin revise el caso.</p>
+          <button class="primary-btn">Abrir reporte</button>
+        </div>
+        <div class="panel report-option-card" onclick="openFailureResponsesFinal()" style="cursor:pointer">
+          <div class="dash-icon" style="margin-bottom:14px">💬</div>
+          <h2>Respuesta de fallos</h2>
+          <p class="small-text">Consulta el estado y la respuesta del admin a tus reportes.</p>
+          <button class="outline-btn">Ver respuestas</button>
+        </div>
+      </div>`;
+    const reportsSection=document.getElementById('section-reports');
+    if(reportsSection) reportsSection.insertAdjacentElement('beforebegin', section);
+    else main.appendChild(section);
+  }
+
+  if(main && !document.getElementById('section-failure-responses')){
+    const section=document.createElement('section');
+    section.id='section-failure-responses';
+    section.className='section';
+    section.innerHTML=`
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Respuesta de fallos</h2>
+            <p class="small-text">Aquí aparecerán las respuestas del admin a tus reportes.</p>
+          </div>
+          <button class="outline-btn" style="width:auto" onclick="loadMyFailureResponsesFinal()">Actualizar</button>
+        </div>
+        <div id="myFailureResponsesList">Cargando respuestas...</div>
+      </div>`;
+    const reportsSection=document.getElementById('section-reports');
+    if(reportsSection) reportsSection.insertAdjacentElement('afterend', section);
+    else main.appendChild(section);
+  }
+}
+
+function openReportFaultFormFinal(){
+  showSection('reports');
+}
+
+function openFailureResponsesFinal(){
+  showSection('failure-responses');
+  loadMyFailureResponsesFinal();
+}
+
+function getReportStatusTextFinal(status){
+  const map={
+    pendiente:'Pendiente',
+    resuelto:'Resuelto',
+    reemplazo:'Reemplazo',
+    reembolso:'Reembolso',
+    rechazado:'Rechazado'
+  };
+  return map[String(status||'').toLowerCase()] || status || 'Pendiente';
+}
+
+async function loadMyFailureResponsesFinal(){
+  const box=document.getElementById('myFailureResponsesList');
+  if(!box) return;
+  try{
+    const reports=await api('/api/my-account-reports');
+    if(!Array.isArray(reports) || !reports.length){
+      box.innerHTML='Todavía no tienes reportes de falla.';
+      return;
+    }
+    box.innerHTML=reports.map(r=>`
+      <div class="item compact-item">
+        <div class="compact-header" onclick="this.parentNode.classList.toggle('open')">
+          <div class="compact-title">Reporte #${r.id}</div>
+          <div class="compact-meta">${safeText(r.email||'correo reportado')} · ${safeText(getReportStatusTextFinal(r.status))}</div>
+        </div>
+        <div class="compact-details">
+          <p><b>Reporte:</b> #${r.id}</p>
+          <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+          <p><b>Tipo de falla:</b> ${safeText(r.issue_type||'otro')}</p>
+          <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinal(r.status))}</span></p>
+          <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
+        </div>
+      </div>`).join('');
+  }catch(e){
+    box.innerHTML='No se pudieron cargar tus respuestas de fallos.';
+    console.warn('Error cargando respuestas de fallos', e);
+  }
+}
+
+(function(){
+  const styleId='reportMenuFinalStyle';
+  if(!document.getElementById(styleId)){
+    const st=document.createElement('style');
+    st.id=styleId;
+    st.textContent=`
+      .report-option-card h2{margin:0 0 8px}.report-option-card button{margin-top:10px}
+      @media(max-width:760px){.report-option-card .dash-icon{width:58px;height:58px;font-size:26px}}
+    `;
+    document.head.appendChild(st);
+  }
+
+  const previousShow=typeof showSection==='function'?showSection:null;
+  if(previousShow){
+    showSection=function(name){
+      ensureReportMenuFinal();
+      applyComunicadosVisibilityFinal();
+      previousShow(name);
+      if(name==='failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
+      setTimeout(()=>applyComunicadosVisibilityFinal(),120);
+    };
+  }
+
+  setTimeout(()=>{ensureReportMenuFinal();applyComunicadosVisibilityFinal();},300);
+  setTimeout(()=>{ensureReportMenuFinal();applyComunicadosVisibilityFinal();},1200);
+})();
 
 </script>
 </body>
