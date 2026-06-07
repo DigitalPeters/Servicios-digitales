@@ -2905,7 +2905,7 @@ async function updateOrderStatus(id){
 
 
 // ===============================
-// FIX FINAL: Comunicados solo para admin principal + Respuesta de fallas en menú lateral
+// FIX FINAL: Comunicados solo para admin principal + menú Reportar con respuestas
 // ===============================
 function isMainAdminOnlyFinal(){
   return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
@@ -2928,10 +2928,73 @@ function applyComunicadosVisibilityFinal(){
     ensureGlobalAnnouncementsUIFinal=function(){
       previousEnsure();
       applyComunicadosVisibilityFinal();
-      ensureFailureResponsesMenuFinal();
     };
   }
 })();
+
+function ensureReportMenuFinal(){
+  const menu=document.querySelector('.menu');
+  const reportsBtn=document.querySelector('[data-section="reports"]');
+  if(reportsBtn){
+    reportsBtn.innerHTML='⚠ Reportar';
+    reportsBtn.onclick=function(){showSection('reports-menu')};
+  }
+
+  const main=document.querySelector('.main');
+  if(main && !document.getElementById('section-reports-menu')){
+    const section=document.createElement('section');
+    section.id='section-reports-menu';
+    section.className='section';
+    section.innerHTML=`
+      <h1 class="section-title">Reportar</h1>
+      <div class="row">
+        <div class="panel report-option-card" onclick="openReportFaultFormFinal()" style="cursor:pointer">
+          <div class="dash-icon" style="margin-bottom:14px">⚠</div>
+          <h2>Reportar fallo</h2>
+          <p class="small-text">Reporta una cuenta que presente problema para que el admin revise el caso.</p>
+          <button class="primary-btn">Abrir reporte</button>
+        </div>
+        <div class="panel report-option-card" onclick="openFailureResponsesFinal()" style="cursor:pointer">
+          <div class="dash-icon" style="margin-bottom:14px">💬</div>
+          <h2>Respuesta de fallos</h2>
+          <p class="small-text">Consulta el estado y la respuesta del admin a tus reportes.</p>
+          <button class="outline-btn">Ver respuestas</button>
+        </div>
+      </div>`;
+    const reportsSection=document.getElementById('section-reports');
+    if(reportsSection) reportsSection.insertAdjacentElement('beforebegin', section);
+    else main.appendChild(section);
+  }
+
+  if(main && !document.getElementById('section-failure-responses')){
+    const section=document.createElement('section');
+    section.id='section-failure-responses';
+    section.className='section';
+    section.innerHTML=`
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Respuesta de fallos</h2>
+            <p class="small-text">Aquí aparecerán las respuestas del admin a tus reportes.</p>
+          </div>
+          <button class="outline-btn" style="width:auto" onclick="loadMyFailureResponsesFinal()">Actualizar</button>
+        </div>
+        <div id="myFailureResponsesList">Cargando respuestas...</div>
+      </div>`;
+    const reportsSection=document.getElementById('section-reports');
+    if(reportsSection) reportsSection.insertAdjacentElement('afterend', section);
+    else main.appendChild(section);
+  }
+}
+
+function openReportFaultFormFinal(){
+  showSection('reports');
+}
+
+function openFailureResponsesFinal(){
+  showSection('failure-responses');
+  loadMyFailureResponsesFinal();
+}
 
 function getReportStatusTextFinal(status){
   const map={
@@ -2944,55 +3007,6 @@ function getReportStatusTextFinal(status){
   return map[String(status||'').toLowerCase()] || status || 'Pendiente';
 }
 
-function ensureFailureResponsesMenuFinal(){
-  const menu=document.querySelector('.menu');
-  const reportsBtn=document.querySelector('[data-section="reports"]');
-
-  // El botón principal se queda como Reportar falla y abre directo el formulario.
-  if(reportsBtn){
-    reportsBtn.innerHTML='⚠ Reportar falla';
-    reportsBtn.onclick=function(){showSection('reports')};
-  }
-
-  // Quita el menú intermedio viejo si llegó a crearse.
-  const oldMenuSection=document.getElementById('section-reports-menu');
-  if(oldMenuSection) oldMenuSection.remove();
-
-  // Agrega el botón Respuesta de fallas justo debajo de Reportar falla.
-  if(menu && reportsBtn && !document.getElementById('failureResponsesMenuBtn')){
-    const btn=document.createElement('button');
-    btn.id='failureResponsesMenuBtn';
-    btn.className='menu-btn';
-    btn.dataset.section='failure-responses';
-    btn.type='button';
-    btn.innerHTML='💬 Respuesta de fallas';
-    btn.onclick=function(){showSection('failure-responses')};
-    reportsBtn.insertAdjacentElement('afterend', btn);
-  }
-
-  // Crea la sección donde el usuario ve las respuestas del admin.
-  const main=document.querySelector('.main');
-  if(main && !document.getElementById('section-failure-responses')){
-    const section=document.createElement('section');
-    section.id='section-failure-responses';
-    section.className='section';
-    section.innerHTML=`
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Respuesta de fallas</h2>
-            <p class="small-text">Aquí aparecerán las respuestas del admin a tus reportes de falla.</p>
-          </div>
-          <button class="outline-btn" style="width:auto" onclick="loadMyFailureResponsesFinal()">Actualizar</button>
-        </div>
-        <div id="myFailureResponsesList">Cargando respuestas...</div>
-      </div>`;
-    const reportsSection=document.getElementById('section-reports');
-    if(reportsSection) reportsSection.insertAdjacentElement('afterend', section);
-    else main.appendChild(section);
-  }
-}
-
 async function loadMyFailureResponsesFinal(){
   const box=document.getElementById('myFailureResponsesList');
   if(!box) return;
@@ -3002,20 +3016,183 @@ async function loadMyFailureResponsesFinal(){
       box.innerHTML='Todavía no tienes reportes de falla.';
       return;
     }
-
     box.innerHTML=reports.map(r=>`
       <div class="item compact-item">
         <div class="compact-header" onclick="this.parentNode.classList.toggle('open')">
-          <div class="compact-title">Reporte #${r.id}${r.order_id ? ' · Pedido #'+r.order_id : ''}</div>
+          <div class="compact-title">Reporte #${r.id}</div>
           <div class="compact-meta">${safeText(r.email||'correo reportado')} · ${safeText(getReportStatusTextFinal(r.status))}</div>
         </div>
         <div class="compact-details">
           <p><b>Reporte:</b> #${r.id}</p>
-          ${r.order_id ? `<p><b>Pedido:</b> #${r.order_id}</p>` : ''}
           <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
           <p><b>Tipo de falla:</b> ${safeText(r.issue_type||'otro')}</p>
           <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
           <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinal(r.status))}</span></p>
+          <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
+        </div>
+      </div>`).join('');
+  }catch(e){
+    box.innerHTML='No se pudieron cargar tus respuestas de fallos.';
+    console.warn('Error cargando respuestas de fallos', e);
+  }
+}
+
+(function(){
+  const styleId='reportMenuFinalStyle';
+  if(!document.getElementById(styleId)){
+    const st=document.createElement('style');
+    st.id=styleId;
+    st.textContent=`
+      .report-option-card h2{margin:0 0 8px}.report-option-card button{margin-top:10px}
+      @media(max-width:760px){.report-option-card .dash-icon{width:58px;height:58px;font-size:26px}}
+    `;
+    document.head.appendChild(st);
+  }
+
+  const previousShow=typeof showSection==='function'?showSection:null;
+  if(previousShow){
+    showSection=function(name){
+      ensureReportMenuFinal();
+      applyComunicadosVisibilityFinal();
+      previousShow(name);
+      if(name==='failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
+      setTimeout(()=>applyComunicadosVisibilityFinal(),120);
+    };
+  }
+
+  setTimeout(()=>{ensureReportMenuFinal();applyComunicadosVisibilityFinal();},300);
+  setTimeout(()=>{ensureReportMenuFinal();applyComunicadosVisibilityFinal();},1200);
+})();
+
+
+
+// ===============================
+// AJUSTE FINAL: FALLAS EN DASHBOARD
+// - Quita Reportar/Respuesta de fallas del menú lateral para usuarios/subadmin.
+// - Convierte tarjetas del dashboard en accesos: Reportar falla, Cargar saldo.
+// - Agrega tarjeta Respuesta de fallas en dashboard.
+// ===============================
+function isPrincipalAdminDashboardFinal(){
+  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+}
+
+function ensureFailureResponsesSectionDashboardFinal(){
+  const main=document.querySelector('.main');
+  if(!main) return;
+  if(!document.getElementById('section-failure-responses')){
+    const section=document.createElement('section');
+    section.id='section-failure-responses';
+    section.className='section';
+    section.innerHTML=`
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Respuesta de fallas</h2>
+            <p class="small-text">Aquí aparecerán las respuestas del admin a tus reportes.</p>
+          </div>
+          <button class="outline-btn" style="width:auto" onclick="loadMyFailureResponsesFinalDashboard()">Actualizar</button>
+        </div>
+        <div id="myFailureResponsesList">Cargando respuestas...</div>
+      </div>`;
+    const reportsSection=document.getElementById('section-reports');
+    if(reportsSection) reportsSection.insertAdjacentElement('afterend', section);
+    else main.appendChild(section);
+  }
+}
+
+function hideFailureMenuItemsDashboardFinal(){
+  const principal=isPrincipalAdminDashboardFinal();
+  document.querySelectorAll('.menu-btn').forEach(btn=>{
+    const txt=(btn.textContent||'').toLowerCase();
+    const sec=btn.getAttribute('data-section')||'';
+    if(!principal && (sec==='reports' || sec==='reports-menu' || sec==='failure-responses' || txt.includes('reportar') || txt.includes('respuesta de fallas'))){
+      btn.style.display='none';
+    }
+  });
+}
+
+function buildDashboardActionCardDashboardFinal(id, icon, label, detail, onclickCode, hiddenSpanId){
+  return `<div id="${id}" class="dash-card clickable dashboard-action-card" onclick="${onclickCode}">
+    <div class="dash-icon">${icon}</div>
+    <div>
+      <div class="dash-label">${label}</div>
+      <div class="small-text">${detail}</div>
+      ${hiddenSpanId?`<span id="${hiddenSpanId}" class="hidden">0</span>`:''}
+    </div>
+  </div>`;
+}
+
+function configureDashboardFailureCardsFinal(){
+  if(!currentUser) return;
+  ensureFailureResponsesSectionDashboardFinal();
+  hideFailureMenuItemsDashboardFinal();
+
+  // Admin principal conserva sus contadores de pendientes.
+  if(isPrincipalAdminDashboardFinal()) return;
+
+  const statReports=document.getElementById('statReports');
+  const reportCard=statReports?.closest('.dash-card');
+  if(reportCard && !reportCard.dataset.convertedReportAction){
+    reportCard.dataset.convertedReportAction='1';
+    reportCard.id='dashReportFaultActionCard';
+    reportCard.setAttribute('onclick', "showSection('reports')");
+    reportCard.classList.add('dashboard-action-card');
+    reportCard.innerHTML=`<div class="dash-icon">⚠</div><div><div class="dash-label">Reportar falla</div><div class="small-text">Abrir formulario</div><span id="statReports" class="hidden">0</span></div>`;
+  }
+
+  const statBalance=document.getElementById('statBalanceRequests');
+  const balanceCard=statBalance?.closest('.dash-card');
+  if(balanceCard && !balanceCard.dataset.convertedBalanceAction){
+    balanceCard.dataset.convertedBalanceAction='1';
+    balanceCard.id='dashLoadBalanceActionCard';
+    balanceCard.setAttribute('onclick', "showSection('balance')");
+    balanceCard.classList.add('dashboard-action-card');
+    balanceCard.innerHTML=`<div class="dash-icon">💳</div><div><div class="dash-label">Cargar saldo</div><div class="small-text">Enviar datos de transferencia</div><span id="statBalanceRequests" class="hidden">0</span></div>`;
+  }
+
+  const grid=document.querySelector('#section-dashboard .grid-cards');
+  if(grid && !document.getElementById('dashFailureResponsesActionCard')){
+    const card=document.createElement('div');
+    card.innerHTML=buildDashboardActionCardDashboardFinal(
+      'dashFailureResponsesActionCard','💬','Respuesta de fallas','Ver respuestas del admin',"openFailureResponsesFinalDashboard()",''
+    );
+    grid.appendChild(card.firstElementChild);
+  }
+}
+
+function openFailureResponsesFinalDashboard(){
+  ensureFailureResponsesSectionDashboardFinal();
+  showSection('failure-responses');
+  loadMyFailureResponsesFinalDashboard();
+}
+
+function getReportStatusTextFinalDashboard(status){
+  const map={pendiente:'Pendiente',resuelto:'Resuelto',reemplazo:'Reemplazo',reembolso:'Reembolso',rechazado:'Rechazado'};
+  return map[String(status||'').toLowerCase()] || status || 'Pendiente';
+}
+
+async function loadMyFailureResponsesFinalDashboard(){
+  const box=document.getElementById('myFailureResponsesList');
+  if(!box) return;
+  try{
+    const reports=await api('/api/my-account-reports');
+    if(!Array.isArray(reports) || !reports.length){
+      box.innerHTML='Todavía no tienes reportes de falla.';
+      return;
+    }
+    box.innerHTML=reports.map(r=>`
+      <div class="item compact-item">
+        <div class="compact-header" onclick="this.parentNode.classList.toggle('open')">
+          <div class="compact-title">Reporte #${r.id}${r.order_id?` · Pedido #${r.order_id}`:''}</div>
+          <div class="compact-meta">${safeText(r.email||'correo reportado')} · ${safeText(getReportStatusTextFinalDashboard(r.status))}</div>
+        </div>
+        <div class="compact-details">
+          <p><b>Reporte:</b> #${r.id}</p>
+          ${r.order_id?`<p><b>Pedido:</b> #${r.order_id}</p>`:''}
+          <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+          <p><b>Tipo de falla:</b> ${safeText(r.issue_type||'otro')}</p>
+          <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
+          <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinalDashboard(r.status))}</span></p>
           <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
         </div>
       </div>`).join('');
@@ -3026,33 +3203,41 @@ async function loadMyFailureResponsesFinal(){
 }
 
 (function(){
-  const styleId='failureResponsesMenuFinalStyle';
-  if(!document.getElementById(styleId)){
-    const st=document.createElement('style');
-    st.id=styleId;
-    st.textContent=`
-      #failureResponsesMenuBtn{margin-top:-2px}
-      @media(max-width:760px){#failureResponsesMenuBtn{font-size:16px}}
-    `;
-    document.head.appendChild(st);
-  }
+  const st=document.createElement('style');
+  st.id='dashboardFailureCardsFinalStyle';
+  st.textContent=`
+    .dashboard-action-card .small-text{font-size:15px;font-weight:800;color:var(--muted);margin-top:6px}
+    .compact-details{display:none;margin-top:12px}.compact-item.open .compact-details{display:block}
+    .compact-header{cursor:pointer;display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .compact-title{font-weight:900}.compact-meta{color:var(--muted);font-size:13px;font-weight:800;text-align:right}
+    @media(max-width:760px){.compact-header{display:block}.compact-meta{text-align:left;margin-top:4px}.dashboard-action-card .small-text{font-size:13px}}
+  `;
+  if(!document.getElementById(st.id)) document.head.appendChild(st);
 
-  const previousShow=typeof showSection==='function'?showSection:null;
-  if(previousShow){
+  const oldShow=typeof showSection==='function'?showSection:null;
+  if(oldShow){
     showSection=function(name){
-      ensureFailureResponsesMenuFinal();
-      applyComunicadosVisibilityFinal();
-      previousShow(name);
-      if(name==='failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
-      setTimeout(()=>applyComunicadosVisibilityFinal(),120);
-      setTimeout(()=>ensureFailureResponsesMenuFinal(),120);
+      const result=oldShow(name);
+      setTimeout(()=>{
+        configureDashboardFailureCardsFinal();
+        if(name==='failure-responses') loadMyFailureResponsesFinalDashboard();
+      },60);
+      return result;
     };
   }
 
-  // Refuerzos para evitar que versiones anteriores vuelvan a cambiar "Reportar falla" por "Reportar".
-  setTimeout(()=>{ensureFailureResponsesMenuFinal();applyComunicadosVisibilityFinal();},100);
-  setTimeout(()=>{ensureFailureResponsesMenuFinal();applyComunicadosVisibilityFinal();},600);
-  setTimeout(()=>{ensureFailureResponsesMenuFinal();applyComunicadosVisibilityFinal();},1500);
+  const oldLoadApp=typeof loadApp==='function'?loadApp:null;
+  if(oldLoadApp){
+    loadApp=async function(){
+      const result=await oldLoadApp.apply(this, arguments);
+      setTimeout(configureDashboardFailureCardsFinal,100);
+      setTimeout(configureDashboardFailureCardsFinal,900);
+      return result;
+    };
+  }
+
+  setTimeout(configureDashboardFailureCardsFinal,400);
+  setTimeout(configureDashboardFailureCardsFinal,1500);
 })();
 
 </script>
