@@ -476,6 +476,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_subadmin BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS owner_user_id INTEGER`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_panel_id INTEGER`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0`);
@@ -604,25 +605,6 @@ async function initDatabase() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
-
-
-  // Asegura columnas de Fase 1 aunque admin_panels se haya creado manualmente antes
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS business_name TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS admin_name TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS email TEXT`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS password TEXT`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS bank_name TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS bank_holder TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS bank_clabe TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS payment_concept TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS notification_email TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'activo'`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS plan_type TEXT DEFAULT 'renta'`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS expires_at DATE`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
-  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_panels_email_unique ON admin_panels (lower(email)) WHERE email IS NOT NULL AND email <> ''`);
 
 
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
@@ -853,22 +835,60 @@ app.post("/api/register", async (req, res) => {
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+    const cleanEmail = String(email || "").trim().toLowerCase();
 
-    const result = await pool.query(
+    let result = await pool.query(
       `SELECT * FROM users WHERE email = $1`,
-      [String(email || "").trim().toLowerCase()]
+      [cleanEmail]
     );
 
-    const user = result.rows[0];
+    let user = result.rows[0];
 
+    // FASE 1.5:
+    // Si el correo no existe en users, pero sí existe en admin_panels activo,
+    // se crea automáticamente el usuario de acceso para que pueda iniciar sesión.
     if (!user) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
+      const panelResult = await pool.query(
+        `SELECT * FROM admin_panels WHERE lower(email) = lower($1) LIMIT 1`,
+        [cleanEmail]
+      );
 
-    const match = await bcrypt.compare(password || "", user.password);
+      const panel = panelResult.rows[0];
 
-    if (!match) {
-      return res.status(401).json({ error: "Contraseña incorrecta" });
+      if (!panel) {
+        return res.status(404).json({ error: "Usuario no encontrado" });
+      }
+
+      if (String(panel.status || "activo").toLowerCase() !== "activo") {
+        return res.status(403).json({ error: "Este panel admin está suspendido o inactivo" });
+      }
+
+      const panelPasswordOk = await bcrypt.compare(password || "", panel.password);
+
+      if (!panelPasswordOk) {
+        return res.status(401).json({ error: "Contraseña incorrecta" });
+      }
+
+      const createdUser = await pool.query(
+        `INSERT INTO users (name, email, password, role, balance, is_subadmin, admin_panel_id)
+         VALUES ($1, $2, $3, 'admin', 0, TRUE, $4)
+         ON CONFLICT (email) DO UPDATE SET
+           name = EXCLUDED.name,
+           password = EXCLUDED.password,
+           role = 'admin',
+           is_subadmin = TRUE,
+           admin_panel_id = EXCLUDED.admin_panel_id
+         RETURNING *`,
+        [panel.admin_name || panel.business_name || cleanEmail, cleanEmail, panel.password, panel.id]
+      );
+
+      user = createdUser.rows[0];
+    } else {
+      const match = await bcrypt.compare(password || "", user.password);
+
+      if (!match) {
+        return res.status(401).json({ error: "Contraseña incorrecta" });
+      }
     }
 
     const token = generateToken(user);
@@ -884,7 +904,7 @@ app.post("/api/login", async (req, res) => {
 app.get("/api/me", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users WHERE id = $1`,
+      `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id, admin_panel_id FROM users WHERE id = $1`,
       [req.user.id]
     );
 
@@ -2900,11 +2920,13 @@ app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, r
 app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, business_name, admin_name, email, phone, bank_name, bank_holder,
-              bank_clabe, payment_concept, notification_email, status, plan_type,
-              expires_at, created_at, updated_at
-       FROM admin_panels
-       ORDER BY id DESC`
+      `SELECT ap.id, ap.business_name, ap.admin_name, ap.email, ap.phone, ap.bank_name, ap.bank_holder,
+              ap.bank_clabe, ap.payment_concept, ap.notification_email, ap.status, ap.plan_type,
+              ap.expires_at, ap.created_at, ap.updated_at,
+              u.id AS login_user_id
+       FROM admin_panels ap
+       LEFT JOIN users u ON lower(u.email) = lower(ap.email)
+       ORDER BY ap.id DESC`
     );
 
     res.json(result.rows);
@@ -2915,6 +2937,8 @@ app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, 
 });
 
 app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const {
       business_name,
@@ -2943,14 +2967,17 @@ app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req,
       return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
     }
 
-    const exists = await pool.query(`SELECT id FROM admin_panels WHERE lower(email) = lower($1)`, [cleanEmail]);
+    await client.query("BEGIN");
+
+    const exists = await client.query(`SELECT id FROM admin_panels WHERE lower(email) = lower($1)`, [cleanEmail]);
     if (exists.rows.length) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: "Este correo ya tiene un panel admin registrado" });
     }
 
     const hashedPassword = await bcrypt.hash(cleanPassword, 10);
 
-    const result = await pool.query(
+    const panelResult = await client.query(
       `INSERT INTO admin_panels
        (business_name, admin_name, email, password, phone, bank_name, bank_holder,
         bank_clabe, payment_concept, notification_email, status, plan_type, expires_at)
@@ -2975,13 +3002,74 @@ app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, async (req,
       ]
     );
 
+    const panel = panelResult.rows[0];
+
+    // Crear también el usuario de login. Así el admin puede entrar con el mismo correo/contraseña.
+    const userResult = await client.query(
+      `INSERT INTO users (name, email, password, role, balance, is_subadmin, admin_panel_id)
+       VALUES ($1, $2, $3, 'admin', 0, TRUE, $4)
+       ON CONFLICT (email) DO UPDATE SET
+         name = EXCLUDED.name,
+         password = EXCLUDED.password,
+         role = 'admin',
+         is_subadmin = TRUE,
+         admin_panel_id = EXCLUDED.admin_panel_id
+       RETURNING id, name, email, role, is_subadmin, admin_panel_id`,
+      [panel.admin_name || panel.business_name || cleanEmail, cleanEmail, hashedPassword, panel.id]
+    );
+
+    await client.query("COMMIT");
+
     res.json({
-      message: "Panel admin creado correctamente",
-      panel: result.rows[0]
+      message: "Panel admin creado correctamente. Ya puede iniciar sesión con ese correo.",
+      panel,
+      login_user: userResult.rows[0]
     });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     console.error("Error creando panel admin:", err.message);
     res.status(500).json({ error: "Error creando panel admin" });
+  } finally {
+    client.release();
+  }
+});
+
+// Crea o repara el acceso de login para un panel que ya existía antes de la Fase 1.5
+app.post("/api/admin/admin-panels/:id/create-login", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const panelId = Number(req.params.id);
+
+    if (!panelId) {
+      return res.status(400).json({ error: "Panel inválido" });
+    }
+
+    const panelResult = await pool.query(`SELECT * FROM admin_panels WHERE id = $1`, [panelId]);
+    const panel = panelResult.rows[0];
+
+    if (!panel) {
+      return res.status(404).json({ error: "Panel admin no encontrado" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role, balance, is_subadmin, admin_panel_id)
+       VALUES ($1, lower($2), $3, 'admin', 0, TRUE, $4)
+       ON CONFLICT (email) DO UPDATE SET
+         name = EXCLUDED.name,
+         password = EXCLUDED.password,
+         role = 'admin',
+         is_subadmin = TRUE,
+         admin_panel_id = EXCLUDED.admin_panel_id
+       RETURNING id, name, email, role, is_subadmin, admin_panel_id`,
+      [panel.admin_name || panel.business_name || panel.email, panel.email, panel.password, panel.id]
+    );
+
+    res.json({
+      message: "Acceso de login creado/reparado correctamente",
+      user: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Error creando acceso de panel admin:", err.message);
+    res.status(500).json({ error: "Error creando acceso de panel admin" });
   }
 });
 

@@ -3224,6 +3224,7 @@ async function loadAdminPanelsPhase1(){
           <th>Banco</th>
           <th>Plan</th>
           <th>Estado</th>
+          <th>Login</th>
           <th>Acciones</th>
         </tr>
       </thead>
@@ -3248,10 +3249,12 @@ async function loadAdminPanelsPhase1(){
               <span class="small-text">Vence: ${safeText(p.expires_at ? String(p.expires_at).slice(0,10) : 'Sin fecha')}</span>
             </td>
             <td><span class="status">${safeText(p.status||'activo')}</span></td>
+            <td>${p.login_user_id ? '<span class="chip">Activo</span>' : '<span class="status">Pendiente</span>'}</td>
             <td>
               <button class="outline-btn" style="width:auto;margin-bottom:6px" onclick="updateAdminPanelStatusPhase1(${p.id}, '${String(p.status||'activo')==='activo'?'suspendido':'activo'}')">
                 ${String(p.status||'activo')==='activo'?'Suspender':'Activar'}
               </button>
+              ${!p.login_user_id ? `<button class="green-btn" style="width:auto;margin-bottom:6px" onclick="createAdminPanelLoginPhase1(${p.id})">Crear acceso</button>` : ''}
               <button class="muted-btn" style="width:auto" onclick="copyAdminPanelInfoPhase1(${p.id})">Copiar datos</button>
             </td>
           </tr>
@@ -3296,6 +3299,18 @@ async function updateAdminPanelStatusPhase1(panelId,status){
     await loadAdminPanelsPhase1();
   }catch(e){
     showMessage(e.message||'Error actualizando estado','error');
+  }
+}
+
+async function createAdminPanelLoginPhase1(panelId){
+  try{
+    const data=await api('/api/admin/admin-panels/'+panelId+'/create-login',{
+      method:'POST'
+    });
+    showMessage(data.message||'Acceso creado correctamente');
+    await loadAdminPanelsPhase1();
+  }catch(e){
+    showMessage(e.message||'Error creando acceso de login','error');
   }
 }
 
