@@ -3224,7 +3224,6 @@ async function loadAdminPanelsPhase1(){
           <th>Banco</th>
           <th>Plan</th>
           <th>Estado</th>
-          <th>Login</th>
           <th>Acciones</th>
         </tr>
       </thead>
@@ -3249,12 +3248,10 @@ async function loadAdminPanelsPhase1(){
               <span class="small-text">Vence: ${safeText(p.expires_at ? String(p.expires_at).slice(0,10) : 'Sin fecha')}</span>
             </td>
             <td><span class="status">${safeText(p.status||'activo')}</span></td>
-            <td>${p.login_user_id ? '<span class="chip">Activo</span>' : '<span class="status">Pendiente</span>'}</td>
             <td>
               <button class="outline-btn" style="width:auto;margin-bottom:6px" onclick="updateAdminPanelStatusPhase1(${p.id}, '${String(p.status||'activo')==='activo'?'suspendido':'activo'}')">
                 ${String(p.status||'activo')==='activo'?'Suspender':'Activar'}
               </button>
-              ${!p.login_user_id ? `<button class="green-btn" style="width:auto;margin-bottom:6px" onclick="createAdminPanelLoginPhase1(${p.id})">Crear acceso</button>` : ''}
               <button class="muted-btn" style="width:auto" onclick="copyAdminPanelInfoPhase1(${p.id})">Copiar datos</button>
             </td>
           </tr>
@@ -3302,18 +3299,6 @@ async function updateAdminPanelStatusPhase1(panelId,status){
   }
 }
 
-async function createAdminPanelLoginPhase1(panelId){
-  try{
-    const data=await api('/api/admin/admin-panels/'+panelId+'/create-login',{
-      method:'POST'
-    });
-    showMessage(data.message||'Acceso creado correctamente');
-    await loadAdminPanelsPhase1();
-  }catch(e){
-    showMessage(e.message||'Error creando acceso de login','error');
-  }
-}
-
 function copyAdminPanelInfoPhase1(panelId){
   const panel=(window.__adminPanelsPhase1Cache||[]).find(p=>Number(p.id)===Number(panelId));
   if(!panel) return;
@@ -3355,6 +3340,111 @@ function copyAdminPanelInfoPhase1(panelId){
     }
   },1000);
 })();
+
+
+// ===============================
+// FASE 1.6: proteger admin principal y tratar paneles rentados como independientes
+// ===============================
+function isPanelAdminRentedFinal(){
+  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+}
+
+function isMainAdminOnlyFinal(){
+  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !isPanelAdminRentedFinal();
+}
+
+function isDistributorUser(){
+  return currentUser && (isMainAdminOnlyFinal() || isPanelAdminRentedFinal() || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+}
+
+function isSubadminOnly(){
+  return currentUser && !isMainAdminOnlyFinal() && (isPanelAdminRentedFinal() || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+}
+
+function applyComunicadosVisibilityFinal(){
+  const btn=document.getElementById('announcementsMenuBtn');
+  const section=document.getElementById('section-comunicados');
+  if(!isMainAdminOnlyFinal()){
+    if(btn) btn.remove();
+    if(section) section.classList.add('hidden');
+    return;
+  }
+  if(section) section.classList.remove('hidden');
+}
+
+loadApp = async function(){
+  if(!token) return;
+  try{
+    currentUser = await api('/api/me');
+
+    authSection.classList.add('hidden');
+    appSection.classList.remove('hidden');
+
+    userName.textContent = currentUser.name || '';
+    userEmail.textContent = currentUser.email || '';
+    userRole.textContent = isPanelAdminRentedFinal() ? 'admin independiente' : (currentUser.role || 'user');
+    userBalance.textContent = formatMoney(currentUser.balance);
+    sideEmail.textContent = currentUser.email || '';
+    topUserName.textContent = currentUser.name || '';
+    statBalance.textContent = formatMoney(currentUser.balance);
+    statUsers.textContent = '0';
+
+    const mainAdmin = isMainAdminOnlyFinal();
+    const distributorVisible = isSubadminOnly();
+
+    document.getElementById('adminMenuBtn')?.classList.toggle('hidden', !mainAdmin);
+    document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden', !mainAdmin);
+    document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden', !mainAdmin);
+    document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden', !mainAdmin);
+    document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !distributorVisible);
+    document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
+
+    applyComunicadosVisibilityFinal();
+
+    await loadProducts();
+    await loadMyOrders();
+    await loadBalanceRequests();
+
+    if(mainAdmin){
+      setTodaySalesDate();
+      await loadUsers();
+      await loadAdminProducts();
+      await loadAdminOrders();
+      await loadSalesReport();
+      await loadPlatformInventory();
+      await loadAccountReports();
+      ensureAdminPanelsPhase1UI?.();
+      await loadAdminPanelsPhase1?.();
+    }
+
+    showSection('dashboard');
+  }catch(e){
+    console.error(e);
+    logout();
+  }
+};
+
+// Evita que un admin de panel rentado fuerce la sección Admin desde la interfaz.
+const __showSectionBeforePanelGuard = showSection;
+showSection = function(name){
+  if(name === 'admin' && !isMainAdminOnlyFinal()){
+    showMessage('Esta sección es solo para el admin principal.','error');
+    name = 'dashboard';
+  }
+  __showSectionBeforePanelGuard(name);
+  if(name === 'distributor' && isDistributorUser()){
+    loadDistributorPanel?.();
+    loadDistributorPrices?.();
+  }
+};
+
+const __loadAdminPanelsPhase1BeforeGuard = typeof loadAdminPanelsPhase1 === 'function' ? loadAdminPanelsPhase1 : null;
+if(__loadAdminPanelsPhase1BeforeGuard){
+  loadAdminPanelsPhase1 = async function(){
+    if(!isMainAdminOnlyFinal()) return;
+    return __loadAdminPanelsPhase1BeforeGuard();
+  };
+}
 
 </script>
 </body>
