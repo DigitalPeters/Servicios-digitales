@@ -1271,6 +1271,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const productId = req.params.productId;
     const userId = req.user.id;
     const orderData = safeJsonObject(req.body.order_data);
+    const requestedQuantity = Math.max(1, Math.min(50, Number(req.body.quantity || 1)));
 
     await client.query("BEGIN");
 
@@ -1288,16 +1289,10 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
-    if (Number(product.stock_enabled || 0) === 1 && Number(product.stock || 0) <= 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Producto agotado. No hay stock disponible." });
-    }
-
     const requiredFields = safeJsonArray(product.required_fields);
 
     for (const field of requiredFields) {
       const value = orderData[field];
-
       if (!value || String(value).trim() === "") {
         await client.query("ROLLBACK");
         return res.status(400).json({ error: `Debes ingresar: ${field}` });
@@ -1317,16 +1312,44 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const isComboProduct = String(product.product_type || '').toLowerCase() === 'combo_auto';
-    const price = isComboProduct
+    const unitPrice = isComboProduct
       ? await calculateComboPrice(client, user, product)
       : await getEffectiveProductPrice(client, user, product);
+
+    const productName = String(product.name || "").trim();
+    const productCategory = String(product.category || "").trim();
+    const productOwnerId = product.owner_admin_id || null;
+
+    const platformCountResult = await client.query(
+      `SELECT COUNT(*)::int AS total
+       FROM platform_accounts
+       WHERE (
+          lower(product_name) = lower($1)
+          OR lower(platform) = lower($1)
+          OR lower(platform) = lower($2)
+       )
+       AND (
+          ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+          OR owner_admin_id = $3
+       )`,
+      [productName, productCategory, productOwnerId]
+    );
+
+    const isPlatformProduct = !isComboProduct && Number(platformCountResult.rows[0]?.total || 0) > 0;
+    const quantity = isPlatformProduct ? requestedQuantity : 1;
+    const totalPrice = unitPrice * quantity;
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
 
-    if (chargeMode === "on_purchase" && balance < price) {
+    if (Number(product.stock_enabled || 0) === 1 && Number(product.stock || 0) < quantity) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: `Producto agotado. Solo hay ${Number(product.stock || 0)} disponible(s).` });
+    }
+
+    if (chargeMode === "on_purchase" && balance < totalPrice) {
       await client.query("ROLLBACK");
       return res.status(400).json({
-        error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y el producto cuesta $${price.toFixed(2)}`
+        error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y el total cuesta $${totalPrice.toFixed(2)}`
       });
     }
 
@@ -1349,11 +1372,23 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         assignedAccounts.push(account);
       }
 
-      const deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
+      let deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
+
+      deliveredAccountData += [
+        "",
+        "📌 Normas de uso:",
+        "✅ No editar datos de acceso",
+        "✅ No cambiar el nombre ni el código del perfil",
+        "✅ Uso exclusivo en un solo equipo",
+        "✅ No compartir el acceso con otros",
+        "",
+        "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
+      ].join("\n");
+
       const charged = chargeMode === "on_purchase" ? 1 : 0;
 
       if (charged === 1) {
-        await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [price, userId]);
+        await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [totalPrice, userId]);
       }
 
       const comboCost = comboItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost_price || 0)), 0);
@@ -1366,8 +1401,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         [
           userId,
           productId,
-          price,
-          JSON.stringify(orderData),
+          totalPrice,
+          JSON.stringify({ ...orderData, quantity: 1 }),
           deliveredAccountData,
           charged,
           assignedAccounts[0]?.id || null,
@@ -1400,7 +1435,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         customerName: user.name || "Cliente",
         customerEmail: user.email || "Sin correo",
         productName: product.name,
-        amount: price,
+        amount: totalPrice,
         orderData
       });
 
@@ -1410,26 +1445,14 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       });
     }
 
-    const productName = String(product.name || "").trim();
-    const productCategory = String(product.category || "").trim();
-
-    const platformCountResult = await client.query(
-      `SELECT COUNT(*)::int AS total
-       FROM platform_accounts
-       WHERE lower(product_name) = lower($1)
-          OR lower(platform) = lower($1)
-          OR lower(platform) = lower($2)`,
-      [productName, productCategory]
-    );
-
-    const isPlatformProduct = Number(platformCountResult.rows[0]?.total || 0) > 0;
+    let assignedAccounts = [];
     let assignedAccount = null;
     let deliveredAccountData = "";
     let orderStatus = "accion_en_espera";
     let adminResponse = "";
 
     if (isPlatformProduct) {
-      const availableAccountResult = await client.query(
+      const availableAccountsResult = await client.query(
         `SELECT *
          FROM platform_accounts
          WHERE status = 'available'
@@ -1438,45 +1461,48 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
              OR lower(platform) = lower($1)
              OR lower(platform) = lower($2)
            )
+           AND (
+             ($4::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+             OR owner_admin_id = $4
+           )
          ORDER BY id ASC
-         LIMIT 1
+         LIMIT $3
          FOR UPDATE SKIP LOCKED`,
-        [productName, productCategory]
+        [productName, productCategory, quantity, productOwnerId]
       );
 
-      assignedAccount = availableAccountResult.rows[0];
+      assignedAccounts = availableAccountsResult.rows || [];
 
-      if (!assignedAccount) {
+      if (assignedAccounts.length < quantity) {
         await client.query("ROLLBACK");
         return res.status(400).json({
-          error: "Por el momento no hay cuentas disponibles para esta plataforma. Intenta más tarde."
+          error: `No hay cuentas suficientes para esta plataforma. Solicitaste ${quantity} y hay ${assignedAccounts.length} disponible(s).`
         });
       }
+
+      assignedAccount = assignedAccounts[0];
 
       const fechaEntrega = new Date();
       const fechaVencimiento = new Date(fechaEntrega);
       fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
 
-      function formatFechaMX(fecha) {
-        return fecha.toLocaleDateString("es-MX", {
-          timeZone: "America/Mexico_City",
-          day: "2-digit",
-          month: "2-digit",
-          year: "2-digit"
-        });
-      }
-
-      deliveredAccountData = [
-        "🎬 Cuenta de Streaming Entregada",
+      const accountBlocks = assignedAccounts.map((account, idx) => [
+        `🎬 Cuenta de Streaming Entregada #${idx + 1}`,
         "",
-        `📌 Plataforma: ${String(assignedAccount.platform || productCategory || productName || "").toUpperCase()}`,
-        `📧 Correo: ${assignedAccount.account_email || ""}`,
-        `🔐 Contraseña: ${assignedAccount.account_password || ""}`,
-        `👤 Perfil: ${assignedAccount.profile_name || "No aplica"}`,
-        `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
+        `📌 Plataforma: ${String(account.platform || productCategory || productName || "").toUpperCase()}`,
+        `📧 Correo: ${account.account_email || ""}`,
+        `🔐 Contraseña: ${account.account_password || ""}`,
+        `👤 Perfil: ${account.profile_name || "No aplica"}`,
+        `🔢 PIN de acceso: ${account.profile_pin || "No aplica"}`,
         `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
         `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
-        assignedAccount.access_url ? `🔗 URL para código/soporte: ${assignedAccount.access_url}` : null,
+        account.access_url ? `🔗 URL para código/soporte: ${account.access_url}` : null
+      ].filter(line => line !== null && line !== undefined).join("\n"));
+
+      deliveredAccountData = [
+        quantity > 1 ? `🎬 Compra múltiple de ${quantity} cuentas/perfiles` : "🎬 Cuenta de Streaming Entregada",
+        "",
+        accountBlocks.join("\n\n━━━━━━━━━━━━━━\n\n"),
         "",
         "📌 Normas de uso:",
         "✅ No editar datos de acceso",
@@ -1485,7 +1511,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         "✅ No compartir el acceso con otros",
         "",
         "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
-      ].filter(line => line !== null && line !== undefined).join("\n");
+      ].join("\n");
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
@@ -1496,7 +1522,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     if (charged === 1) {
       await client.query(
         `UPDATE users SET balance = balance - $1 WHERE id = $2`,
-        [price, userId]
+        [totalPrice, userId]
       );
     }
 
@@ -1508,36 +1534,38 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       [
         userId,
         productId,
-        price,
-        JSON.stringify(orderData),
+        totalPrice,
+        JSON.stringify({ ...orderData, quantity }),
         orderStatus,
         adminResponse,
         charged,
         0,
         assignedAccount ? assignedAccount.id : null,
         deliveredAccountData,
-        product.name || productName,
+        quantity > 1 ? `${product.name || productName} x${quantity}` : (product.name || productName),
         product.category || productCategory,
-        Math.max(0, Number(product.cost_price || 0)),
+        Math.max(0, Number(product.cost_price || 0)) * quantity,
         viewerContext?.owner_admin_id || null
       ]
     );
 
     const newOrderId = orderInsertResult.rows[0].id;
 
-    if (assignedAccount) {
-      await client.query(
-        `UPDATE platform_accounts
-         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
-         WHERE id = $3`,
-        [newOrderId, userId, assignedAccount.id]
-      );
+    if (assignedAccounts.length) {
+      for (const account of assignedAccounts) {
+        await client.query(
+          `UPDATE platform_accounts
+           SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+           WHERE id = $3`,
+          [newOrderId, userId, account.id]
+        );
+      }
     }
 
     if (Number(product.stock_enabled || 0) === 1) {
       await client.query(
-        `UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`,
-        [productId]
+        `UPDATE products SET stock = stock - $1 WHERE id = $2 AND stock >= $1`,
+        [quantity, productId]
       );
     }
 
@@ -1548,20 +1576,22 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       customerName: user.name || "Cliente",
       customerEmail: user.email || "Sin correo",
       productName: product.name,
-      amount: price,
-      orderData
+      amount: totalPrice,
+      orderData: { ...orderData, quantity }
     });
 
     if (assignedAccount) {
       return res.json({
-        message: "Compra realizada correctamente. Tu cuenta fue entregada automáticamente en Mis pedidos.",
+        message: quantity > 1
+          ? `Compra realizada correctamente. Se entregaron ${quantity} cuentas/perfiles en Mis pedidos.`
+          : "Compra realizada correctamente. Tu cuenta fue entregada automáticamente en Mis pedidos.",
         delivered_account_data: deliveredAccountData
       });
     }
 
     if (charged === 1) {
       return res.json({
-        message: `Compra realizada correctamente. Se descontaron $${price.toFixed(2)} de tu saldo.`
+        message: `Compra realizada correctamente. Se descontaron $${totalPrice.toFixed(2)} de tu saldo.`
       });
     }
 
@@ -1569,7 +1599,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       message: "Pedido creado correctamente. El saldo se descontará cuando el admin marque Éxito."
     });
   } catch (err) {
-    await client.query("ROLLBACK");
+    try { await client.query("ROLLBACK"); } catch (_) {}
     console.error(err.message);
     res.status(500).json({ error: "Error creando pedido" });
   } finally {
@@ -3844,3 +3874,5 @@ initDatabase()
 // COMUNICADOS MENU PANEL PROPIETARIO - 2026-06-08 03:59:14
 
 // REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28
+
+// SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36

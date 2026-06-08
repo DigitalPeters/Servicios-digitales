@@ -4320,6 +4320,108 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(setupOwnerAnnouncementsMenu, 1500);
 })();
 
+
+// ===============================
+// SUMADOR DE PRODUCTOS / PERFILES EN TIENDA
+// Permite comprar varias cuentas de una misma plataforma en un solo pedido.
+// ===============================
+(function(){
+  function isStreamingProductForQuantity(product){
+    const type = String(product?.product_type || '').toLowerCase();
+    const cat = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    return type === 'streaming_auto' || cat.includes('plataforma') || cat.includes('perfil') || name.includes('perfil');
+  }
+
+  window.renderProductRow = function(product){
+    const stockEnabled=Number(product.stock_enabled||0)===1;
+    const stock=Number(product.stock||0);
+    const soldOut=stockEnabled&&stock<=0;
+    const showQty=isStreamingProductForQuantity(product);
+    const maxAttr=stockEnabled ? `max="${Math.max(1, stock)}"` : '';
+    const quantityBox = showQty ? `
+      <label class="field-label">Cantidad de perfiles/cuentas</label>
+      <input id="qty-${product.id}" type="number" min="1" ${maxAttr} value="1" oninput="updateProductTotal(${product.id})" />
+      <p class="small-text">Puedes comprar varias cuentas/perfiles de esta misma plataforma en un solo pedido.</p>
+      <div class="order-data">
+        <b>Total estimado:</b> $<span id="total-${product.id}">${formatMoney(product.price)}</span>
+      </div>
+    ` : '';
+
+    return `<div class="product-row" data-product-id="${product.id}">
+      <div class="product-header" onclick="toggleProduct(${product.id})">
+        <div><div class="product-name">${safeText(product.name)}</div><span class="chip">${safeText(product.category||'Otros')}</span></div>
+        <div><div class="price">$${formatMoney(product.price)}</div>${stockEnabled?`<div class="stock ${soldOut?'out':''}">${soldOut?'Sin stock':'Stock: '+stock}</div>`:''}</div>
+        <div>⌄</div>
+      </div>
+      <div id="product-details-${product.id}" class="product-details">
+        <p class="product-description">${safeText(product.description||'')}</p>
+        <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
+        ${quantityBox}
+        ${renderProductInputs(product)}
+        <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut?'disabled':''}>${soldOut?'Sin stock':'Comprar'}</button>
+      </div>
+    </div>`;
+  };
+
+  window.updateProductTotal = function(productId){
+    const product=allProducts.find(p=>Number(p.id)===Number(productId));
+    if(!product)return;
+    const qtyInput=document.getElementById(`qty-${productId}`);
+    const qty=Math.max(1, Number(qtyInput?.value || 1));
+    const totalEl=document.getElementById(`total-${productId}`);
+    if(totalEl)totalEl.textContent=formatMoney(Number(product.price||0)*qty);
+  };
+
+  window.buyProduct = async function(productId){
+    try{
+      const product=allProducts.find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
+      if(!product)throw new Error('Producto no encontrado');
+
+      const qtyInput=document.getElementById(`qty-${productId}`);
+      const quantity=isStreamingProductForQuantity(product) ? Math.max(1, Number(qtyInput?.value || 1)) : 1;
+      const total=Number(product.price||0)*quantity;
+
+      const confirmText = quantity > 1
+        ? `Vas a comprar: ${product.name}\nCantidad: ${quantity}\nTotal: $${formatMoney(total)}\n\nLas cuentas se entregarán juntas y los términos aparecerán una sola vez al final.\n¿Confirmas la compra?`
+        : `Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`;
+
+      if(!confirm(confirmText))return;
+
+      const fields=parseJsonArray(product.required_fields);
+      const order_data={};
+      fields.forEach(f=>{
+        const input=document.getElementById(`field-${productId}-${f}`);
+        order_data[f]=input?input.value.trim():'';
+      });
+
+      const data=await api('/api/buy/'+productId,{
+        method:'POST',
+        body:JSON.stringify({order_data, quantity})
+      });
+
+      showMessage(data.message||'Compra realizada');
+      await loadApp();
+      showSection('orders');
+    }catch(e){
+      showMessage(e.message,'error');
+    }
+  };
+
+  const oldFilterProductsQty = typeof filterProducts === 'function' ? filterProducts : null;
+  if(oldFilterProductsQty){
+    filterProducts = function(){
+      const result = oldFilterProductsQty();
+      setTimeout(()=>document.querySelectorAll('[id^="qty-"]').forEach(input=>{
+        const id=String(input.id).replace('qty-','');
+        if(typeof updateProductTotal==='function') updateProductTotal(id);
+      }),50);
+      return result;
+    };
+    window.filterProducts=filterProducts;
+  }
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4327,3 +4429,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 </html>
 
 <!-- REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28 -->
+
+<!-- SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36 -->
