@@ -346,7 +346,68 @@ async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.A
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');await loadProducts();await loadMyOrders();await loadBalanceRequests();if(currentUser.role==='admin'){setTodaySalesDate();await loadUsers();await loadAdminProducts();await loadAdminOrders();await loadSalesReport();await loadPlatformInventory();await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){
+  if(!token)return;
+  try{
+    currentUser=await api('/api/me');
+
+    authSection.classList.add('hidden');
+    appSection.classList.remove('hidden');
+
+    userName.textContent=currentUser.name||'';
+    userEmail.textContent=currentUser.email||'';
+    userRole.textContent=currentUser.role||'';
+    userBalance.textContent=formatMoney(currentUser.balance);
+    sideEmail.textContent=currentUser.email||'';
+    topUserName.textContent=currentUser.name||currentUser.email||'Usuario';
+    statBalance.textContent=formatMoney(currentUser.balance);
+    statUsers.textContent='0';
+
+    const isPanelAdmin = currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true';
+    const isMainAdmin = currentUser.role === 'admin' && !isPanelAdmin;
+
+    document.getElementById('adminMenuBtn')?.classList.toggle('hidden', currentUser.role!=='admin');
+    document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden', !isMainAdmin);
+    document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden', !isMainAdmin);
+    document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden', !isMainAdmin);
+
+    await loadProducts().catch(e=>console.warn('No se pudieron cargar productos', e));
+    await loadMyOrders().catch(e=>console.warn('No se pudieron cargar pedidos', e));
+    await loadBalanceRequests().catch(e=>console.warn('No se pudieron cargar solicitudes de saldo', e));
+
+    if(isMainAdmin){
+      setTodaySalesDate();
+      await loadUsers().catch(e=>console.warn('No se pudieron cargar usuarios admin', e));
+      await loadAdminProducts().catch(e=>console.warn('No se pudieron cargar productos admin', e));
+      await loadAdminOrders().catch(e=>console.warn('No se pudieron cargar pedidos admin', e));
+      await loadSalesReport().catch(e=>console.warn('No se pudo cargar reporte ventas', e));
+      await loadPlatformInventory().catch(e=>console.warn('No se pudo cargar inventario', e));
+      await loadAccountReports().catch(e=>console.warn('No se pudieron cargar reportes', e));
+    }else if(isPanelAdmin){
+      // Panel independiente: no llamar endpoints exclusivos del admin principal.
+      await loadAdminProducts().catch(e=>console.warn('No se pudieron cargar productos del panel', e));
+      await loadPlatformInventory().catch(e=>console.warn('No se pudo cargar inventario del panel', e));
+      await loadDistributorPanel().catch(e=>console.warn('No se pudieron cargar vendedores', e));
+      await loadDistributorPrices().catch(e=>console.warn('No se pudieron cargar precios de vendedores', e));
+    }else if(isDistributorUser && isDistributorUser()){
+      await loadDistributorPanel().catch(e=>console.warn('No se pudieron cargar vendedores', e));
+      await loadDistributorPrices().catch(e=>console.warn('No se pudieron cargar precios', e));
+    }
+
+    if(typeof syncAdminVisibilitySafe === 'function') syncAdminVisibilitySafe();
+    if(typeof applyPanelAdminDashboardCleanup === 'function') applyPanelAdminDashboardCleanup();
+    if(typeof loadBankInfo === 'function') await loadBankInfo().catch(()=>{});
+
+    showSection('dashboard');
+  }catch(e){
+    console.error(e);
+    showMessage(e.message || 'Error cargando sesión','error');
+    // Si el token ya no sirve, sí cerramos sesión. Si fue un error secundario, dejamos ver el panel.
+    if(String(e.message||'').toLowerCase().includes('token') || String(e.message||'').toLowerCase().includes('no autorizado')){
+      logout();
+    }
+  }
+}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}

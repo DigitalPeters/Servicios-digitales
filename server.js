@@ -962,7 +962,7 @@ app.post("/api/login", async (req, res) => {
     const result = await pool.query(
       `SELECT *
        FROM users
-       WHERE lower(regexp_replace(trim(email), '\\s+', '', 'g')) = lower(regexp_replace($1, '\\s+', '', 'g'))
+       WHERE lower(trim(email)) = lower(trim($1))
        ORDER BY id DESC
        LIMIT 1`,
       [cleanEmail]
