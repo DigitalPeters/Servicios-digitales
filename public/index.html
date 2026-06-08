@@ -1609,16 +1609,57 @@ async function updateAccountReportStatus(reportId){
   }catch(e){showMessage(e.message,'error')}
 }
 
+
 async function replaceReportedAccount(reportId){
   try{
-    if(!confirm('¿Reemplazar esta cuenta por otra disponible de la misma plataforma?'))return;
-    const data=await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify({})});
+    const useManual = confirm(
+      '¿Quieres capturar manualmente la cuenta de reemplazo?\n\n' +
+      'Aceptar = Capturar correo, contraseña, perfil y PIN manualmente.\n' +
+      'Cancelar = Usar una cuenta disponible del inventario automático.'
+    );
+
+    let body = {};
+
+    if(useManual){
+      const account_email = prompt('Correo de la cuenta nueva:');
+      if(!account_email || !account_email.trim()) throw new Error('El correo de la cuenta es obligatorio');
+
+      const account_password = prompt('Contraseña de la cuenta nueva:');
+      if(!account_password || !account_password.trim()) throw new Error('La contraseña es obligatoria');
+
+      const profile_name = prompt('Perfil (opcional):', '') || '';
+      const profile_pin = prompt('PIN del perfil (opcional):', '') || '';
+      const access_url = prompt('URL para código/soporte (opcional):', '') || '';
+      const extra_data = prompt('Notas extra / datos adicionales (opcional):', '') || '';
+
+      body = {
+        manual: true,
+        account_email: account_email.trim(),
+        account_password: account_password.trim(),
+        profile_name: profile_name.trim(),
+        profile_pin: profile_pin.trim(),
+        access_url: access_url.trim(),
+        extra_data: extra_data.trim()
+      };
+    }else{
+      if(!confirm('¿Reemplazar esta cuenta usando una cuenta disponible del inventario automático?'))return;
+    }
+
+    const data=await api('/api/admin/account-reports/'+reportId+'/replace',{
+      method:'POST',
+      body:JSON.stringify(body)
+    });
+
     showMessage(data.message||'Cuenta reemplazada');
     await loadAccountReports();
-    await loadAdminOrders();
-    await loadPlatformInventory();
-  }catch(e){showMessage(e.message,'error')}
+    if(typeof loadMyAccountReports === 'function') await loadMyAccountReports();
+    if(typeof loadAdminOrders === 'function') await loadAdminOrders();
+    if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
+  }catch(e){
+    showMessage(e.message || 'Error reemplazando cuenta','error');
+  }
 }
+
 
 async function refundReportedAccount(reportId){
   try{
@@ -4284,3 +4325,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
 </body>
 </html>
+
+<!-- REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28 -->

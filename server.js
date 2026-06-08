@@ -678,6 +678,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS manual_replacement_source TEXT DEFAULT ''`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
 
 
@@ -2196,13 +2197,27 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
   try {
     const reportId = req.params.reportId;
+    const {
+      manual,
+      account_email,
+      account_password,
+      profile_name,
+      profile_pin,
+      access_url,
+      extra_data
+    } = req.body || {};
+
     await client.query("BEGIN");
     transactionStarted = true;
 
     const reportResult = await client.query(
       `SELECT ar.*, o.amount, o.product_id, o.created_at AS order_created_at,
+              o.owner_admin_id AS order_owner_admin_id,
               p.name AS product_name, p.category AS product_category,
-              pa.platform, pa.product_name AS account_product_name, pa.account_email
+              p.owner_admin_id AS product_owner_admin_id,
+              pa.platform, pa.product_name AS account_product_name, pa.account_email,
+              pa.owner_admin_id AS reported_account_owner_admin_id,
+              COALESCE(ar.owner_admin_id, o.owner_admin_id, p.owner_admin_id, pa.owner_admin_id) AS resolved_owner_admin_id
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        JOIN products p ON p.id = o.product_id
@@ -2219,81 +2234,135 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       return res.status(404).json({ error: "Reporte no encontrado" });
     }
 
-    if (!report.order_id || !report.reported_account_id) {
+    if (!report.order_id) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado automáticamente" });
+      return res.status(400).json({ error: "Este reporte no está ligado a un pedido" });
     }
 
-    const matchProduct = report.account_product_name || report.product_name;
-    const matchPlatform = report.platform || report.product_category || report.product_name;
+    const ownerAdminId = report.resolved_owner_admin_id || null;
+    const replacementProductName = report.account_product_name || report.product_name || "";
+    const replacementPlatform = report.platform || report.product_category || report.product_name || "";
 
-    const availableResult = await client.query(
-      `SELECT *
-       FROM platform_accounts
-       WHERE status = 'available'
-         AND (
-           lower(product_name) = lower($1)
-           OR lower(platform) = lower($1)
-           OR lower(platform) = lower($2)
-           OR lower(product_name) = lower($2)
-         )
-       ORDER BY id ASC
-       LIMIT 1
-       FOR UPDATE SKIP LOCKED`,
-      [matchProduct, matchPlatform]
-    );
+    let newAccount = null;
 
-    const newAccount = availableResult.rows[0];
+    if (manual === true || manual === "true") {
+      const cleanEmail = String(account_email || "").trim();
+      const cleanPassword = String(account_password || "").trim();
 
-    if (!newAccount) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "No hay otra cuenta disponible para reemplazar esta plataforma" });
+      if (!cleanEmail || !cleanPassword) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Correo y contraseña de la cuenta nueva son obligatorios" });
+      }
+
+      const insertAccountResult = await client.query(
+        `INSERT INTO platform_accounts
+         (platform, product_name, account_email, account_password, profile_name, profile_pin,
+          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11)
+         RETURNING *`,
+        [
+          replacementPlatform,
+          replacementProductName,
+          cleanEmail,
+          cleanPassword,
+          String(profile_name || "").trim(),
+          String(profile_pin || "").trim(),
+          String(extra_data || "").trim(),
+          String(access_url || "").trim(),
+          report.order_id,
+          report.user_id,
+          ownerAdminId
+        ]
+      );
+
+      newAccount = insertAccountResult.rows[0];
+    } else {
+      const availableResult = await client.query(
+        `SELECT *
+         FROM platform_accounts
+         WHERE status = 'available'
+           AND (
+             lower(product_name) = lower($1)
+             OR lower(platform) = lower($1)
+             OR lower(platform) = lower($2)
+             OR lower(product_name) = lower($2)
+           )
+           AND (
+             ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+             OR owner_admin_id = $3
+           )
+         ORDER BY id ASC
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED`,
+        [replacementProductName, replacementPlatform, ownerAdminId]
+      );
+
+      newAccount = availableResult.rows[0];
+
+      if (!newAccount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "No hay otra cuenta disponible para reemplazar esta plataforma. Puedes capturar una cuenta manual." });
+      }
+
+      await client.query(
+        `UPDATE platform_accounts
+         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+         WHERE id = $3`,
+        [report.order_id, report.user_id, newAccount.id]
+      );
     }
 
     const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category);
 
-    await client.query(
-      `UPDATE platform_accounts
-       SET status = 'failed'
-       WHERE id = $1`,
-      [report.reported_account_id]
-    );
-
-    await client.query(
-      `UPDATE platform_accounts
-       SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
-       WHERE id = $3`,
-      [report.order_id, report.user_id, newAccount.id]
-    );
+    if (report.reported_account_id) {
+      await client.query(
+        `UPDATE platform_accounts
+         SET status = 'failed'
+         WHERE id = $1`,
+        [report.reported_account_id]
+      );
+    }
 
     await client.query(
       `UPDATE orders
        SET assigned_platform_account_id = $1,
            delivered_account_data = $2,
            admin_response = $2,
-           status = 'exito'
+           status = 'exito',
+           owner_admin_id = COALESCE(owner_admin_id, $4)
        WHERE id = $3`,
-      [newAccount.id, deliveredAccountData, report.order_id]
+      [newAccount.id, deliveredAccountData, report.order_id, ownerAdminId]
     );
-
-    const replacementResponse = `Cuenta reemplazada correctamente.
-
-${deliveredAccountData}`;
 
     await client.query(
       `UPDATE account_reports
-       SET status = 'reemplazo',
+       SET reported_account_id = $1,
+           owner_admin_id = COALESCE(owner_admin_id, $4),
+           status = 'reemplazo',
            resolution_type = 'reemplazo',
-           admin_response = $1,
+           admin_response = $2,
            reviewed_at = NOW()
-       WHERE id = $2`,
-      [replacementResponse, reportId]
+       WHERE id = $3`,
+      [
+        newAccount.id,
+        `Cuenta reemplazada correctamente.
+
+${deliveredAccountData}`,
+        reportId,
+        ownerAdminId
+      ]
     );
 
     await client.query("COMMIT");
     transactionStarted = false;
 
-    res.json({ message: "Cuenta reemplazada correctamente", delivered_account_data: deliveredAccountData });
+    res.json({
+      message: manual === true || manual === "true"
+        ? "Cuenta manual agregada y reemplazada correctamente"
+        : "Cuenta reemplazada correctamente",
+      delivered_account_data: deliveredAccountData,
+      platform_account_id: newAccount.id
+    });
   } catch (err) {
     if (transactionStarted) {
       try { await client.query("ROLLBACK"); } catch (_) {}
@@ -3773,3 +3842,5 @@ initDatabase()
 // JERARQUIA PANEL PROPIETARIO Y ANUNCIOS PROPIOS - 2026-06-08 03:50:31
 
 // COMUNICADOS MENU PANEL PROPIETARIO - 2026-06-08 03:59:14
+
+// REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28
