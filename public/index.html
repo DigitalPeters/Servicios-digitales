@@ -78,6 +78,7 @@
         <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
         <button id="adminSalesMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openSalesReport()">📊 Reporte ventas</button>
         <button id="distributorMenuBtn" class="menu-btn hidden" data-section="distributor" onclick="showSection('distributor')">🏪 Mis vendedores</button>
+        <button id="ownerAnnouncementsMenuBtn" class="menu-btn hidden" data-section="ownerAnnouncements" onclick="showSection('ownerAnnouncements')">📢 Comunicados</button>
       </nav>
       <div class="sidebar-bottom"><button class="logout-side" onclick="logout()">Cerrar sesión</button></div>
     </aside>
@@ -204,6 +205,31 @@
         <div class="panel">
           <div class="panel-head"><div><h2>Precios para mis vendedores</h2><p class="small-text">Tu costo es el precio que tú pagas. Precio vendedor es lo que verá tu vendedor.</p></div><button class="outline-btn" style="width:auto" onclick="loadDistributorPrices()">Actualizar</button></div>
           <div id="distributorPricesList">Sin precios.</div>
+        </div>
+      </section>
+
+      
+      <section id="section-ownerAnnouncements" class="section">
+        <h1 class="section-title">Comunicados</h1>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Comunicados para mis vendedores</h2>
+              <p class="small-text">Estos avisos solo aparecerán para los vendedores de tu panel propietario. No se mezclan con los comunicados del admin global.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadOwnerAnnouncements()">Actualizar</button>
+          </div>
+          <div class="row">
+            <div>
+              <label class="field-label">Nuevo comunicado</label>
+              <textarea id="ownerAnnouncementText" placeholder="Ejemplo: Servicio con demora, favor de avisar a sus clientes."></textarea>
+              <button class="primary-btn" onclick="createOwnerAnnouncement()">Publicar comunicado</button>
+            </div>
+            <div>
+              <h3>Comunicados publicados</h3>
+              <div id="ownerAnnouncementsList" class="announcement-admin-list">Sin comunicados.</div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -4139,6 +4165,118 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   }
   setTimeout(renderUsersWithHierarchy, 600);
   setTimeout(renameAnnouncementsPanel, 600);
+})();
+
+
+// ===============================
+// COMUNICADOS PARA PANEL PROPIETARIO - 2026-06-08 03:59:14
+// ===============================
+(function(){
+  function isPanelOwnerUser(){
+    return currentUser && (
+      currentUser.is_panel_admin === true ||
+      currentUser.is_panel_admin === 1 ||
+      currentUser.is_panel_admin === 'true' ||
+      currentUser.account_type === 'panel_propietario'
+    );
+  }
+
+  function setupOwnerAnnouncementsMenu(){
+    const btn = document.getElementById('ownerAnnouncementsMenuBtn');
+    if (!btn) return;
+    if (isPanelOwnerUser()) {
+      btn.classList.remove('hidden');
+      btn.style.display = '';
+    } else {
+      btn.classList.add('hidden');
+      btn.style.display = 'none';
+    }
+  }
+
+  window.loadOwnerAnnouncements = async function(){
+    try {
+      if (!isPanelOwnerUser()) return;
+      const list = await api('/api/admin/announcements');
+      const box = document.getElementById('ownerAnnouncementsList');
+      if (!box) return;
+      box.innerHTML = Array.isArray(list) && list.length ? list.map(a => `
+        <div class="item">
+          <p><b>#${a.id}</b> ${safeText(a.message)}</p>
+          <p><b>Estado:</b> <span class="status">${Number(a.active)===1 || a.active===true ? 'Activo' : 'Oculto'}</span></p>
+          <div class="two-row">
+            <button class="outline-btn" onclick="toggleOwnerAnnouncement(${a.id}, ${Number(a.active)===1 || a.active===true ? 0 : 1})">${Number(a.active)===1 || a.active===true ? 'Ocultar' : 'Activar'}</button>
+            <button class="danger-btn" onclick="deleteOwnerAnnouncement(${a.id})">Eliminar</button>
+          </div>
+        </div>
+      `).join('') : 'Sin comunicados.';
+    } catch(e) {
+      showMessage(e.message || 'Error cargando comunicados', 'error');
+    }
+  };
+
+  window.createOwnerAnnouncement = async function(){
+    try {
+      const text = (document.getElementById('ownerAnnouncementText')?.value || '').trim();
+      if (!text) throw new Error('Escribe el comunicado');
+      const data = await api('/api/admin/announcements', { method:'POST', body: JSON.stringify({ message:text }) });
+      showMessage(data.message || 'Comunicado publicado');
+      const input = document.getElementById('ownerAnnouncementText');
+      if (input) input.value = '';
+      await loadAnnouncements();
+      await loadOwnerAnnouncements();
+    } catch(e) {
+      showMessage(e.message || 'Error creando comunicado', 'error');
+    }
+  };
+
+  window.toggleOwnerAnnouncement = async function(id, active){
+    try {
+      const data = await api('/api/admin/announcements/' + id, { method:'PATCH', body: JSON.stringify({ active }) });
+      showMessage(data.message || 'Comunicado actualizado');
+      await loadAnnouncements();
+      await loadOwnerAnnouncements();
+    } catch(e) {
+      showMessage(e.message || 'Error actualizando comunicado', 'error');
+    }
+  };
+
+  window.deleteOwnerAnnouncement = async function(id){
+    if (!confirm('¿Eliminar este comunicado?')) return;
+    try {
+      const data = await api('/api/admin/announcements/' + id, { method:'DELETE' });
+      showMessage(data.message || 'Comunicado eliminado');
+      await loadAnnouncements();
+      await loadOwnerAnnouncements();
+    } catch(e) {
+      showMessage(e.message || 'Error eliminando comunicado', 'error');
+    }
+  };
+
+  const prevShowSectionOwnerAnn = typeof showSection === 'function' ? showSection : null;
+  if (prevShowSectionOwnerAnn) {
+    showSection = function(name){
+      const result = prevShowSectionOwnerAnn(name);
+      setupOwnerAnnouncementsMenu();
+      if (name === 'ownerAnnouncements') loadOwnerAnnouncements();
+      return result;
+    };
+    window.showSection = showSection;
+  }
+
+  const prevLoadAppOwnerAnn = typeof loadApp === 'function' ? loadApp : null;
+  if (prevLoadAppOwnerAnn) {
+    loadApp = async function(){
+      const result = await prevLoadAppOwnerAnn();
+      setupOwnerAnnouncementsMenu();
+      setTimeout(setupOwnerAnnouncementsMenu, 500);
+      setTimeout(setupOwnerAnnouncementsMenu, 1500);
+      return result;
+    };
+    window.loadApp = loadApp;
+  }
+
+  setTimeout(setupOwnerAnnouncementsMenu, 500);
+  setTimeout(setupOwnerAnnouncementsMenu, 1500);
 })();
 
 </script>
