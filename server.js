@@ -388,16 +388,26 @@ async function getViewerContext(userId, client = pool) {
             ap.id AS admin_panel_id,
             ap.business_name AS admin_panel_business_name,
             ap.bank_name, ap.bank_holder, ap.bank_clabe, ap.payment_concept,
-            ap.notification_email, ap.status AS admin_panel_status
+            ap.notification_email, ap.status AS admin_panel_status,
+            owner_panel.id AS owner_panel_id
      FROM users u
      LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+     LEFT JOIN users owner_user ON owner_user.id = u.owner_user_id
+     LEFT JOIN admin_panels owner_panel ON lower(owner_panel.email) = lower(owner_user.email)
      WHERE u.id = $1`,
     [userId]
   );
   const viewer = result.rows[0] || null;
   if (!viewer) return null;
   viewer.is_panel_admin = Boolean(viewer.admin_panel_id);
-  viewer.owner_admin_id = viewer.is_panel_admin ? viewer.id : (viewer.owner_user_id || null);
+  viewer.owner_is_panel_admin = Boolean(viewer.owner_panel_id);
+  // Reglas de negocio:
+  // - admin principal: datos globales (owner_admin_id NULL/0)
+  // - usuario convertido a distribuidor: usa productos/stock globales del admin principal
+  // - panel vendido/rentado: usa sus propios productos/stock (owner_admin_id = su id de users)
+  // - vendedor de panel vendido/rentado: usa productos/stock del panel dueño
+  // - vendedor de distribuidor convertido: usa productos/stock globales del admin principal
+  viewer.owner_admin_id = viewer.is_panel_admin ? viewer.id : (viewer.owner_is_panel_admin ? viewer.owner_user_id : null);
   return viewer;
 }
 
@@ -431,12 +441,13 @@ async function getOwnerAndNotificationForUser(userId, client = pool) {
 
 function adminOwnedWhere(viewer, alias = "") {
   const prefix = alias ? alias + "." : "";
-  if (viewer && viewer.is_panel_admin) {
-    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.id] };
+
+  // Panel vendido/rentado y sus vendedores: solo datos propios del panel.
+  if (viewer && viewer.owner_admin_id) {
+    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.owner_admin_id] };
   }
-  if (viewer && viewer.owner_user_id) {
-    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.owner_user_id] };
-  }
+
+  // Admin principal, usuarios normales y distribuidores convertidos: datos globales.
   return { clause: `(${prefix}owner_admin_id IS NULL OR ${prefix}owner_admin_id = 0)`, params: [] };
 }
 
@@ -2969,6 +2980,32 @@ app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distribut
 
 app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
+    const viewer = await getViewerContext(req.user.id);
+
+    // Si es panel vendido/rentado: solo sus productos propios.
+    if (viewer && viewer.is_panel_admin) {
+      const result = await pool.query(
+        `SELECT
+           products.id AS product_id,
+           products.name,
+           products.category,
+           products.price AS general_price,
+           COALESCE(products.cost_price, products.price, 0) AS owner_price,
+           COALESCE(subadmin_reseller_prices.sale_price, products.price) AS reseller_price
+         FROM products
+         LEFT JOIN subadmin_reseller_prices
+           ON subadmin_reseller_prices.product_id = products.id
+          AND subadmin_reseller_prices.owner_user_id = $1
+         WHERE products.active = 1
+           AND products.owner_admin_id = $1
+         ORDER BY products.category ASC, products.name ASC`,
+        [req.user.id]
+      );
+      return res.json(result.rows);
+    }
+
+    // Si es usuario convertido a distribuidor independiente: depende del admin global.
+    // Ve productos globales y los precios especiales que el admin principal le asignó.
     const result = await pool.query(
       `SELECT
          products.id AS product_id,
@@ -2985,6 +3022,7 @@ app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async 
          ON subadmin_reseller_prices.product_id = products.id
         AND subadmin_reseller_prices.owner_user_id = $1
        WHERE products.active = 1
+         AND (products.owner_admin_id IS NULL OR products.owner_admin_id = 0)
        ORDER BY products.category ASC, products.name ASC`,
       [req.user.id]
     );
@@ -3003,6 +3041,17 @@ app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, asyn
 
     if (!product_id || !priceNumber || priceNumber <= 0) {
       return res.status(400).json({ error: "Producto y precio válido son obligatorios" });
+    }
+
+    const viewer = await getViewerContext(req.user.id);
+    const productParams = viewer?.is_panel_admin ? [product_id, req.user.id] : [product_id];
+    const productWhere = viewer?.is_panel_admin
+      ? `id = $1 AND active = 1 AND owner_admin_id = $2`
+      : `id = $1 AND active = 1 AND (owner_admin_id IS NULL OR owner_admin_id = 0)`;
+
+    const productCheck = await pool.query(`SELECT id FROM products WHERE ${productWhere} LIMIT 1`, productParams);
+    if (!productCheck.rows.length) {
+      return res.status(404).json({ error: "Producto no disponible para este panel" });
     }
 
     const updateResult = await pool.query(
