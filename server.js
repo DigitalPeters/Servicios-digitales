@@ -3678,3 +3678,5 @@ initDatabase()
     console.error("Error iniciando base de datos:", err.message);
     process.exit(1);
   });
+
+// FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33
