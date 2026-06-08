@@ -1668,26 +1668,44 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
     if (req.isPanelAdmin) {
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+                owner.name AS owner_name,
+                owner.email AS owner_email,
+                own_panel.business_name AS owner_panel_name,
+                own_panel.id AS owner_panel_id,
                 CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+                CASE WHEN own_panel.id IS NULL THEN false ELSE true END AS belongs_to_panel_owner,
                 CASE WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                     WHEN own_panel.id IS NOT NULL AND COALESCE(u.is_subadmin, false) = true THEN 'distribuidor_del_panel'
+                     WHEN own_panel.id IS NOT NULL THEN 'vendedor_panel'
                      WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
                      WHEN u.role = 'admin' THEN 'admin_global'
                      ELSE 'usuario' END AS account_type
          FROM users u
+         LEFT JOIN users owner ON owner.id = u.owner_user_id
+         LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
          LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
          WHERE u.owner_user_id = $1
-         ORDER BY id DESC`,
+         ORDER BY u.id DESC`,
         [req.user.id]
       );
     } else {
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+              owner.name AS owner_name,
+              owner.email AS owner_email,
+              own_panel.business_name AS owner_panel_name,
+              own_panel.id AS owner_panel_id,
               CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+              CASE WHEN own_panel.id IS NULL THEN false ELSE true END AS belongs_to_panel_owner,
               CASE WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                   WHEN own_panel.id IS NOT NULL AND COALESCE(u.is_subadmin, false) = true THEN 'distribuidor_del_panel'
+                   WHEN own_panel.id IS NOT NULL THEN 'vendedor_panel'
                    WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
                    WHEN u.role = 'admin' THEN 'admin_global'
                    ELSE 'usuario' END AS account_type
        FROM users u
+       LEFT JOIN users owner ON owner.id = u.owner_user_id
+       LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
        LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
        ORDER BY u.id DESC`
       );
@@ -2696,8 +2714,37 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 // ADMIN: activar/desactivar usuario como admin independiente
 app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const userId = req.params.userId;
+    const userId = Number(req.params.userId);
     const isSubadmin = req.body.is_subadmin === true;
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "Usuario inválido" });
+    }
+
+    const targetResult = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role, u.owner_user_id,
+              owner.name AS owner_name,
+              own_panel.id AS owner_panel_id,
+              own_panel.business_name AS owner_panel_name,
+              ap.id AS target_panel_id
+       FROM users u
+       LEFT JOIN users owner ON owner.id = u.owner_user_id
+       LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       WHERE u.id = $1
+       LIMIT 1`,
+      [userId]
+    );
+
+    const target = targetResult.rows[0];
+    if (!target || target.role === "admin" || target.target_panel_id) {
+      return res.status(404).json({ error: "Usuario no encontrado o no se puede modificar" });
+    }
+
+    // Si quien modifica es Panel propietario, solo puede convertir/desactivar a sus propios vendedores.
+    if (req.isPanelAdmin && Number(target.owner_user_id || 0) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "Solo puedes modificar vendedores de tu propio panel" });
+    }
 
     const result = await pool.query(
       `UPDATE users SET is_subadmin = $1 WHERE id = $2 AND role <> 'admin'
@@ -2705,17 +2752,19 @@ app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, 
       [isSubadmin, userId]
     );
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Usuario no encontrado o no se puede modificar" });
-    }
-
-    res.json({ message: isSubadmin ? "Usuario convertido en admin distribuidor" : "Admin distribuidor desactivado", user: result.rows[0] });
+    const isPanelSeller = Boolean(target.owner_panel_id);
+    const label = isPanelSeller ? "distribuidor del panel" : "admin distribuidor";
+    res.json({
+      message: isSubadmin ? `Usuario convertido en ${label}` : `${label.charAt(0).toUpperCase() + label.slice(1)} desactivado`,
+      user: result.rows[0]
+    });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: "Error actualizando admin independiente" });
+    res.status(500).json({ error: "Error actualizando distribuidor" });
   }
 });
 
+// ADMIN: precios que tú le das a un admin independiente
 // ADMIN: precios que tú le das a un admin independiente
 app.get("/api/admin/subadmin-prices/:userId", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -3720,3 +3769,5 @@ initDatabase()
 // FIX VENTAS HOY SCROLL REPORTE MISMA PAGINA - 2026-06-08 03:25:07
 
 // ROLES SEPARADOS: admin_global, admin_distribuidor, panel_propietario - 2026-06-08 03:36:19
+
+// JERARQUIA PANEL PROPIETARIO Y ANUNCIOS PROPIOS - 2026-06-08 03:50:31

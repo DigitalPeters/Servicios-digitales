@@ -4055,6 +4055,92 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(applyRoleLabels, 1500);
 })();
 
+
+// ===============================
+// JERARQUÍA PANEL PROPIETARIO + ANUNCIOS PROPIOS - 2026-06-08 03:50:31
+// ===============================
+(function(){
+  function isTrue(v){ return v === true || v === 1 || v === 'true'; }
+  function userAccountLabel(u){
+    if (isTrue(u.is_panel_admin) || u.account_type === 'panel_propietario') return 'Panel propietario';
+    if (u.account_type === 'distribuidor_del_panel') return 'Distribuidor del panel';
+    if (u.account_type === 'vendedor_panel') return 'Vendedor de panel';
+    if (isTrue(u.is_subadmin)) return 'Admin distribuidor';
+    if (u.role === 'admin') return 'Admin global';
+    return 'Usuario';
+  }
+  function ownerText(u){
+    if (u.owner_panel_name || u.owner_name || u.owner_email) {
+      return `<p><b>Panel:</b> ${safeText(u.owner_panel_name || u.owner_name || 'Panel propietario')}${u.owner_email ? ` <span class="small-text">(${safeText(u.owner_email)})</span>` : ''}</p>`;
+    }
+    return '';
+  }
+  function actionForUser(u){
+    const isPanelOwner = isTrue(u.is_panel_admin) || u.account_type === 'panel_propietario';
+    if (isPanelOwner || u.role === 'admin') return '';
+    const isDistributor = isTrue(u.is_subadmin);
+    const belongsToPanel = isTrue(u.belongs_to_panel_owner) || u.account_type === 'vendedor_panel' || u.account_type === 'distribuidor_del_panel' || !!u.owner_panel_id;
+    const textOn = belongsToPanel ? 'Convertir en distribuidor del panel' : 'Convertir en admin distribuidor';
+    const textOff = belongsToPanel ? 'Quitar distribuidor del panel' : 'Quitar admin distribuidor';
+    return `<button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${isDistributor ? 'false' : 'true'})">${isDistributor ? textOff : textOn}</button>`;
+  }
+  function renderUsersWithHierarchy(){
+    const box = document.getElementById('usersList');
+    if (!box || !Array.isArray(allUsers)) return;
+    box.innerHTML = allUsers.map(u => {
+      const label = userAccountLabel(u);
+      const chipClass = label === 'Panel propietario' ? 'chip' : 'chip';
+      return `<div class="item">
+        <p><b>ID:</b> ${u.id}</p>
+        <p><b>Nombre:</b> ${safeText(u.name)}</p>
+        <p><b>Correo:</b> ${safeText(u.email)}</p>
+        <p><b>Rol:</b> ${safeText(u.role)} <span class="${chipClass}">${safeText(label)}</span></p>
+        ${ownerText(u)}
+        <p><b>Saldo:</b> $${formatMoney(u.balance)}</p>
+        ${actionForUser(u)}
+      </div>`;
+    }).join('') || 'No hay usuarios.';
+  }
+  function renameAnnouncementsPanel(){
+    const title = document.querySelector('#adminAnnouncementsPanel h2');
+    const desc = document.querySelector('#adminAnnouncementsPanel .small-text');
+    const isPanelOwner = currentUser && (isTrue(currentUser.is_panel_admin) || currentUser.account_type === 'panel_propietario');
+    if (title) title.textContent = isPanelOwner ? 'Comunicados de mi panel' : 'Comunicados globales';
+    if (desc) desc.textContent = isPanelOwner
+      ? 'Estos avisos solo aparecen para tus vendedores y dentro de tu panel propietario.'
+      : 'Estos avisos aparecen para los usuarios de tu ecosistema global.';
+  }
+  const oldLoadUsersHierarchy = typeof loadUsers === 'function' ? loadUsers : null;
+  if (oldLoadUsersHierarchy) {
+    loadUsers = async function(){
+      const result = await oldLoadUsersHierarchy();
+      renderUsersWithHierarchy();
+      return result;
+    };
+  }
+  const oldEnsureAnnouncementsPanel = typeof ensureAnnouncementAdminPanel === 'function' ? ensureAnnouncementAdminPanel : null;
+  if (oldEnsureAnnouncementsPanel) {
+    ensureAnnouncementAdminPanel = function(){
+      const result = oldEnsureAnnouncementsPanel();
+      renameAnnouncementsPanel();
+      return result;
+    };
+  }
+  const oldShowSectionHierarchy = typeof showSection === 'function' ? showSection : null;
+  if (oldShowSectionHierarchy) {
+    showSection = function(name){
+      const result = oldShowSectionHierarchy(name);
+      if (name === 'admin') {
+        setTimeout(renderUsersWithHierarchy, 250);
+        setTimeout(renameAnnouncementsPanel, 250);
+      }
+      return result;
+    };
+  }
+  setTimeout(renderUsersWithHierarchy, 600);
+  setTimeout(renameAnnouncementsPanel, 600);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
