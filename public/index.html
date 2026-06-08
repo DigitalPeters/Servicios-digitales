@@ -4424,24 +4424,59 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 
 
 // ===============================
-// FIX CANTIDAD EN REPORTES - 2026-06-08 23:32:35
-// Limpia nombres tipo "Netflix perfil x2" en gráficas/listados.
+// FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09
+// Evita romper SQL y corrige conteo visual cuando producto viene como "Nombre x2".
 // ===============================
 (function(){
-  function cleanProductQtyName(name){
+  function extractQtyFromName(name){
+    const m = String(name || '').match(/\s+x(\d+)$/i);
+    return m ? Math.max(1, Number(m[1] || 1)) : 1;
+  }
+  function cleanQtyName(name){
     return String(name || '').replace(/\s+x\d+$/i, '').trim();
   }
-  window.cleanProductQtyName = cleanProductQtyName;
+  window.extractQtyFromName = extractQtyFromName;
+  window.cleanQtyName = cleanQtyName;
 
-  const oldRenderDashboardChartsQtyFix = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
-  if (oldRenderDashboardChartsQtyFix) {
+  function mergeTopProductsQty(products){
+    const map = new Map();
+    (products || []).forEach(p => {
+      const rawName = p.product_name || p.name || p.product || '';
+      const cleanName = cleanQtyName(rawName);
+      const qty = Number(p.orders ?? p.count ?? p.total ?? 0) || extractQtyFromName(rawName);
+      const key = cleanName.toLowerCase();
+      const prev = map.get(key) || {...p, product_name: cleanName, name: cleanName, orders: 0};
+      prev.orders = Number(prev.orders || 0) + qty;
+      prev.count = Number(prev.orders || 0);
+      prev.total = Number(prev.orders || 0);
+      map.set(key, prev);
+    });
+    return Array.from(map.values());
+  }
+  window.mergeTopProductsQty = mergeTopProductsQty;
+
+  const oldRenderDashboardChartsQtySafe = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (oldRenderDashboardChartsQtySafe) {
     renderDashboardCharts = function(data){
       if (data && Array.isArray(data.top_products)) {
-        data.top_products = data.top_products.map(p => ({...p, product_name: cleanProductQtyName(p.product_name || p.name)}));
+        data.top_products = mergeTopProductsQty(data.top_products);
       }
-      return oldRenderDashboardChartsQtyFix(data);
+      return oldRenderDashboardChartsQtySafe(data);
     };
     window.renderDashboardCharts = renderDashboardCharts;
+  }
+
+  const oldLoadSalesReportQtySafe = typeof loadSalesReport === 'function' ? loadSalesReport : null;
+  if (oldLoadSalesReportQtySafe) {
+    loadSalesReport = async function(forceToday=false){
+      try {
+        return await oldLoadSalesReportQtySafe(forceToday);
+      } catch(e) {
+        console.warn('Reporte de ventas falló, revisa endpoint:', e);
+        showMessage(e.message || 'Error generando reporte de ventas', 'error');
+      }
+    };
+    window.loadSalesReport = loadSalesReport;
   }
 })();
 
@@ -4455,4 +4490,4 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 
 <!-- SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36 -->
 
-<!-- FIX CANTIDAD REPORTES QUANTITY - 2026-06-08 23:32:35 -->
+<!-- FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09 -->

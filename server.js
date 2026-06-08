@@ -3342,7 +3342,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 
     const summaryResult = await pool.query(
       `SELECT
-         SUM(GREATEST(1, COALESCE(NULLIF((o.order_data::jsonb ->> 'quantity'), '')::int, 1)))::int AS total_orders,
+         COUNT(*)::int AS total_orders,
          COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
          COALESCE(SUM(orders.amount - ${costExpr}), 0)::numeric AS total_profit
@@ -3877,4 +3877,6 @@ initDatabase()
 
 // SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36
 
-// FIX CANTIDAD REPORTES QUANTITY - 2026-06-08 23:32:35
+// FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09
+// Nota: se evita castear order_data::jsonb en todos los reportes para no romper cuando haya order_data antiguo.
+// La cantidad queda guardada en order_data y el frontend corrige visualmente productos tipo "x2".
