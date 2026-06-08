@@ -663,6 +663,10 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_cost_snapshot NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
+  await pool.query(`UPDATE orders SET quantity = 1 WHERE quantity IS NULL OR quantity < 1`);
+
+
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS account_email VARCHAR(255)`);
@@ -1395,8 +1399,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
       const orderInsertResult = await client.query(
         `INSERT INTO orders
-         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
-         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11)
+         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id, quantity)
+         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11, 1)
          RETURNING id`,
         [
           userId,
@@ -1528,8 +1532,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id, quantity)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id`,
       [
         userId,
@@ -1545,7 +1549,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         quantity > 1 ? `${product.name || productName} x${quantity}` : (product.name || productName),
         product.category || productCategory,
         Math.max(0, Number(product.cost_price || 0)) * quantity,
-        viewerContext?.owner_admin_id || null
+        viewerContext?.owner_admin_id || null,
+        quantity
       ]
     );
 
@@ -3342,7 +3347,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 
     const summaryResult = await pool.query(
       `SELECT
-         COUNT(*)::int AS total_orders,
+         SUM(COALESCE(NULLIF(o.quantity, 0), 1))::int AS total_orders,
          COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
          COALESCE(SUM(orders.amount - ${costExpr}), 0)::numeric AS total_profit
@@ -3880,3 +3885,5 @@ initDatabase()
 // FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09
 // Nota: se evita castear order_data::jsonb en todos los reportes para no romper cuando haya order_data antiguo.
 // La cantidad queda guardada en order_data y el frontend corrige visualmente productos tipo "x2".
+
+// FIX DEFINITIVO CANTIDAD CON COLUMNA ORDERS.QUANTITY - 2026-06-08 23:42:29

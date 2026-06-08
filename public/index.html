@@ -4480,6 +4480,33 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   }
 })();
 
+
+// ===============================
+// FIX DEFINITIVO CANTIDAD REPORTES - 2026-06-08 23:42:29
+// Si un pedido trae quantity=2, los gráficos/reportes muestran 2 vendidos.
+// ===============================
+(function(){
+  function normalizeTopProductCounts(data){
+    if (!data || !Array.isArray(data.top_products)) return data;
+    data.top_products = data.top_products.map(p => {
+      const name = String(p.product_name || p.name || '');
+      const qtyFromName = (name.match(/\s+x(\d+)$/i) || [])[1];
+      const reported = Number(p.orders ?? p.count ?? p.total ?? 0) || 0;
+      const qty = Math.max(reported, Number(qtyFromName || 0) || reported || 1);
+      return {...p, orders: qty, count: qty, total: qty};
+    });
+    return data;
+  }
+
+  const oldRenderDashboardChartsQuantityFinal = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (oldRenderDashboardChartsQuantityFinal) {
+    renderDashboardCharts = function(data){
+      return oldRenderDashboardChartsQuantityFinal(normalizeTopProductCounts(data));
+    };
+    window.renderDashboardCharts = renderDashboardCharts;
+  }
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4491,3 +4518,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36 -->
 
 <!-- FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09 -->
+
+<!-- FIX DEFINITIVO CANTIDAD CON COLUMNA ORDERS.QUANTITY - 2026-06-08 23:42:29 -->
