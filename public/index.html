@@ -3749,6 +3749,152 @@ if(__loadAppBeforeReportsFinal){
 }
 setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); ensureAdvancedReportsPanelFinal(); loadSalesReport(true).catch(()=>{}); } }, 1200);
 
+
+// ===============================
+// AJUSTE FINAL: Ventas hoy despliega resumen + Paneles admin en dashboard principal
+// ===============================
+(function(){
+  let salesDetailsExpandedFinal = false;
+
+  function isMainGlobalAdminFinal(){
+    return currentUser &&
+      String(currentUser.role || '').toLowerCase() === 'admin' &&
+      !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true') &&
+      !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+  }
+
+  function isAnyAdminFinal(){
+    return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
+  }
+
+  function setSalesDetailCardsFinal(show){
+    ['panelSuccessOrdersCard','panelProfitTodayCard','panelCostTodayCard'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(!el) return;
+      el.classList.toggle('hidden', !show);
+      el.style.display = show ? '' : 'none';
+    });
+  }
+
+  function prepareSalesTodayToggleFinal(){
+    const salesCard=document.getElementById('dashSalesTodayCard');
+    if(!salesCard || salesCard.dataset.salesToggleFinal === '1') return;
+    salesCard.dataset.salesToggleFinal = '1';
+    salesCard.title = 'Toca para desplegar costo, ganancia y pedidos éxito';
+    salesCard.onclick = async function(){
+      salesDetailsExpandedFinal = !salesDetailsExpandedFinal;
+      if(typeof ensurePanelAdminDashboardCardsFinal === 'function') ensurePanelAdminDashboardCardsFinal();
+      setSalesDetailCardsFinal(salesDetailsExpandedFinal);
+      if(salesDetailsExpandedFinal && typeof loadSalesReport === 'function'){
+        try{ await loadSalesReport(true); }catch(e){ console.warn('No se pudo actualizar ventas hoy', e); }
+        setSalesDetailCardsFinal(true);
+      }
+    };
+  }
+
+  function movePanelsAdminToMainDashboardFinal(){
+    if(!isMainGlobalAdminFinal()) return;
+    const grid=document.querySelector('#section-dashboard .grid-cards');
+    if(!grid) return;
+
+    let card=document.getElementById('dashAdminPanelsCardMainFinal');
+    if(!card){
+      card=document.createElement('div');
+      card.id='dashAdminPanelsCardMainFinal';
+      card.className='dash-card clickable';
+      card.innerHTML=`<div class="dash-icon">🏢</div><div><div class="dash-label">Paneles admin</div><div id="statAdminPanelsMainFinal" class="dash-value">0</div></div>`;
+      card.onclick=function(){
+        if(typeof ensureAdminPanelsPhase1UI === 'function') ensureAdminPanelsPhase1UI();
+        if(typeof showSection === 'function') showSection('admin');
+        setTimeout(()=>{
+          if(typeof loadAdminPanelsPhase1 === 'function') loadAdminPanelsPhase1();
+          const panel=document.getElementById('adminPanelsPanelPhase1');
+          if(panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+        },180);
+      };
+      grid.appendChild(card);
+    }
+    card.classList.remove('hidden');
+    card.style.display='';
+    updateAdminPanelsCountFinal();
+  }
+
+  async function updateAdminPanelsCountFinal(){
+    if(!isMainGlobalAdminFinal()) return;
+    const el=document.getElementById('statAdminPanelsMainFinal');
+    try{
+      const panels=await api('/api/admin/admin-panels');
+      if(el) el.textContent = Array.isArray(panels) ? panels.length : 0;
+      const old=document.getElementById('adminPanelsCountPhase1');
+      if(old) old.textContent = Array.isArray(panels) ? panels.length : 0;
+    }catch(e){
+      if(el && !el.textContent) el.textContent='0';
+      console.warn('No se pudo contar paneles admin', e);
+    }
+  }
+
+  function applyDashboardFinalAdjustments(){
+    if(!isAnyAdminFinal()) return;
+    if(typeof ensurePanelAdminDashboardCardsFinal === 'function') ensurePanelAdminDashboardCardsFinal();
+    prepareSalesTodayToggleFinal();
+    setSalesDetailCardsFinal(salesDetailsExpandedFinal);
+    movePanelsAdminToMainDashboardFinal();
+  }
+
+  const prevLoadSalesReport = typeof loadSalesReport === 'function' ? loadSalesReport : null;
+  if(prevLoadSalesReport){
+    loadSalesReport = async function(forceToday=false){
+      const result = await prevLoadSalesReport(forceToday);
+      prepareSalesTodayToggleFinal();
+      setSalesDetailCardsFinal(salesDetailsExpandedFinal);
+      movePanelsAdminToMainDashboardFinal();
+      return result;
+    };
+  }
+
+  const prevLoadAdminPanels = typeof loadAdminPanelsPhase1 === 'function' ? loadAdminPanelsPhase1 : null;
+  if(prevLoadAdminPanels){
+    loadAdminPanelsPhase1 = async function(){
+      const result = await prevLoadAdminPanels();
+      updateAdminPanelsCountFinal();
+      return result;
+    };
+  }
+
+  const prevShowSection = typeof showSection === 'function' ? showSection : null;
+  if(prevShowSection){
+    showSection = function(name){
+      const result = prevShowSection(name);
+      setTimeout(applyDashboardFinalAdjustments,120);
+      return result;
+    };
+  }
+
+  const prevLoadApp = typeof loadApp === 'function' ? loadApp : null;
+  if(prevLoadApp){
+    loadApp = async function(){
+      const result = await prevLoadApp();
+      applyDashboardFinalAdjustments();
+      // Mantener cerrado el resumen hasta que el usuario toque Ventas hoy.
+      salesDetailsExpandedFinal = false;
+      setSalesDetailCardsFinal(false);
+      setTimeout(applyDashboardFinalAdjustments,400);
+      setTimeout(applyDashboardFinalAdjustments,1200);
+      setTimeout(applyDashboardFinalAdjustments,2500);
+      return result;
+    };
+  }
+
+  window.toggleSalesTodayDetailsFinal = function(){
+    salesDetailsExpandedFinal = !salesDetailsExpandedFinal;
+    setSalesDetailCardsFinal(salesDetailsExpandedFinal);
+  };
+
+  setTimeout(applyDashboardFinalAdjustments,500);
+  setTimeout(applyDashboardFinalAdjustments,1500);
+  setTimeout(applyDashboardFinalAdjustments,3000);
+})();
+
 </script>
 </body>
 </html>

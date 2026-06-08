@@ -388,16 +388,26 @@ async function getViewerContext(userId, client = pool) {
             ap.id AS admin_panel_id,
             ap.business_name AS admin_panel_business_name,
             ap.bank_name, ap.bank_holder, ap.bank_clabe, ap.payment_concept,
-            ap.notification_email, ap.status AS admin_panel_status
+            ap.notification_email, ap.status AS admin_panel_status,
+            owner_panel.id AS owner_panel_id
      FROM users u
      LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+     LEFT JOIN users owner_user ON owner_user.id = u.owner_user_id
+     LEFT JOIN admin_panels owner_panel ON lower(owner_panel.email) = lower(owner_user.email)
      WHERE u.id = $1`,
     [userId]
   );
   const viewer = result.rows[0] || null;
   if (!viewer) return null;
   viewer.is_panel_admin = Boolean(viewer.admin_panel_id);
-  viewer.owner_admin_id = viewer.is_panel_admin ? viewer.id : (viewer.owner_user_id || null);
+  viewer.owner_is_panel_admin = Boolean(viewer.owner_panel_id);
+  // Reglas de negocio:
+  // - admin principal: datos globales (owner_admin_id NULL/0)
+  // - usuario convertido a distribuidor: usa productos/stock globales del admin principal
+  // - panel vendido/rentado: usa sus propios productos/stock (owner_admin_id = su id de users)
+  // - vendedor de panel vendido/rentado: usa productos/stock del panel dueño
+  // - vendedor de distribuidor convertido: usa productos/stock globales del admin principal
+  viewer.owner_admin_id = viewer.is_panel_admin ? viewer.id : (viewer.owner_is_panel_admin ? viewer.owner_user_id : null);
   return viewer;
 }
 
@@ -431,12 +441,13 @@ async function getOwnerAndNotificationForUser(userId, client = pool) {
 
 function adminOwnedWhere(viewer, alias = "") {
   const prefix = alias ? alias + "." : "";
-  if (viewer && viewer.is_panel_admin) {
-    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.id] };
+
+  // Panel vendido/rentado y sus vendedores: solo datos propios del panel.
+  if (viewer && viewer.owner_admin_id) {
+    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.owner_admin_id] };
   }
-  if (viewer && viewer.owner_user_id) {
-    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.owner_user_id] };
-  }
+
+  // Admin principal, usuarios normales y distribuidores convertidos: datos globales.
   return { clause: `(${prefix}owner_admin_id IS NULL OR ${prefix}owner_admin_id = 0)`, params: [] };
 }
 
@@ -691,6 +702,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_account_id INTEGER`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
 
   await pool.query(`
@@ -2969,6 +2981,32 @@ app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distribut
 
 app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
+    const viewer = await getViewerContext(req.user.id);
+
+    // Si es panel vendido/rentado: solo sus productos propios.
+    if (viewer && viewer.is_panel_admin) {
+      const result = await pool.query(
+        `SELECT
+           products.id AS product_id,
+           products.name,
+           products.category,
+           products.price AS general_price,
+           COALESCE(products.cost_price, products.price, 0) AS owner_price,
+           COALESCE(subadmin_reseller_prices.sale_price, products.price) AS reseller_price
+         FROM products
+         LEFT JOIN subadmin_reseller_prices
+           ON subadmin_reseller_prices.product_id = products.id
+          AND subadmin_reseller_prices.owner_user_id = $1
+         WHERE products.active = 1
+           AND products.owner_admin_id = $1
+         ORDER BY products.category ASC, products.name ASC`,
+        [req.user.id]
+      );
+      return res.json(result.rows);
+    }
+
+    // Si es usuario convertido a distribuidor independiente: depende del admin global.
+    // Ve productos globales y los precios especiales que el admin principal le asignó.
     const result = await pool.query(
       `SELECT
          products.id AS product_id,
@@ -2985,6 +3023,7 @@ app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async 
          ON subadmin_reseller_prices.product_id = products.id
         AND subadmin_reseller_prices.owner_user_id = $1
        WHERE products.active = 1
+         AND (products.owner_admin_id IS NULL OR products.owner_admin_id = 0)
        ORDER BY products.category ASC, products.name ASC`,
       [req.user.id]
     );
@@ -3003,6 +3042,17 @@ app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, asyn
 
     if (!product_id || !priceNumber || priceNumber <= 0) {
       return res.status(400).json({ error: "Producto y precio válido son obligatorios" });
+    }
+
+    const viewer = await getViewerContext(req.user.id);
+    const productParams = viewer?.is_panel_admin ? [product_id, req.user.id] : [product_id];
+    const productWhere = viewer?.is_panel_admin
+      ? `id = $1 AND active = 1 AND owner_admin_id = $2`
+      : `id = $1 AND active = 1 AND (owner_admin_id IS NULL OR owner_admin_id = 0)`;
+
+    const productCheck = await pool.query(`SELECT id FROM products WHERE ${productWhere} LIMIT 1`, productParams);
+    if (!productCheck.rows.length) {
+      return res.status(404).json({ error: "Producto no disponible para este panel" });
     }
 
     const updateResult = await pool.query(
@@ -3052,6 +3102,25 @@ app.post("/api/distributor/add-balance", authMiddleware, distributorMiddleware, 
   }
 });
 
+
+function getReportScopeOwnerId(req) {
+  try {
+    if (req.isPanelAdmin) return Number(req.user.id);
+    if (req.adminUser && (req.adminUser.is_subadmin === true || req.adminUser.is_subadmin === 'true' || req.adminUser.is_subadmin === 1)) return Number(req.user.id);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getScopedOrdersCondition() {
+  return `($2::int IS NULL OR orders.owner_admin_id = $2 OR orders.user_id = $2 OR orders.user_id IN (SELECT id FROM users WHERE owner_user_id = $2))`;
+}
+
+function getScopedReportsCondition() {
+  return `($3::int IS NULL OR account_reports.owner_admin_id = $3 OR account_reports.user_id = $3 OR account_reports.user_id IN (SELECT id FROM users WHERE owner_user_id = $3))`;
+}
+
 // ADMIN: REPORTE DE VENTAS (fecha local México) - con costo y ganancia
 app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -3064,7 +3133,9 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     const selectedDate = useDate || mexicoTodayResult.rows[0].today;
-    const params = [selectedDate];
+    const scopeOwnerId = getReportScopeOwnerId(req);
+    const params = [selectedDate, scopeOwnerId];
+    const scopeCondition = getScopedOrdersCondition();
 
     const saleProductNameExpr = `
       COALESCE(
@@ -3094,7 +3165,8 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
        FROM orders
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
-         AND ${dateCondition}`,
+         AND ${dateCondition}
+         AND ${scopeCondition}`,
       params
     );
 
@@ -3112,6 +3184,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}
+         AND ${scopeCondition}
        GROUP BY users.id, users.name, users.email
        ORDER BY total_profit DESC, total_sales DESC, total_orders DESC`,
       params
@@ -3129,6 +3202,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}
+         AND ${scopeCondition}
        GROUP BY ${saleProductNameExpr}, ${saleProductCategoryExpr}
        ORDER BY total_profit DESC, total_sales DESC, total_orders DESC`,
       params
@@ -3152,6 +3226,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
        JOIN products ON products.id = orders.product_id
        WHERE orders.status = 'exito'
          AND ${dateCondition}
+         AND ${scopeCondition}
        ORDER BY orders.created_at DESC`,
       params
     );
@@ -3171,6 +3246,144 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 });
 
 
+
+
+
+
+// ADMIN: REPORTE MENSUAL CSV (respeta admin global, distribuidor o panel independiente)
+app.get("/api/admin/monthly-report", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const month = String(req.query.month || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: "Mes inválido. Usa YYYY-MM" });
+    }
+    const scopeOwnerId = getReportScopeOwnerId(req);
+    const startDate = `${month}-01`;
+    const result = await pool.query(
+      `SELECT
+         orders.id,
+         users.name AS customer_name,
+         users.email AS customer_email,
+         COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name) AS product_name,
+         COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, 'Otros') AS product_category,
+         orders.amount,
+         COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0) AS cost_price,
+         (orders.amount - COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0)) AS profit,
+         orders.status,
+         to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'YYYY-MM-DD HH24:MI:SS') AS fecha_mexico
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       JOIN products ON products.id = orders.product_id
+       WHERE orders.status = 'exito'
+         AND ((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date >= $1::date
+         AND ((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date < ($1::date + INTERVAL '1 month')
+         AND ($2::int IS NULL OR orders.owner_admin_id = $2 OR orders.user_id = $2 OR orders.user_id IN (SELECT id FROM users WHERE owner_user_id = $2))
+       ORDER BY orders.created_at DESC`,
+      [startDate, scopeOwnerId]
+    );
+
+    const headers = ['Pedido','Cliente','Correo','Producto','Categoria','Venta','Costo','Ganancia','Estado','Fecha Mexico'];
+    const rows = result.rows.map(r => [
+      r.id,
+      r.customer_name || '',
+      r.customer_email || '',
+      r.product_name || '',
+      r.product_category || '',
+      Number(r.amount || 0).toFixed(2),
+      Number(r.cost_price || 0).toFixed(2),
+      Number(r.profit || 0).toFixed(2),
+      r.status || '',
+      r.fecha_mexico || ''
+    ]);
+    const csv = [headers, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte_mensual_${month}.csv"`);
+    res.send('\ufeff' + csv);
+  } catch (err) {
+    console.error('Error generando reporte mensual:', err.message);
+    res.status(500).json({ error: "Error generando reporte mensual" });
+  }
+});
+
+// ADMIN: BUSCAR PEDIDOS O FALLAS POR RANGO DE FECHAS
+app.get("/api/admin/search-records", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const type = String(req.query.type || 'orders');
+    const startDate = String(req.query.start_date || '').trim();
+    const endDate = String(req.query.end_date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ error: "Selecciona fecha inicial y fecha final válidas" });
+    }
+    const scopeOwnerId = getReportScopeOwnerId(req);
+    if (type === 'reports') {
+      const result = await pool.query(
+        `SELECT account_reports.id, account_reports.order_id, account_reports.email, account_reports.issue_type, account_reports.description,
+                account_reports.status, account_reports.admin_response, account_reports.created_at, account_reports.reviewed_at,
+                users.name AS customer_name, users.email AS customer_email
+         FROM account_reports
+         JOIN users ON users.id = account_reports.user_id
+         WHERE account_reports.created_at::date >= $1::date
+           AND account_reports.created_at::date <= $2::date
+           AND ($3::int IS NULL OR account_reports.owner_admin_id = $3 OR account_reports.user_id = $3 OR account_reports.user_id IN (SELECT id FROM users WHERE owner_user_id = $3))
+         ORDER BY account_reports.created_at DESC`,
+        [startDate, endDate, scopeOwnerId]
+      );
+      return res.json({ type, records: result.rows });
+    }
+
+    const result = await pool.query(
+      `SELECT orders.id, orders.amount, orders.status, orders.admin_response, orders.created_at,
+              COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name) AS product_name,
+              users.name AS customer_name, users.email AS customer_email
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       JOIN products ON products.id = orders.product_id
+       WHERE orders.created_at::date >= $1::date
+         AND orders.created_at::date <= $2::date
+         AND ($3::int IS NULL OR orders.owner_admin_id = $3 OR orders.user_id = $3 OR orders.user_id IN (SELECT id FROM users WHERE owner_user_id = $3))
+       ORDER BY orders.created_at DESC`,
+      [startDate, endDate, scopeOwnerId]
+    );
+    res.json({ type: 'orders', records: result.rows });
+  } catch (err) {
+    console.error('Error buscando registros:', err.message);
+    res.status(500).json({ error: "Error buscando registros" });
+  }
+});
+
+// ADMIN: HISTORIAL DE PEDIDOS POR USUARIO
+app.get("/api/admin/user-history", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.query.user_id || 0);
+    const startDate = String(req.query.start_date || '').trim();
+    const endDate = String(req.query.end_date || '').trim();
+    if (!userId) return res.status(400).json({ error: "Selecciona un usuario" });
+    const scopeOwnerId = getReportScopeOwnerId(req);
+    const params = [userId, scopeOwnerId];
+    let dateSql = '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      params.push(startDate, endDate);
+      dateSql = ' AND orders.created_at::date >= $3::date AND orders.created_at::date <= $4::date ';
+    }
+    const result = await pool.query(
+      `SELECT orders.id, orders.amount, orders.status, orders.admin_response, orders.order_data, orders.delivered_account_data, orders.created_at,
+              COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name) AS product_name,
+              users.name AS customer_name, users.email AS customer_email
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       JOIN products ON products.id = orders.product_id
+       WHERE orders.user_id = $1
+         AND ($2::int IS NULL OR orders.owner_admin_id = $2 OR users.owner_user_id = $2 OR users.id = $2)
+         ${dateSql}
+       ORDER BY orders.created_at DESC`,
+      params
+    );
+    res.json({ records: result.rows });
+  } catch (err) {
+    console.error('Error cargando historial:', err.message);
+    res.status(500).json({ error: "Error cargando historial de usuario" });
+  }
+});
 
 
 // DATOS BANCARIOS SEGÚN PANEL / ADMIN
