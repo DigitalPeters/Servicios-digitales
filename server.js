@@ -742,6 +742,16 @@ async function initDatabase() {
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
+
+  // Los paneles creados/rentados son "Panel propietario", no "Admin distribuidor".
+  // Por eso, si existe un usuario cuyo correo está en admin_panels, se limpia is_subadmin.
+  await pool.query(`
+    UPDATE users u
+    SET is_subadmin = FALSE
+    FROM admin_panels ap
+    WHERE lower(u.email) = lower(ap.email)
+  `);
+
   await pool.query(`UPDATE products SET cost_price = 0 WHERE cost_price IS NULL`);
   await pool.query(`UPDATE products SET active = 1 WHERE active IS NULL`);
   await pool.query(`UPDATE products SET category = 'Otros' WHERE category IS NULL`);
@@ -1001,7 +1011,7 @@ app.post("/api/login", async (req, res) => {
 
       const created = await pool.query(
         `INSERT INTO users (name, email, password, role, balance, is_subadmin)
-         VALUES ($1, $2, $3, 'admin', 0, true)
+         VALUES ($1, $2, $3, 'admin', 0, false)
          RETURNING *`,
         [panel.admin_name || panel.business_name || cleanEmail, cleanEmail, panelPass.rows[0].password]
       );
@@ -1038,7 +1048,19 @@ app.get("/api/me", authMiddleware, async (req, res) => {
               ap.id AS admin_panel_id,
               ap.business_name AS admin_panel_business_name,
               ap.status AS admin_panel_status,
-              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin
+              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+              CASE
+                WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
+                WHEN u.role = 'admin' THEN 'admin_global'
+                ELSE 'usuario'
+              END AS account_type,
+              CASE
+                WHEN ap.id IS NOT NULL THEN 'Panel propietario'
+                WHEN COALESCE(u.is_subadmin, false) = true THEN 'Admin distribuidor'
+                WHEN u.role = 'admin' THEN 'Admin global'
+                ELSE 'Usuario'
+              END AS role_label
        FROM users u
        LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
        WHERE u.id = $1`,
@@ -1645,15 +1667,29 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
     let result;
     if (req.isPanelAdmin) {
       result = await pool.query(
-        `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id
-         FROM users
-         WHERE owner_user_id = $1
+        `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+                CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+                CASE WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                     WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
+                     WHEN u.role = 'admin' THEN 'admin_global'
+                     ELSE 'usuario' END AS account_type
+         FROM users u
+         LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+         WHERE u.owner_user_id = $1
          ORDER BY id DESC`,
         [req.user.id]
       );
     } else {
       result = await pool.query(
-        `SELECT id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id FROM users ORDER BY id DESC`
+        `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+              CASE WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                   WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
+                   WHEN u.role = 'admin' THEN 'admin_global'
+                   ELSE 'usuario' END AS account_type
+       FROM users u
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       ORDER BY u.id DESC`
       );
     }
 
@@ -2673,7 +2709,7 @@ app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, 
       return res.status(404).json({ error: "Usuario no encontrado o no se puede modificar" });
     }
 
-    res.json({ message: isSubadmin ? "Usuario convertido en admin independiente" : "Admin independiente desactivado", user: result.rows[0] });
+    res.json({ message: isSubadmin ? "Usuario convertido en admin distribuidor" : "Admin distribuidor desactivado", user: result.rows[0] });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error actualizando admin independiente" });
@@ -3612,12 +3648,12 @@ app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMi
 
     await pool.query(
       `INSERT INTO users (name, email, password, role, balance, is_subadmin)
-       VALUES ($1, $2, $3, 'admin', 0, true)
+       VALUES ($1, $2, $3, 'admin', 0, false)
        ON CONFLICT (email) DO UPDATE
        SET name = EXCLUDED.name,
            password = EXCLUDED.password,
            role = 'admin',
-           is_subadmin = true
+           is_subadmin = false
        RETURNING id`,
       [String(admin_name || business_name || cleanEmail).trim() || cleanEmail, cleanEmail, hashedPassword]
     );
@@ -3682,3 +3718,5 @@ initDatabase()
 // FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33
 
 // FIX VENTAS HOY SCROLL REPORTE MISMA PAGINA - 2026-06-08 03:25:07
+
+// ROLES SEPARADOS: admin_global, admin_distribuidor, panel_propietario - 2026-06-08 03:36:19
