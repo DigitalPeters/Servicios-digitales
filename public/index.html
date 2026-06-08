@@ -3547,6 +3547,208 @@ if(__loadAppBeforeRentedAdmin){
 setTimeout(()=>{loadBankInfoForPanel();applyRentedAdminLayout();},800);
 setTimeout(()=>applyRentedAdminLayout(),1800);
 
+
+// ===============================
+// MEJORA REAL: dashboard para panel independiente + reporte mensual + busquedas
+// ===============================
+function isPanelAdminCreatedFinal(){
+  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+}
+function isAdminAnyFinal(){
+  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
+}
+function showHardFinal(id, show=true){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.classList.toggle('hidden', !show);
+  el.style.display = show ? '' : 'none';
+}
+function ensurePanelAdminDashboardCardsFinal(){
+  if(!isAdminAnyFinal()) return;
+  // El panel creado debe ver ventas y graficas como admin global, pero con sus propios datos.
+  showHardFinal('dashSalesTodayCard', true);
+  showHardFinal('dashboardChartsPanel', true);
+  showHardFinal('adminSalesReportPanel', true);
+
+  const grid=document.querySelector('#section-dashboard .grid-cards');
+  if(!grid) return;
+  const specs=[
+    ['panelCostTodayCard','💸','Costo total','salesReportCost','0.00'],
+    ['panelProfitTodayCard','📈','Ganancia real','salesReportProfit','0.00'],
+    ['panelSuccessOrdersCard','▤','Pedidos éxito','salesReportOrders','0']
+  ];
+  specs.forEach(([id,icon,label,source,def])=>{
+    if(document.getElementById(id)) return;
+    const card=document.createElement('div');
+    card.id=id;
+    card.className='dash-card clickable';
+    card.onclick=()=>openSalesReportFinal();
+    const isMoney = source !== 'salesReportOrders';
+    card.innerHTML=`<div class="dash-icon">${icon}</div><div><div class="dash-label">${label}</div><div class="dash-value">${isMoney?'$':''}<span id="${id}Value">${def}</span></div></div>`;
+    const salesCard=document.getElementById('dashSalesTodayCard');
+    if(salesCard && salesCard.parentNode===grid) salesCard.insertAdjacentElement('afterend', card);
+    else grid.appendChild(card);
+  });
+}
+function syncPanelAdminDashboardValuesFinal(){
+  const copy=(src,dst,def='0')=>{
+    const s=document.getElementById(src), d=document.getElementById(dst);
+    if(d) d.textContent=(s?.textContent || def);
+  };
+  copy('salesReportCost','panelCostTodayCardValue','0.00');
+  copy('salesReportProfit','panelProfitTodayCardValue','0.00');
+  copy('salesReportOrders','panelSuccessOrdersCardValue','0');
+}
+function openSalesReportFinal(){
+  if(!isAdminAnyFinal()) return;
+  showSection('admin');
+  setTimeout(()=>{
+    ensureAdvancedReportsPanelFinal();
+    const el=document.getElementById('adminSalesReportPanel');
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    loadSalesReport(true).then(syncPanelAdminDashboardValuesFinal).catch(()=>{});
+  },140);
+}
+if(typeof openSalesReport === 'function'){
+  openSalesReport = openSalesReportFinal;
+}
+
+function ensureAdvancedReportsPanelFinal(){
+  if(!isAdminAnyFinal()) return;
+  const salesPanel=document.getElementById('adminSalesReportPanel');
+  if(!salesPanel || document.getElementById('advancedReportsPanelFinal')) return;
+  const panel=document.createElement('div');
+  panel.id='advancedReportsPanelFinal';
+  panel.className='panel';
+  panel.innerHTML=`
+    <div class="panel-head">
+      <div>
+        <h2>Búsqueda e historial</h2>
+        <p class="small-text">Busca pedidos o fallas por rango de fechas, o consulta el historial de pedidos de un usuario.</p>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <h3>Buscar por fechas</h3>
+        <div class="two-row">
+          <div><label class="field-label">Fecha inicial</label><input id="searchStartDateFinal" type="date"></div>
+          <div><label class="field-label">Fecha final</label><input id="searchEndDateFinal" type="date"></div>
+        </div>
+        <label class="field-label">Tipo</label>
+        <select id="searchTypeFinal"><option value="orders">Pedidos</option><option value="reports">Fallas</option></select>
+        <button class="primary-btn" onclick="searchRecordsByDateFinal()">Buscar</button>
+      </div>
+      <div>
+        <h3>Historial por usuario</h3>
+        <label class="field-label">Usuario</label>
+        <select id="historyUserSelectFinal"><option value="">Cargando usuarios...</option></select>
+        <div class="two-row">
+          <div><label class="field-label">Desde opcional</label><input id="historyStartDateFinal" type="date"></div>
+          <div><label class="field-label">Hasta opcional</label><input id="historyEndDateFinal" type="date"></div>
+        </div>
+        <button class="green-btn" onclick="loadUserHistoryFinal()">Ver historial</button>
+      </div>
+    </div>
+    <hr class="divider">
+    <div id="advancedReportsResultFinal">Sin búsqueda todavía.</div>`;
+  salesPanel.insertAdjacentElement('afterend', panel);
+  loadHistoryUsersFinal();
+}
+async function loadHistoryUsersFinal(){
+  if(!isAdminAnyFinal()) return;
+  const sel=document.getElementById('historyUserSelectFinal');
+  if(!sel) return;
+  try{
+    const users=await api('/api/admin/users');
+    sel.innerHTML='<option value="">Selecciona usuario</option>'+users.map(u=>`<option value="${u.id}">#${u.id} ${safeText(u.name||'Usuario')} · ${safeText(u.email||'')}</option>`).join('');
+  }catch(e){
+    sel.innerHTML='<option value="">Error cargando usuarios</option>';
+  }
+}
+function renderRecordsTableFinal(type, records=[]){
+  const box=document.getElementById('advancedReportsResultFinal');
+  if(!box) return;
+  if(!records.length){ box.innerHTML='Sin resultados.'; return; }
+  if(type==='reports'){
+    box.innerHTML=`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Reporte</th><th>Usuario</th><th>Correo falla</th><th>Tipo</th><th>Estado</th><th>Respuesta</th><th>Fecha</th></tr></thead><tbody>${records.map(r=>`<tr><td>#${r.id}${r.order_id?`<br><span class="small-text">Pedido #${r.order_id}</span>`:''}</td><td><b>${safeText(r.customer_name||'')}</b><br><span class="small-text">${safeText(r.customer_email||'')}</span></td><td>${safeText(r.email||'')}</td><td>${safeText(r.issue_type||'')}</td><td>${safeText(r.status||'')}</td><td>${safeText(r.admin_response||'Sin respuesta')}</td><td>${safeText(String(r.created_at||'').slice(0,10))}</td></tr>`).join('')}</tbody></table></div>`;
+    return;
+  }
+  box.innerHTML=`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Usuario</th><th>Producto</th><th>Monto</th><th>Estado</th><th>Respuesta</th><th>Fecha</th></tr></thead><tbody>${records.map(o=>`<tr><td>#${o.id}</td><td><b>${safeText(o.customer_name||'')}</b><br><span class="small-text">${safeText(o.customer_email||'')}</span></td><td>${safeText(o.product_name||'')}</td><td>$${formatMoney(o.amount)}</td><td>${safeText(o.status||'')}</td><td>${safeText(o.admin_response||'')}</td><td>${safeText(String(o.created_at||'').slice(0,10))}</td></tr>`).join('')}</tbody></table></div>`;
+}
+async function searchRecordsByDateFinal(){
+  try{
+    const type=document.getElementById('searchTypeFinal')?.value || 'orders';
+    const start=document.getElementById('searchStartDateFinal')?.value || '';
+    const end=document.getElementById('searchEndDateFinal')?.value || '';
+    const data=await api(`/api/admin/search-records?type=${encodeURIComponent(type)}&start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`);
+    renderRecordsTableFinal(type, data.records||[]);
+  }catch(e){ showMessage(e.message||'Error buscando registros','error'); }
+}
+async function loadUserHistoryFinal(){
+  try{
+    const userId=document.getElementById('historyUserSelectFinal')?.value || '';
+    const start=document.getElementById('historyStartDateFinal')?.value || '';
+    const end=document.getElementById('historyEndDateFinal')?.value || '';
+    const qs=new URLSearchParams({user_id:userId});
+    if(start && end){ qs.set('start_date',start); qs.set('end_date',end); }
+    const data=await api('/api/admin/user-history?'+qs.toString());
+    renderRecordsTableFinal('orders', data.records||[]);
+  }catch(e){ showMessage(e.message||'Error cargando historial','error'); }
+}
+async function downloadMonthlyReport(){
+  try{
+    if(!isAdminAnyFinal()) return;
+    let month=document.getElementById('monthlyReportMonth')?.value || '';
+    if(!month){
+      const d=new Date(); month=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const input=document.getElementById('monthlyReportMonth'); if(input) input.value=month;
+    }
+    const res=await fetch('/api/admin/monthly-report?month='+encodeURIComponent(month), {headers:{Authorization:'Bearer '+token}});
+    if(!res.ok){ const err=await res.json().catch(()=>({error:'Error descargando reporte'})); throw new Error(err.error||'Error descargando reporte'); }
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=`reporte_mensual_${month}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }catch(e){ showMessage(e.message||'Error descargando reporte mensual','error'); }
+}
+
+const __loadSalesReportBeforeFinal = typeof loadSalesReport === 'function' ? loadSalesReport : null;
+if(__loadSalesReportBeforeFinal){
+  loadSalesReport = async function(forceToday=false){
+    await __loadSalesReportBeforeFinal(forceToday);
+    ensurePanelAdminDashboardCardsFinal();
+    syncPanelAdminDashboardValuesFinal();
+  };
+}
+const __applyRentedLayoutBeforeFinal = typeof applyRentedAdminLayout === 'function' ? applyRentedAdminLayout : null;
+if(__applyRentedLayoutBeforeFinal){
+  applyRentedAdminLayout = function(){
+    __applyRentedLayoutBeforeFinal();
+    if(isPanelAdminCreatedFinal()){
+      showHardFinal('dashSalesTodayCard', true);
+      showHardFinal('dashboardChartsPanel', true);
+      showHardFinal('adminSalesReportPanel', true);
+      showHardFinal('panelCostTodayCard', true);
+      showHardFinal('panelProfitTodayCard', true);
+      showHardFinal('panelSuccessOrdersCard', true);
+    }
+  };
+}
+const __loadAppBeforeReportsFinal = typeof loadApp === 'function' ? loadApp : null;
+if(__loadAppBeforeReportsFinal){
+  loadApp = async function(){
+    await __loadAppBeforeReportsFinal();
+    if(isAdminAnyFinal()){
+      ensurePanelAdminDashboardCardsFinal();
+      ensureAdvancedReportsPanelFinal();
+      await Promise.allSettled([loadSalesReport(true), loadHistoryUsersFinal()]);
+      if(typeof applyRentedAdminLayout==='function') applyRentedAdminLayout();
+      syncPanelAdminDashboardValuesFinal();
+    }
+  };
+}
+setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); ensureAdvancedReportsPanelFinal(); loadSalesReport(true).catch(()=>{}); } }, 1200);
+
 </script>
 </body>
 </html>
