@@ -3342,7 +3342,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 
     const summaryResult = await pool.query(
       `SELECT
-         COUNT(*)::int AS total_orders,
+         SUM(GREATEST(1, COALESCE(NULLIF((o.order_data::jsonb ->> 'quantity'), '')::int, 1)))::int AS total_orders,
          COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
          COALESCE(SUM(orders.amount - ${costExpr}), 0)::numeric AS total_profit
@@ -3876,3 +3876,5 @@ initDatabase()
 // REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28
 
 // SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36
+
+// FIX CANTIDAD REPORTES QUANTITY - 2026-06-08 23:32:35

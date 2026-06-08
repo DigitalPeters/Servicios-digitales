@@ -4422,6 +4422,29 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   }
 })();
 
+
+// ===============================
+// FIX CANTIDAD EN REPORTES - 2026-06-08 23:32:35
+// Limpia nombres tipo "Netflix perfil x2" en gráficas/listados.
+// ===============================
+(function(){
+  function cleanProductQtyName(name){
+    return String(name || '').replace(/\s+x\d+$/i, '').trim();
+  }
+  window.cleanProductQtyName = cleanProductQtyName;
+
+  const oldRenderDashboardChartsQtyFix = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (oldRenderDashboardChartsQtyFix) {
+    renderDashboardCharts = function(data){
+      if (data && Array.isArray(data.top_products)) {
+        data.top_products = data.top_products.map(p => ({...p, product_name: cleanProductQtyName(p.product_name || p.name)}));
+      }
+      return oldRenderDashboardChartsQtyFix(data);
+    };
+    window.renderDashboardCharts = renderDashboardCharts;
+  }
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4431,3 +4454,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28 -->
 
 <!-- SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36 -->
+
+<!-- FIX CANTIDAD REPORTES QUANTITY - 2026-06-08 23:32:35 -->
