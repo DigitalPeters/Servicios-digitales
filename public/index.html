@@ -198,6 +198,7 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h2>Vendedores registrados</h2><button class="outline-btn" style="width:auto" onclick="loadDistributorPanel()">Actualizar</button></div>
+          <button class="green-btn" style="width:auto;margin-bottom:12px" onclick="repairResellerByEmail()">Reparar acceso por correo</button>
           <div id="resellersList">Sin vendedores.</div>
         </div>
         <div class="panel">
@@ -1218,7 +1219,7 @@ async function loadDistributorPanel(){
     }
     const box = document.getElementById('resellersList');
     if(box){
-      box.innerHTML = sellers.length ? sellers.map(s=>`<div class="item"><p><b>ID:</b> ${s.id}</p><p><b>Nombre:</b> ${safeText(s.name)}</p><p><b>Correo:</b> ${safeText(s.email)}</p><p><b>Saldo:</b> $${formatMoney(s.balance)}</p><button class="outline-btn" style="width:auto" onclick="resetResellerAccess(${s.id})">Reparar acceso</button></div>`).join('') : 'Sin vendedores.';
+      box.innerHTML = sellers.length ? sellers.map(s=>`<div class="item"><p><b>ID:</b> ${s.id}</p><p><b>Nombre:</b> ${safeText(s.name)}</p><p><b>Correo:</b> ${safeText(s.email)}</p><p><b>Saldo:</b> $${formatMoney(s.balance)}</p><div class="tools" style="margin-bottom:0"><button class="outline-btn" style="width:auto" onclick="resetResellerAccess(${s.id})">Reparar acceso</button><button class="danger-btn" style="width:auto" onclick="deleteReseller(${s.id})">Eliminar vendedor</button></div></div>`).join('') : 'Sin vendedores.';
     }
   }catch(e){ showMessage(e.message || 'Error cargando vendedores','error'); }
 }
@@ -1234,6 +1235,32 @@ async function resetResellerAccess(id){
     showMessage(data.message || 'Acceso reparado');
     await loadDistributorPanel();
   }catch(e){ showMessage(e.message || 'Error reparando acceso','error'); }
+}
+
+async function deleteReseller(id){
+  try{
+    if(!confirm('¿Seguro que quieres eliminar este vendedor? Esta acción solo se permite si no tiene pedidos, reportes o solicitudes.')) return;
+    const data = await api('/api/distributor/resellers/'+id, { method:'DELETE' });
+    showMessage(data.message || 'Vendedor eliminado');
+    await loadDistributorPanel();
+  }catch(e){ showMessage(e.message || 'No se pudo eliminar vendedor','error'); }
+}
+
+
+async function repairResellerByEmail(){
+  try{
+    const email = prompt('Correo exacto del vendedor:');
+    if(!email) return;
+    const password = prompt('Nueva contraseña para el vendedor (mínimo 6 caracteres):');
+    if(!password) return;
+    const name = prompt('Nombre del vendedor (opcional):') || email;
+    const data = await api('/api/distributor/resellers/repair-by-email', {
+      method:'POST',
+      body: JSON.stringify({ email, password, name })
+    });
+    showMessage(data.message || 'Acceso reparado');
+    await loadDistributorPanel();
+  }catch(e){ showMessage(e.message || 'Error reparando acceso por correo','error'); }
 }
 
 async function addResellerBalance(){
@@ -3508,6 +3535,7 @@ if(__loadAppBeforeRentedAdmin){
     if(isPanelAdminRented()){
       const statUsersEl=document.getElementById('statUsers'); if(statUsersEl) statUsersEl.textContent='0';
       await Promise.allSettled([
+        typeof loadDistributorPanel==='function'?loadDistributorPanel():Promise.resolve(),
         typeof loadProducts==='function'?loadProducts():Promise.resolve(),
         typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve()
       ]);

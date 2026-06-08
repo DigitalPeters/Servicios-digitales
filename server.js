@@ -960,7 +960,11 @@ app.post("/api/login", async (req, res) => {
     const cleanEmail = String(email || "").trim().toLowerCase();
 
     const result = await pool.query(
-      `SELECT * FROM users WHERE lower(trim(email)) = lower($1)`,
+      `SELECT *
+       FROM users
+       WHERE lower(regexp_replace(trim(email), '\\s+', '', 'g')) = lower(regexp_replace($1, '\\s+', '', 'g'))
+       ORDER BY id DESC
+       LIMIT 1`,
       [cleanEmail]
     );
 
@@ -2780,13 +2784,14 @@ app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, as
       const updated = await pool.query(
         `UPDATE users
          SET name = $1,
+             email = $5,
              password = $2,
              role = 'user',
              owner_user_id = $3,
              is_subadmin = FALSE
          WHERE id = $4
          RETURNING id, name, email, role, balance, owner_user_id`,
-        [cleanName, hashedPassword, req.user.id, existingUser.id]
+        [cleanName, hashedPassword, req.user.id, existingUser.id, cleanEmail]
       );
 
       user = updated.rows[0];
@@ -2808,6 +2813,65 @@ app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, as
   }
 });
 
+
+app.delete("/api/distributor/resellers/:id", authMiddleware, distributorMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const resellerId = Number(req.params.id);
+
+    if (!resellerId) {
+      return res.status(400).json({ error: "ID de vendedor inválido" });
+    }
+
+    await client.query("BEGIN");
+
+    const sellerResult = await client.query(
+      `SELECT id, name, email, owner_user_id
+       FROM users
+       WHERE id = $1 AND owner_user_id = $2
+       LIMIT 1`,
+      [resellerId, req.user.id]
+    );
+
+    const seller = sellerResult.rows[0];
+    if (!seller) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Vendedor no encontrado en tu panel" });
+    }
+
+    const usage = await client.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM orders WHERE user_id = $1) AS orders_count,
+         (SELECT COUNT(*)::int FROM balance_requests WHERE user_id = $1) AS balance_count,
+         (SELECT COUNT(*)::int FROM account_reports WHERE user_id = $1) AS reports_count`,
+      [resellerId]
+    );
+
+    const counts = usage.rows[0] || {};
+    const hasMovements = Number(counts.orders_count || 0) > 0 || Number(counts.balance_count || 0) > 0 || Number(counts.reports_count || 0) > 0;
+
+    if (hasMovements) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: "No se puede eliminar porque este vendedor ya tiene pedidos, solicitudes de saldo o reportes. Así se evita perder historial."
+      });
+    }
+
+    await client.query(`DELETE FROM subadmin_reseller_prices WHERE owner_user_id = $1`, [resellerId]);
+    await client.query(`DELETE FROM user_product_prices WHERE user_id = $1`, [resellerId]);
+    await client.query(`DELETE FROM users WHERE id = $1 AND owner_user_id = $2`, [resellerId, req.user.id]);
+
+    await client.query("COMMIT");
+    res.json({ message: "Vendedor eliminado correctamente" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error eliminando vendedor:", err.message);
+    res.status(500).json({ error: "Error eliminando vendedor" });
+  } finally {
+    client.release();
+  }
+});
+
 app.post("/api/distributor/resellers/:id/reset-access", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
     const resellerId = Number(req.params.id);
@@ -2821,11 +2885,13 @@ app.post("/api/distributor/resellers/:id/reset-access", authMiddleware, distribu
 
     const result = await pool.query(
       `UPDATE users
-       SET password = $1,
+       SET email = lower(trim(email)),
+           password = $1,
            role = 'user',
            owner_user_id = $2,
            is_subadmin = FALSE
-       WHERE id = $3 AND owner_user_id = $2
+       WHERE id = $3
+         AND (owner_user_id = $2 OR owner_user_id IS NULL OR owner_user_id = 0)
        RETURNING id, name, email, role, balance, owner_user_id`,
       [hashedPassword, req.user.id, resellerId]
     );
@@ -2841,6 +2907,65 @@ app.post("/api/distributor/resellers/:id/reset-access", authMiddleware, distribu
   }
 });
 
+
+
+// Repara acceso por correo exacto desde el panel independiente.
+// Útil cuando el vendedor fue creado antes pero no quedó ligado correctamente.
+app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const cleanEmail = String(req.body.email || "").trim().toLowerCase();
+    const cleanName = String(req.body.name || "").trim() || cleanEmail;
+    const password = String(req.body.password || "");
+
+    if (!cleanEmail || !password || password.length < 6) {
+      return res.status(400).json({ error: "Correo y contraseña mínima de 6 caracteres son obligatorios" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const existing = await pool.query(
+      `SELECT id, owner_user_id
+       FROM users
+       WHERE lower(regexp_replace(trim(email), '\s+', '', 'g')) = lower(regexp_replace($1, '\s+', '', 'g'))
+       ORDER BY id DESC
+       LIMIT 1`,
+      [cleanEmail]
+    );
+
+    let result;
+
+    if (existing.rows[0]) {
+      const existingUser = existing.rows[0];
+      if (existingUser.owner_user_id && Number(existingUser.owner_user_id) !== Number(req.user.id)) {
+        return res.status(400).json({ error: "Ese correo ya pertenece a otro panel" });
+      }
+      result = await pool.query(
+        `UPDATE users
+         SET name = $1,
+             email = $2,
+             password = $3,
+             role = 'user',
+             owner_user_id = $4,
+             is_subadmin = FALSE
+         WHERE id = $5
+         RETURNING id, name, email, role, balance, owner_user_id`,
+        [cleanName, cleanEmail, hashedPassword, req.user.id, existingUser.id]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
+         VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
+         RETURNING id, name, email, role, balance, owner_user_id`,
+        [cleanName, cleanEmail, hashedPassword, req.user.id]
+      );
+    }
+
+    res.json({ message: "Acceso reparado correctamente. Ya puede iniciar sesión con esa contraseña.", user: result.rows[0] });
+  } catch (err) {
+    console.error("Error reparando acceso por correo:", err.message);
+    res.status(500).json({ error: "Error reparando acceso por correo" });
+  }
+});
 
 app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
