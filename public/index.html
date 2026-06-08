@@ -3895,6 +3895,110 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(applyDashboardFinalAdjustments,3000);
 })();
 
+
+// ===============================
+// FIX FINAL 2026-06-08 03:25:07
+// Ventas hoy debe mandar al apartado de Reporte de ventas en la misma página
+// y NO desplegar tarjetas sueltas en el dashboard principal.
+// ===============================
+(function(){
+  function hideDashboardSalesExtraCards(){
+    ['panelSuccessOrdersCard','panelProfitTodayCard','panelCostTodayCard'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('hidden');
+      el.style.display = 'none';
+    });
+  }
+
+  async function goToSalesReportSamePage(){
+    try {
+      if (typeof showSection === 'function') showSection('admin');
+
+      const panel = document.getElementById('adminSalesReportPanel');
+      if (panel) {
+        panel.classList.remove('hidden');
+        panel.style.display = '';
+      }
+
+      if (typeof setTodaySalesDate === 'function') setTodaySalesDate();
+      if (typeof loadSalesReport === 'function') {
+        try { await loadSalesReport(true); } catch(e) { console.warn('No se pudo cargar reporte de ventas', e); }
+      }
+
+      setTimeout(() => {
+        const target = document.getElementById('adminSalesReportPanel');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 160);
+    } catch(e) {
+      console.error('Error abriendo Ventas hoy', e);
+    }
+
+    setTimeout(hideDashboardSalesExtraCards, 250);
+    setTimeout(hideDashboardSalesExtraCards, 900);
+  }
+
+  function bindVentasHoyButton(){
+    const salesCard = document.getElementById('dashSalesTodayCard');
+    if (salesCard) {
+      salesCard.onclick = goToSalesReportSamePage;
+      salesCard.title = 'Ver reporte de ventas de hoy';
+      salesCard.classList.add('clickable');
+    }
+
+    document.querySelectorAll('[onclick="openSalesReport()"]').forEach(el => {
+      if (el.id === 'dashSalesTodayCard' || (el.textContent || '').toLowerCase().includes('ventas hoy')) {
+        el.onclick = goToSalesReportSamePage;
+      }
+    });
+
+    hideDashboardSalesExtraCards();
+  }
+
+  const prevOpenSalesReportFixed = typeof openSalesReport === 'function' ? openSalesReport : null;
+  openSalesReport = goToSalesReportSamePage;
+  window.openSalesReport = goToSalesReportSamePage;
+
+  const prevOpenSalesReportFinalFixed = typeof openSalesReportFinal === 'function' ? openSalesReportFinal : null;
+  openSalesReportFinal = goToSalesReportSamePage;
+  window.openSalesReportFinal = goToSalesReportSamePage;
+
+  const prevLoadAppVentasFix = typeof loadApp === 'function' ? loadApp : null;
+  if (prevLoadAppVentasFix) {
+    loadApp = async function(){
+      const result = await prevLoadAppVentasFix();
+      bindVentasHoyButton();
+      setTimeout(bindVentasHoyButton, 500);
+      setTimeout(bindVentasHoyButton, 1500);
+      setTimeout(bindVentasHoyButton, 3000);
+      return result;
+    };
+  }
+
+  const prevShowSectionVentasFix = typeof showSection === 'function' ? showSection : null;
+  if (prevShowSectionVentasFix) {
+    showSection = function(name){
+      const result = prevShowSectionVentasFix(name);
+      setTimeout(bindVentasHoyButton, 180);
+      return result;
+    };
+  }
+
+  const prevLoadSalesReportVentasFix = typeof loadSalesReport === 'function' ? loadSalesReport : null;
+  if (prevLoadSalesReportVentasFix) {
+    loadSalesReport = async function(forceToday=false){
+      const result = await prevLoadSalesReportVentasFix(forceToday);
+      hideDashboardSalesExtraCards();
+      bindVentasHoyButton();
+      return result;
+    };
+  }
+
+  setTimeout(bindVentasHoyButton, 300);
+  setTimeout(bindVentasHoyButton, 1200);
+  setTimeout(bindVentasHoyButton, 2500);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
