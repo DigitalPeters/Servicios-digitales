@@ -705,7 +705,43 @@ function reportDeliveredAccount(orderId){
 }
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
 function toggleCreateProduct(){createProductBox.classList.toggle('hidden')}
-async function createProduct(){try{const data=await api('/api/admin/create-product',{method:'POST',body:JSON.stringify({name:productName.value,description:productDescription.value,price:productPrice.value,cost_price:(document.getElementById('productCostPrice')?.value||0),category:productCategory.value,required_fields:getRequiredFieldsFromInput('productRequiredFields'),charge_mode:productChargeMode.value,stock_enabled:productStockEnabled.checked,stock:productStock.value})});showMessage(data.message||'Producto creado');productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';if(document.getElementById('productCostPrice'))productCostPrice.value='0';productStock.value='0';productStockEnabled.checked=false;await 
+async function createProduct(){
+  try{
+    const comboIds = [...document.querySelectorAll('.comboItemCheck:checked')].map(cb=>Number(cb.value)).filter(Boolean);
+    const payload = {
+      name: productName.value,
+      description: productDescription.value,
+      price: productPrice.value,
+      cost_price: (document.getElementById('productCostPrice')?.value || 0),
+      category: productCategory.value,
+      required_fields: getRequiredFieldsFromInput('productRequiredFields'),
+      charge_mode: productChargeMode.value,
+      stock_enabled: productStockEnabled.checked,
+      stock: productStock.value,
+      product_type: document.getElementById('productType')?.value || 'streaming_auto',
+      combo_items: comboIds,
+      combo_discount: document.getElementById('productComboDiscount')?.value || 0
+    };
+    const data = await api('/api/admin/create-product',{method:'POST',body:JSON.stringify(payload)});
+    showMessage(data.message||'Producto creado');
+    productName.value='';
+    productDescription.value='';
+    productPrice.value='';
+    productCategory.value='';
+    productRequiredFields.value='';
+    if(document.getElementById('productCostPrice')) productCostPrice.value='0';
+    if(document.getElementById('productComboDiscount')) productComboDiscount.value='5';
+    productStock.value='0';
+    productStockEnabled.checked=false;
+    allProducts=[];
+    await loadProducts();
+    await loadAdminProducts();
+    await loadDistributorPrices?.();
+    toggleCreateProduct();
+  }catch(e){
+    showMessage(e.message||'Error creando producto','error');
+  }
+}
 function openSalesReport(){
   if(currentUser?.role==='admin'){
     showSection('admin');

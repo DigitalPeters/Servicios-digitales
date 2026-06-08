@@ -2969,6 +2969,9 @@ app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distribut
 
 app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
+    const viewer = await getViewerContext(req.user.id);
+    const ownerAdminId = viewer?.is_panel_admin ? req.user.id : null;
+
     const result = await pool.query(
       `SELECT
          products.id AS product_id,
@@ -2985,8 +2988,12 @@ app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async 
          ON subadmin_reseller_prices.product_id = products.id
         AND subadmin_reseller_prices.owner_user_id = $1
        WHERE products.active = 1
+         AND (
+           ($2::int IS NULL AND (products.owner_admin_id IS NULL OR products.owner_admin_id = 0))
+           OR products.owner_admin_id = $2
+         )
        ORDER BY products.category ASC, products.name ASC`,
-      [req.user.id]
+      [req.user.id, ownerAdminId]
     );
 
     res.json(result.rows);
@@ -3003,6 +3010,26 @@ app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, asyn
 
     if (!product_id || !priceNumber || priceNumber <= 0) {
       return res.status(400).json({ error: "Producto y precio válido son obligatorios" });
+    }
+
+    const viewer = await getViewerContext(req.user.id);
+    const ownerAdminId = viewer?.is_panel_admin ? req.user.id : null;
+
+    const productCheck = await pool.query(
+      `SELECT id
+       FROM products
+       WHERE id = $1
+         AND active = 1
+         AND (
+           ($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+           OR owner_admin_id = $2
+         )
+       LIMIT 1`,
+      [product_id, ownerAdminId]
+    );
+
+    if (!productCheck.rows[0]) {
+      return res.status(404).json({ error: "Producto no disponible para este panel" });
     }
 
     const updateResult = await pool.query(
