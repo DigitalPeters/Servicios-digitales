@@ -722,6 +722,10 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_account_id INTEGER`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
+
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_platform TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
+
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
 
@@ -2086,19 +2090,98 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 });
 
 
+
+// USUARIO: CUENTAS REPORTABLES
+// Permite que en un combo el usuario seleccione exactamente cuál cuenta/plataforma falló.
+app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         pa.id,
+         pa.assigned_order_id AS order_id,
+         pa.platform,
+         pa.product_name,
+         pa.account_email,
+         pa.profile_name,
+         pa.profile_pin,
+         pa.delivered_at,
+         o.created_at AS order_created_at,
+         COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, '') AS order_product_name
+       FROM platform_accounts pa
+       JOIN orders o ON o.id = pa.assigned_order_id
+       LEFT JOIN products p ON p.id = o.product_id
+       WHERE pa.assigned_user_id = $1
+         AND o.user_id = $1
+         AND o.status = 'exito'
+         AND pa.status IN ('delivered','failed')
+       ORDER BY o.id DESC, pa.id ASC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error cargando cuentas reportables:", err.message);
+    res.status(500).json({ error: "Error cargando cuentas reportables" });
+  }
+});
+
+
 // USUARIO: REPORTAR PROBLEMA DE CUENTA
 async function createAccountReportHandler(req, res) {
   try {
     const userId = req.user.id;
-    const email = String(req.body.email || req.body.correo || "").trim();
+    const reportedAccountId = Number(req.body.reported_account_id || 0);
+    let email = String(req.body.email || req.body.correo || "").trim();
     const issue_type = String(req.body.issue_type || req.body.tipo || "otro").trim();
     const description = String(req.body.description || req.body.explicacion || "").trim();
 
-    if (!email || !description) {
-      return res.status(400).json({ error: "Correo y explicación de la falla son obligatorios" });
+    if (!description) {
+      return res.status(400).json({ error: "La explicación de la falla es obligatoria" });
     }
 
-    let purchase = await findReportedPurchase(pool, userId, email);
+    let purchase = null;
+
+    if (reportedAccountId > 0) {
+      const selectedResult = await pool.query(
+        `SELECT
+           o.id AS order_id,
+           o.user_id,
+           o.amount,
+           o.created_at AS order_created_at,
+           o.refunded,
+           p.id AS product_id,
+           p.name AS product_name,
+           p.category AS product_category,
+           pa.id AS account_id,
+           pa.platform,
+           pa.product_name AS account_product_name,
+           pa.account_email,
+           pa.status AS account_status,
+           pa.owner_admin_id
+         FROM platform_accounts pa
+         JOIN orders o ON o.id = pa.assigned_order_id
+         JOIN products p ON p.id = o.product_id
+         WHERE pa.id = $1
+           AND pa.assigned_user_id = $2
+           AND o.user_id = $2
+           AND o.status = 'exito'
+           AND pa.status IN ('delivered','failed')
+         LIMIT 1`,
+        [reportedAccountId, userId]
+      );
+
+      purchase = selectedResult.rows[0] || null;
+      if (!purchase) {
+        return res.status(400).json({ error: "No se encontró la cuenta seleccionada en tus pedidos." });
+      }
+      email = purchase.account_email || email;
+    }
+
+    if (!email) {
+      return res.status(400).json({ error: "Selecciona la cuenta del combo o escribe el correo con falla" });
+    }
+
+    if (!purchase) purchase = await findReportedPurchase(pool, userId, email);
 
     // Si no existe en inventario automático, busca cuentas entregadas manualmente
     // dentro del pedido del usuario. Esto permite reportar cuentas manuales
@@ -2143,10 +2226,19 @@ async function createAccountReportHandler(req, res) {
 
     const insertResult = await pool.query(
       `INSERT INTO account_reports
-       (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id, refund_amount, resolution_type)
-       VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6, 0, '')
+       (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id, refund_amount, resolution_type, reported_platform, owner_admin_id)
+       VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6, 0, '', $7, $8)
        RETURNING id`,
-      [userId, email, issue_type || "otro", description, purchase.order_id, purchase.account_id]
+      [
+        userId,
+        email,
+        issue_type || "otro",
+        description,
+        purchase.order_id,
+        purchase.account_id,
+        purchase.platform || purchase.account_product_name || purchase.product_name || "",
+        purchase.owner_admin_id || null
+      ]
     );
 
     const reportId = insertResult.rows[0].id;
@@ -2215,6 +2307,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.reported_account_id,
         account_reports.refund_amount,
         account_reports.resolution_type,
+        account_reports.reported_platform,
         users.name AS customer_name,
         users.email AS customer_email,
         orders.amount AS order_amount,
@@ -2240,6 +2333,64 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
 });
 
 
+
+// ADMIN: OPCIONES DE REEMPLAZO PARA REPORTE
+// Trae cuentas disponibles de la misma plataforma/cuenta reportada.
+app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = req.params.reportId;
+
+    const reportResult = await pool.query(
+      `SELECT ar.*, o.owner_admin_id AS order_owner_admin_id,
+              p.name AS product_name, p.category AS product_category,
+              pa.platform, pa.product_name AS account_product_name,
+              COALESCE(ar.owner_admin_id, o.owner_admin_id, pa.owner_admin_id, p.owner_admin_id) AS resolved_owner_admin_id
+       FROM account_reports ar
+       JOIN orders o ON o.id = ar.order_id
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN platform_accounts pa ON pa.id = ar.reported_account_id
+       WHERE ar.id = $1
+       LIMIT 1`,
+      [reportId]
+    );
+
+    const report = reportResult.rows[0];
+    if (!report) return res.status(404).json({ error: "Reporte no encontrado" });
+
+    const ownerAdminId = report.resolved_owner_admin_id || null;
+    const platform = report.platform || report.account_product_name || report.reported_platform || report.product_name || report.product_category || "";
+
+    const optionsResult = await pool.query(
+      `SELECT id, platform, product_name, account_email, profile_name, profile_pin, created_at
+       FROM platform_accounts
+       WHERE status = 'available'
+         AND (
+           lower(platform) = lower($1)
+           OR lower(product_name) = lower($1)
+           OR lower(platform) = lower($2)
+           OR lower(product_name) = lower($2)
+         )
+         AND (
+           ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+           OR owner_admin_id = $3
+         )
+       ORDER BY id ASC
+       LIMIT 30`,
+      [platform, report.product_name || "", ownerAdminId]
+    );
+
+    res.json({
+      report_id: reportId,
+      platform,
+      options: optionsResult.rows
+    });
+  } catch (err) {
+    console.error("Error cargando opciones de reemplazo:", err.message);
+    res.status(500).json({ error: "Error cargando opciones de reemplazo" });
+  }
+});
+
+
 // ADMIN: REEMPLAZAR CUENTA REPORTADA
 app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMiddleware, async (req, res) => {
   const client = await pool.connect();
@@ -2254,7 +2405,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       profile_name,
       profile_pin,
       access_url,
-      extra_data
+      extra_data,
+      replacement_account_id
     } = req.body || {};
 
     await client.query("BEGIN");
@@ -2327,31 +2479,55 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
       newAccount = insertAccountResult.rows[0];
     } else {
-      const availableResult = await client.query(
-        `SELECT *
-         FROM platform_accounts
-         WHERE status = 'available'
-           AND (
-             lower(product_name) = lower($1)
-             OR lower(platform) = lower($1)
-             OR lower(platform) = lower($2)
-             OR lower(product_name) = lower($2)
-           )
-           AND (
-             ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-             OR owner_admin_id = $3
-           )
-         ORDER BY id ASC
-         LIMIT 1
-         FOR UPDATE SKIP LOCKED`,
-        [replacementProductName, replacementPlatform, ownerAdminId]
-      );
+      let availableResult;
+
+      if (Number(replacement_account_id || 0) > 0) {
+        availableResult = await client.query(
+          `SELECT *
+           FROM platform_accounts
+           WHERE id = $1
+             AND status = 'available'
+             AND (
+               lower(product_name) = lower($2)
+               OR lower(platform) = lower($2)
+               OR lower(platform) = lower($3)
+               OR lower(product_name) = lower($3)
+             )
+             AND (
+               ($4::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+               OR owner_admin_id = $4
+             )
+           LIMIT 1
+           FOR UPDATE`,
+          [Number(replacement_account_id), replacementProductName, replacementPlatform, ownerAdminId]
+        );
+      } else {
+        availableResult = await client.query(
+          `SELECT *
+           FROM platform_accounts
+           WHERE status = 'available'
+             AND (
+               lower(product_name) = lower($1)
+               OR lower(platform) = lower($1)
+               OR lower(platform) = lower($2)
+               OR lower(product_name) = lower($2)
+             )
+             AND (
+               ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+               OR owner_admin_id = $3
+             )
+           ORDER BY id ASC
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED`,
+          [replacementProductName, replacementPlatform, ownerAdminId]
+        );
+      }
 
       newAccount = availableResult.rows[0];
 
       if (!newAccount) {
         await client.query("ROLLBACK");
-        return res.status(400).json({ error: "No hay otra cuenta disponible para reemplazar esta plataforma. Puedes capturar una cuenta manual." });
+        return res.status(400).json({ error: "No hay cuenta disponible válida para esa plataforma. Puedes capturar una cuenta manual." });
       }
 
       await client.query(
@@ -3908,3 +4084,5 @@ initDatabase()
 // FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26
 
 // FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38
+
+// REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43

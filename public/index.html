@@ -4702,6 +4702,179 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(fixVisibleTopProductsX2, 1500);
 })();
 
+
+// ===============================
+// REPORTAR FALLA DE CUENTA DE COMBO
+// El usuario puede seleccionar qué cuenta del combo falló.
+// El admin puede reemplazar manual o elegir una disponible de esa plataforma.
+// ===============================
+(function(){
+  async function loadReportableAccountsCombo(){
+    try{
+      const select = document.getElementById('reporteCuentaSelect');
+      if(!select) return;
+      const accounts = await api('/api/reportable-accounts');
+      select.innerHTML = '<option value="">Selecciona cuenta entregada o escribe el correo abajo</option>' + (accounts||[]).map(a=>{
+        const label = `#${a.order_id} | ${a.platform || a.product_name || 'Plataforma'} | ${a.account_email || ''}${a.profile_name ? ' | Perfil: '+a.profile_name : ''}`;
+        return `<option value="${a.id}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
+      }).join('');
+    }catch(e){
+      console.warn('No se pudieron cargar cuentas reportables', e);
+    }
+  }
+
+  function ensureReportableSelect(){
+    const reportSection = document.getElementById('section-reports');
+    if(!reportSection || document.getElementById('reporteCuentaSelect')) return;
+    const correo = document.getElementById('reporteCorreo');
+    if(!correo) return;
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <label class="field-label">Selecciona la cuenta entregada</label>
+      <select id="reporteCuentaSelect" onchange="onSelectReportableAccountCombo()">
+        <option value="">Cargando cuentas...</option>
+      </select>
+      <p class="small-text">Si compraste un combo, selecciona exactamente la plataforma/cuenta que falló.</p>
+    `;
+    correo.parentNode.insertBefore(wrap, correo.previousSibling);
+    loadReportableAccountsCombo();
+  }
+
+  window.onSelectReportableAccountCombo = function(){
+    const select = document.getElementById('reporteCuentaSelect');
+    const correo = document.getElementById('reporteCorreo');
+    const opt = select?.selectedOptions?.[0];
+    const email = opt?.getAttribute('data-email') || '';
+    if(correo && email) correo.value = email;
+  };
+
+  const oldEnviarReporteCuentaCombo = typeof enviarReporteCuenta === 'function' ? enviarReporteCuenta : null;
+  if(oldEnviarReporteCuentaCombo){
+    enviarReporteCuenta = async function(){
+      try{
+        const selectedId = Number(document.getElementById('reporteCuentaSelect')?.value || 0);
+        const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
+        const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
+        const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
+        if(!selectedId && !correo) throw new Error('Selecciona una cuenta o escribe el correo con falla');
+        if(!explicacion) throw new Error('La explicación es obligatoria');
+
+        const data=await api('/api/account-reports',{
+          method:'POST',
+          body:JSON.stringify({
+            reported_account_id:selectedId || undefined,
+            email:correo,
+            issue_type:tipo,
+            description:explicacion
+          })
+        });
+
+        showMessage(data.message||'Reporte enviado');
+        const c=document.getElementById('reporteCorreo');
+        const e=document.getElementById('reporteExplicacion');
+        const s=document.getElementById('reporteCuentaSelect');
+        if(c)c.value='';
+        if(e)e.value='';
+        if(s)s.value='';
+        if(typeof loadMyAccountReports === 'function') await loadMyAccountReports();
+        if(typeof loadAccountReports === 'function') await loadAccountReports();
+      }catch(e){
+        showMessage(e.message || 'Error enviando reporte','error');
+      }
+    };
+    window.enviarReporteCuenta = enviarReporteCuenta;
+  }
+
+  async function chooseReplacementAccountFromInventory(reportId){
+    const data = await api('/api/admin/account-reports/'+reportId+'/replacement-options');
+    const options = data.options || [];
+    if(!options.length) throw new Error('No hay cuentas disponibles para esa plataforma. Captura una cuenta manual.');
+
+    const list = options.map((a,i)=>`${i+1}) ${a.platform || a.product_name} | ${a.account_email}${a.profile_name ? ' | Perfil: '+a.profile_name : ''}`).join('\n');
+    const answer = prompt('Selecciona el número de la cuenta disponible para reemplazo:\n\n'+list);
+    if(answer === null) throw new Error('Reemplazo cancelado');
+    const idx = Number(answer) - 1;
+    if(!Number.isInteger(idx) || idx < 0 || idx >= options.length) throw new Error('Opción inválida');
+    return options[idx].id;
+  }
+
+  const oldReplaceReportedAccountCombo = typeof replaceReportedAccount === 'function' ? replaceReportedAccount : null;
+  replaceReportedAccount = async function(reportId){
+    try{
+      const useManual = confirm(
+        '¿Quieres capturar manualmente la cuenta de reemplazo?\n\n' +
+        'Aceptar = Capturar correo, contraseña, perfil y PIN manualmente.\n' +
+        'Cancelar = Elegir una cuenta disponible del inventario de esa plataforma.'
+      );
+
+      let body = {};
+
+      if(useManual){
+        const account_email = prompt('Correo de la cuenta nueva:');
+        if(!account_email || !account_email.trim()) throw new Error('El correo de la cuenta es obligatorio');
+
+        const account_password = prompt('Contraseña de la cuenta nueva:');
+        if(!account_password || !account_password.trim()) throw new Error('La contraseña es obligatoria');
+
+        const profile_name = prompt('Perfil (opcional):', '') || '';
+        const profile_pin = prompt('PIN del perfil (opcional):', '') || '';
+        const access_url = prompt('URL para código/soporte (opcional):', '') || '';
+        const extra_data = prompt('Notas extra / datos adicionales (opcional):', '') || '';
+
+        body = {
+          manual: true,
+          account_email: account_email.trim(),
+          account_password: account_password.trim(),
+          profile_name: profile_name.trim(),
+          profile_pin: profile_pin.trim(),
+          access_url: access_url.trim(),
+          extra_data: extra_data.trim()
+        };
+      }else{
+        const replacementId = await chooseReplacementAccountFromInventory(reportId);
+        body = { manual:false, replacement_account_id: replacementId };
+      }
+
+      const data=await api('/api/admin/account-reports/'+reportId+'/replace',{
+        method:'POST',
+        body:JSON.stringify(body)
+      });
+
+      showMessage(data.message||'Cuenta reemplazada');
+      await loadAccountReports();
+      if(typeof loadMyAccountReports === 'function') await loadMyAccountReports();
+      if(typeof loadAdminOrders === 'function') await loadAdminOrders();
+      if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
+    }catch(e){
+      showMessage(e.message || 'Error reemplazando cuenta','error');
+    }
+  };
+  window.replaceReportedAccount = replaceReportedAccount;
+
+  const oldShowSectionComboReports = typeof showSection === 'function' ? showSection : null;
+  if(oldShowSectionComboReports){
+    showSection = function(name){
+      const result = oldShowSectionComboReports(name);
+      if(name === 'reports') setTimeout(()=>{ ensureReportableSelect(); loadReportableAccountsCombo(); },100);
+      return result;
+    };
+    window.showSection = showSection;
+  }
+
+  const oldLoadAppComboReports = typeof loadApp === 'function' ? loadApp : null;
+  if(oldLoadAppComboReports){
+    loadApp = async function(){
+      const result = await oldLoadAppComboReports();
+      setTimeout(ensureReportableSelect,500);
+      return result;
+    };
+    window.loadApp = loadApp;
+  }
+
+  setTimeout(ensureReportableSelect,800);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4721,3 +4894,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26 -->
 
 <!-- FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38 -->
+
+<!-- REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43 -->
