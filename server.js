@@ -663,25 +663,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_cost_snapshot NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
-  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
-
-  await pool.query(`
-    UPDATE orders
-    SET quantity = GREATEST(quantity, COALESCE(NULLIF(substring(product_name_snapshot from '\\s+x([0-9]+)$'), '')::int, 1))
-    WHERE product_name_snapshot ~* '\\s+x[0-9]+$'
-  `);
-
-
-  await pool.query(`
-    UPDATE orders
-    SET quantity = COALESCE(NULLIF(substring(product_name_snapshot from '\\s+x([0-9]+)$'), '')::int, 1)
-    WHERE product_name_snapshot ~* '\\s+x[0-9]+$'
-      AND (quantity IS NULL OR quantity <= 1)
-  `);
-
-  await pool.query(`UPDATE orders SET quantity = 1 WHERE quantity IS NULL OR quantity < 1`);
-
-
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS account_email VARCHAR(255)`);
@@ -1294,7 +1275,6 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const productId = req.params.productId;
     const userId = req.user.id;
     const orderData = safeJsonObject(req.body.order_data);
-    const requestedQuantity = 1; // Multicompra desactivada
 
     await client.query("BEGIN");
 
@@ -1312,10 +1292,16 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
+    if (Number(product.stock_enabled || 0) === 1 && Number(product.stock || 0) <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Producto agotado. No hay stock disponible." });
+    }
+
     const requiredFields = safeJsonArray(product.required_fields);
 
     for (const field of requiredFields) {
       const value = orderData[field];
+
       if (!value || String(value).trim() === "") {
         await client.query("ROLLBACK");
         return res.status(400).json({ error: `Debes ingresar: ${field}` });
@@ -1335,44 +1321,16 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const isComboProduct = String(product.product_type || '').toLowerCase() === 'combo_auto';
-    const unitPrice = isComboProduct
+    const price = isComboProduct
       ? await calculateComboPrice(client, user, product)
       : await getEffectiveProductPrice(client, user, product);
-
-    const productName = String(product.name || "").trim();
-    const productCategory = String(product.category || "").trim();
-    const productOwnerId = product.owner_admin_id || null;
-
-    const platformCountResult = await client.query(
-      `SELECT COUNT(*)::int AS total
-       FROM platform_accounts
-       WHERE (
-          lower(product_name) = lower($1)
-          OR lower(platform) = lower($1)
-          OR lower(platform) = lower($2)
-       )
-       AND (
-          ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-          OR owner_admin_id = $3
-       )`,
-      [productName, productCategory, productOwnerId]
-    );
-
-    const isPlatformProduct = !isComboProduct && Number(platformCountResult.rows[0]?.total || 0) > 0;
-    const quantity = 1; // Multicompra desactivada
-    const totalPrice = unitPrice * quantity;
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
 
-    if (Number(product.stock_enabled || 0) === 1 && Number(product.stock || 0) < quantity) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: `Producto agotado. Solo hay ${Number(product.stock || 0)} disponible(s).` });
-    }
-
-    if (chargeMode === "on_purchase" && balance < totalPrice) {
+    if (chargeMode === "on_purchase" && balance < price) {
       await client.query("ROLLBACK");
       return res.status(400).json({
-        error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y el total cuesta $${totalPrice.toFixed(2)}`
+        error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y el producto cuesta $${price.toFixed(2)}`
       });
     }
 
@@ -1395,37 +1353,25 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         assignedAccounts.push(account);
       }
 
-      let deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
-
-      deliveredAccountData += [
-        "",
-        "📌 Normas de uso:",
-        "✅ No editar datos de acceso",
-        "✅ No cambiar el nombre ni el código del perfil",
-        "✅ Uso exclusivo en un solo equipo",
-        "✅ No compartir el acceso con otros",
-        "",
-        "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
-      ].join("\n");
-
+      const deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
       const charged = chargeMode === "on_purchase" ? 1 : 0;
 
       if (charged === 1) {
-        await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [totalPrice, userId]);
+        await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [price, userId]);
       }
 
       const comboCost = comboItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost_price || 0)), 0);
 
       const orderInsertResult = await client.query(
         `INSERT INTO orders
-         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id, quantity)
-         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11, 1)
+         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
+         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11)
          RETURNING id`,
         [
           userId,
           productId,
-          totalPrice,
-          JSON.stringify({ ...orderData, quantity: 1 }),
+          price,
+          JSON.stringify(orderData),
           deliveredAccountData,
           charged,
           assignedAccounts[0]?.id || null,
@@ -1458,7 +1404,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         customerName: user.name || "Cliente",
         customerEmail: user.email || "Sin correo",
         productName: product.name,
-        amount: totalPrice,
+        amount: price,
         orderData
       });
 
@@ -1468,14 +1414,26 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       });
     }
 
-    let assignedAccounts = [];
+    const productName = String(product.name || "").trim();
+    const productCategory = String(product.category || "").trim();
+
+    const platformCountResult = await client.query(
+      `SELECT COUNT(*)::int AS total
+       FROM platform_accounts
+       WHERE lower(product_name) = lower($1)
+          OR lower(platform) = lower($1)
+          OR lower(platform) = lower($2)`,
+      [productName, productCategory]
+    );
+
+    const isPlatformProduct = Number(platformCountResult.rows[0]?.total || 0) > 0;
     let assignedAccount = null;
     let deliveredAccountData = "";
     let orderStatus = "accion_en_espera";
     let adminResponse = "";
 
     if (isPlatformProduct) {
-      const availableAccountsResult = await client.query(
+      const availableAccountResult = await client.query(
         `SELECT *
          FROM platform_accounts
          WHERE status = 'available'
@@ -1484,48 +1442,45 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
              OR lower(platform) = lower($1)
              OR lower(platform) = lower($2)
            )
-           AND (
-             ($4::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-             OR owner_admin_id = $4
-           )
          ORDER BY id ASC
-         LIMIT $3
+         LIMIT 1
          FOR UPDATE SKIP LOCKED`,
-        [productName, productCategory, quantity, productOwnerId]
+        [productName, productCategory]
       );
 
-      assignedAccounts = availableAccountsResult.rows || [];
+      assignedAccount = availableAccountResult.rows[0];
 
-      if (assignedAccounts.length < quantity) {
+      if (!assignedAccount) {
         await client.query("ROLLBACK");
         return res.status(400).json({
-          error: `No hay cuentas suficientes para esta plataforma. Solicitaste ${quantity} y hay ${assignedAccounts.length} disponible(s).`
+          error: "Por el momento no hay cuentas disponibles para esta plataforma. Intenta más tarde."
         });
       }
-
-      assignedAccount = assignedAccounts[0];
 
       const fechaEntrega = new Date();
       const fechaVencimiento = new Date(fechaEntrega);
       fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
 
-      const accountBlocks = assignedAccounts.map((account, idx) => [
-        `🎬 Cuenta de Streaming Entregada #${idx + 1}`,
-        "",
-        `📌 Plataforma: ${String(account.platform || productCategory || productName || "").toUpperCase()}`,
-        `📧 Correo: ${account.account_email || ""}`,
-        `🔐 Contraseña: ${account.account_password || ""}`,
-        `👤 Perfil: ${account.profile_name || "No aplica"}`,
-        `🔢 PIN de acceso: ${account.profile_pin || "No aplica"}`,
-        `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
-        `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
-        account.access_url ? `🔗 URL para código/soporte: ${account.access_url}` : null
-      ].filter(line => line !== null && line !== undefined).join("\n"));
+      function formatFechaMX(fecha) {
+        return fecha.toLocaleDateString("es-MX", {
+          timeZone: "America/Mexico_City",
+          day: "2-digit",
+          month: "2-digit",
+          year: "2-digit"
+        });
+      }
 
       deliveredAccountData = [
-        quantity > 1 ? `🎬 Compra múltiple de ${quantity} cuentas/perfiles` : "🎬 Cuenta de Streaming Entregada",
+        "🎬 Cuenta de Streaming Entregada",
         "",
-        accountBlocks.join("\n\n━━━━━━━━━━━━━━\n\n"),
+        `📌 Plataforma: ${String(assignedAccount.platform || productCategory || productName || "").toUpperCase()}`,
+        `📧 Correo: ${assignedAccount.account_email || ""}`,
+        `🔐 Contraseña: ${assignedAccount.account_password || ""}`,
+        `👤 Perfil: ${assignedAccount.profile_name || "No aplica"}`,
+        `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
+        `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
+        `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
+        assignedAccount.access_url ? `🔗 URL para código/soporte: ${assignedAccount.access_url}` : null,
         "",
         "📌 Normas de uso:",
         "✅ No editar datos de acceso",
@@ -1534,7 +1489,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         "✅ No compartir el acceso con otros",
         "",
         "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
-      ].join("\n");
+      ].filter(line => line !== null && line !== undefined).join("\n");
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
@@ -1545,51 +1500,48 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     if (charged === 1) {
       await client.query(
         `UPDATE users SET balance = balance - $1 WHERE id = $2`,
-        [totalPrice, userId]
+        [price, userId]
       );
     }
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id, quantity)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id`,
       [
         userId,
         productId,
-        totalPrice,
-        JSON.stringify({ ...orderData, quantity }),
+        price,
+        JSON.stringify(orderData),
         orderStatus,
         adminResponse,
         charged,
         0,
         assignedAccount ? assignedAccount.id : null,
         deliveredAccountData,
-        quantity > 1 ? `${product.name || productName} x${quantity}` : (product.name || productName),
+        product.name || productName,
         product.category || productCategory,
-        Math.max(0, Number(product.cost_price || 0)) * quantity,
-        viewerContext?.owner_admin_id || null,
-        quantity
+        Math.max(0, Number(product.cost_price || 0)),
+        viewerContext?.owner_admin_id || null
       ]
     );
 
     const newOrderId = orderInsertResult.rows[0].id;
 
-    if (assignedAccounts.length) {
-      for (const account of assignedAccounts) {
-        await client.query(
-          `UPDATE platform_accounts
-           SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
-           WHERE id = $3`,
-          [newOrderId, userId, account.id]
-        );
-      }
+    if (assignedAccount) {
+      await client.query(
+        `UPDATE platform_accounts
+         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+         WHERE id = $3`,
+        [newOrderId, userId, assignedAccount.id]
+      );
     }
 
     if (Number(product.stock_enabled || 0) === 1) {
       await client.query(
-        `UPDATE products SET stock = stock - $1 WHERE id = $2 AND stock >= $1`,
-        [quantity, productId]
+        `UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`,
+        [productId]
       );
     }
 
@@ -1600,22 +1552,20 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       customerName: user.name || "Cliente",
       customerEmail: user.email || "Sin correo",
       productName: product.name,
-      amount: totalPrice,
-      orderData: { ...orderData, quantity }
+      amount: price,
+      orderData
     });
 
     if (assignedAccount) {
       return res.json({
-        message: quantity > 1
-          ? `Compra realizada correctamente. Se entregaron ${quantity} cuentas/perfiles en Mis pedidos.`
-          : "Compra realizada correctamente. Tu cuenta fue entregada automáticamente en Mis pedidos.",
+        message: "Compra realizada correctamente. Tu cuenta fue entregada automáticamente en Mis pedidos.",
         delivered_account_data: deliveredAccountData
       });
     }
 
     if (charged === 1) {
       return res.json({
-        message: `Compra realizada correctamente. Se descontaron $${totalPrice.toFixed(2)} de tu saldo.`
+        message: `Compra realizada correctamente. Se descontaron $${price.toFixed(2)} de tu saldo.`
       });
     }
 
@@ -1623,7 +1573,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       message: "Pedido creado correctamente. El saldo se descontará cuando el admin marque Éxito."
     });
   } catch (err) {
-    try { await client.query("ROLLBACK"); } catch (_) {}
+    await client.query("ROLLBACK");
     console.error(err.message);
     res.status(500).json({ error: "Error creando pedido" });
   } finally {
@@ -2092,7 +2042,7 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
 
 
 // USUARIO: CUENTAS REPORTABLES
-// Permite que en un combo el usuario seleccione exactamente cuál cuenta/plataforma falló.
+// Permite seleccionar cuenta exacta cuando un pedido/combo trae varias plataformas.
 app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
@@ -2117,7 +2067,6 @@ app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
        ORDER BY o.id DESC, pa.id ASC`,
       [req.user.id]
     );
-
     res.json(result.rows);
   } catch (err) {
     console.error("Error cargando cuentas reportables:", err.message);
@@ -2307,7 +2256,6 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.reported_account_id,
         account_reports.refund_amount,
         account_reports.resolution_type,
-        account_reports.reported_platform,
         users.name AS customer_name,
         users.email AS customer_email,
         orders.amount AS order_amount,
@@ -2334,61 +2282,81 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
 
 
 
-
-// CUENTAS ENTREGADAS DE UN PEDIDO
-app.get("/api/orders/:orderId/platform-accounts", authMiddleware, async (req, res) => {
-  try {
-    const orderId = Number(req.params.orderId || 0);
-    const orderResult = await pool.query(`SELECT id, user_id FROM orders WHERE id=$1 LIMIT 1`, [orderId]);
-    const order = orderResult.rows[0];
-    if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
-
-    if (req.user.role !== "admin" && Number(order.user_id) !== Number(req.user.id)) {
-      return res.status(403).json({ error: "No autorizado" });
-    }
-
-    const result = await pool.query(
-      `SELECT id, platform, product_name, account_email, profile_name, profile_pin, status, delivered_at
-       FROM platform_accounts
-       WHERE assigned_order_id=$1
-       ORDER BY id ASC`,
-      [orderId]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error cuentas pedido:", err.message);
-    res.status(500).json({ error: "Error cargando cuentas del pedido" });
-  }
-});
-
 // CUENTAS DEL PEDIDO DE UN REPORTE
 app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.reportId || 0);
-    const r = await pool.query(`SELECT id, order_id, reported_account_id FROM account_reports WHERE id=$1 LIMIT 1`, [reportId]);
-    const report = r.rows[0];
-    if (!report || !report.order_id) return res.status(404).json({ error: "Reporte sin pedido ligado" });
+    const reportResult = await pool.query(
+      `SELECT id, order_id, reported_account_id
+       FROM account_reports
+       WHERE id = $1
+       LIMIT 1`,
+      [reportId]
+    );
 
-    const a = await pool.query(
+    const report = reportResult.rows[0];
+
+    if (report && Number(reported_account_id || 0) > 0) {
+      const selectedAccountResult = await client.query(
+        `SELECT *
+         FROM platform_accounts
+         WHERE id = $1
+           AND assigned_order_id = $2
+         LIMIT 1
+         FOR UPDATE`,
+        [Number(reported_account_id), report.order_id]
+      );
+
+      const selectedAccount = selectedAccountResult.rows[0];
+      if (!selectedAccount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "La cuenta seleccionada no pertenece a ese pedido/combo" });
+      }
+
+      report.reported_account_id = selectedAccount.id;
+      report.platform = selectedAccount.platform || report.platform;
+      report.account_product_name = selectedAccount.product_name || report.account_product_name;
+      report.resolved_owner_admin_id = selectedAccount.owner_admin_id || report.resolved_owner_admin_id;
+
+      await client.query(
+        `UPDATE account_reports
+         SET reported_account_id = $1,
+             reported_platform = $2,
+             owner_admin_id = COALESCE(owner_admin_id, $3)
+         WHERE id = $4`,
+        [selectedAccount.id, selectedAccount.platform || selectedAccount.product_name || "", selectedAccount.owner_admin_id || null, reportId]
+      );
+    }
+
+    if (!report || !report.order_id) {
+      return res.status(404).json({ error: "Reporte sin pedido ligado" });
+    }
+
+    const accountsResult = await pool.query(
       `SELECT id, platform, product_name, account_email, profile_name, profile_pin, status, delivered_at
        FROM platform_accounts
-       WHERE assigned_order_id=$1
+       WHERE assigned_order_id = $1
        ORDER BY id ASC`,
       [report.order_id]
     );
-    res.json({ report_id: report.id, order_id: report.order_id, reported_account_id: report.reported_account_id, accounts: a.rows });
+
+    res.json({
+      report_id: report.id,
+      order_id: report.order_id,
+      reported_account_id: report.reported_account_id,
+      accounts: accountsResult.rows
+    });
   } catch (err) {
-    console.error("Error cuentas reporte:", err.message);
+    console.error("Error cargando cuentas del reporte:", err.message);
     res.status(500).json({ error: "Error cargando cuentas del reporte" });
   }
 });
 
-
-// ADMIN: OPCIONES DE REEMPLAZO PARA REPORTE
-// Trae cuentas disponibles de la misma plataforma/cuenta reportada.
+// OPCIONES DE REEMPLAZO PARA REPORTE
 app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const reportId = req.params.reportId;
+    const selectedAccountId = Number(req.query.reported_account_id || 0);
 
     const reportResult = await pool.query(
       `SELECT ar.*, o.owner_admin_id AS order_owner_admin_id,
@@ -2398,34 +2366,13 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        JOIN products p ON p.id = o.product_id
-       LEFT JOIN platform_accounts pa ON pa.id = ar.reported_account_id
+       LEFT JOIN platform_accounts pa ON pa.id = COALESCE(NULLIF($2,0), ar.reported_account_id)
        WHERE ar.id = $1
        LIMIT 1`,
-      [reportId]
+      [reportId, selectedAccountId]
     );
 
     const report = reportResult.rows[0];
-
-    if (report && Number(reported_account_id || 0) > 0) {
-      const sel = await client.query(
-        `SELECT * FROM platform_accounts WHERE id=$1 AND assigned_order_id=$2 LIMIT 1 FOR UPDATE`,
-        [Number(reported_account_id), report.order_id]
-      );
-      const selectedAccount = sel.rows[0];
-      if (!selectedAccount) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({ error: "La cuenta seleccionada no pertenece a ese pedido/combo" });
-      }
-      report.reported_account_id = selectedAccount.id;
-      report.platform = selectedAccount.platform || report.platform;
-      report.account_product_name = selectedAccount.product_name || report.account_product_name;
-      report.resolved_owner_admin_id = selectedAccount.owner_admin_id || report.resolved_owner_admin_id;
-      await client.query(
-        `UPDATE account_reports SET reported_account_id=$1, reported_platform=$2, owner_admin_id=COALESCE(owner_admin_id,$3) WHERE id=$4`,
-        [selectedAccount.id, selectedAccount.platform || selectedAccount.product_name || "", selectedAccount.owner_admin_id || null, reportId]
-      );
-    }
-
     if (!report) return res.status(404).json({ error: "Reporte no encontrado" });
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
@@ -2438,33 +2385,23 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
          AND (
            lower(platform) = lower($1)
            OR lower(product_name) = lower($1)
-           OR lower(platform) = lower($2)
-           OR lower(product_name) = lower($2)
            OR lower(platform) LIKE '%' || lower($1) || '%'
            OR lower($1) LIKE '%' || lower(platform) || '%'
            OR lower(product_name) LIKE '%' || lower($1) || '%'
            OR lower($1) LIKE '%' || lower(product_name) || '%'
-           OR lower(platform) LIKE '%' || lower($2) || '%'
-           OR lower($2) LIKE '%' || lower(platform) || '%'
-           OR lower(product_name) LIKE '%' || lower($2) || '%'
-           OR lower($2) LIKE '%' || lower(product_name) || '%'
          )
          AND (
-           owner_admin_id = $3
+           owner_admin_id = $2
            OR owner_admin_id IS NULL
            OR owner_admin_id = 0
-           OR $3::int IS NULL
+           OR $2::int IS NULL
          )
        ORDER BY id ASC
        LIMIT 30`,
-      [platform, report.product_name || "", ownerAdminId]
+      [platform, ownerAdminId]
     );
 
-    res.json({
-      report_id: reportId,
-      platform,
-      options: optionsResult.rows
-    });
+    res.json({ report_id: reportId, platform, options: optionsResult.rows });
   } catch (err) {
     console.error("Error cargando opciones de reemplazo:", err.message);
     res.status(500).json({ error: "Error cargando opciones de reemplazo" });
@@ -2487,8 +2424,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       profile_pin,
       access_url,
       extra_data,
-      replacement_account_id,
-      reported_account_id
+      reported_account_id,
+      replacement_account_id
     } = req.body || {};
 
     await client.query("BEGIN");
@@ -2525,7 +2462,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
     const replacementProductName = report.account_product_name || report.product_name || "";
-    const replacementPlatform = report.platform || report.account_product_name || report.reported_platform || report.product_category || report.product_name || "";
+    const replacementPlatform = report.platform || report.product_category || report.product_name || "";
 
     let newAccount = null;
 
@@ -2570,43 +2507,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
            WHERE id = $1
              AND status = 'available'
              AND (
-               lower(product_name) = lower($2)
-               OR lower(platform) = lower($2)
-               OR lower(platform) = lower($3)
-               OR lower(product_name) = lower($3)
-               OR lower(platform) LIKE '%' || lower($2) || '%'
-               OR lower($2) LIKE '%' || lower(platform) || '%'
-               OR lower(product_name) LIKE '%' || lower($2) || '%'
-               OR lower($2) LIKE '%' || lower(product_name) || '%'
-               OR lower(platform) LIKE '%' || lower($3) || '%'
-               OR lower($3) LIKE '%' || lower(platform) || '%'
-               OR lower(product_name) LIKE '%' || lower($3) || '%'
-               OR lower($3) LIKE '%' || lower(product_name) || '%'
-             )
-             AND (
-               owner_admin_id = $4
-               OR owner_admin_id IS NULL
-               OR owner_admin_id = 0
-               OR $4::int IS NULL
-             )
-           LIMIT 1
-           FOR UPDATE`,
-          [Number(replacement_account_id), replacementProductName, replacementPlatform, ownerAdminId]
-        );
-      } else {
-        availableResult = await client.query(
-          `SELECT *
-           FROM platform_accounts
-           WHERE status = 'available'
-             AND (
-               lower(product_name) = lower($1)
-               OR lower(platform) = lower($1)
-               OR lower(platform) = lower($2)
+               lower(platform) = lower($2)
                OR lower(product_name) = lower($2)
-               OR lower(platform) LIKE '%' || lower($1) || '%'
-               OR lower($1) LIKE '%' || lower(platform) || '%'
-               OR lower(product_name) LIKE '%' || lower($1) || '%'
-               OR lower($1) LIKE '%' || lower(product_name) || '%'
                OR lower(platform) LIKE '%' || lower($2) || '%'
                OR lower($2) LIKE '%' || lower(platform) || '%'
                OR lower(product_name) LIKE '%' || lower($2) || '%'
@@ -2618,10 +2520,33 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
                OR owner_admin_id = 0
                OR $3::int IS NULL
              )
+           LIMIT 1
+           FOR UPDATE`,
+          [Number(replacement_account_id), replacementPlatform, ownerAdminId]
+        );
+      } else {
+        availableResult = await client.query(
+          `SELECT *
+           FROM platform_accounts
+           WHERE status = 'available'
+             AND (
+               lower(platform) = lower($1)
+               OR lower(product_name) = lower($1)
+               OR lower(platform) LIKE '%' || lower($1) || '%'
+               OR lower($1) LIKE '%' || lower(platform) || '%'
+               OR lower(product_name) LIKE '%' || lower($1) || '%'
+               OR lower($1) LIKE '%' || lower(product_name) || '%'
+             )
+             AND (
+               owner_admin_id = $2
+               OR owner_admin_id IS NULL
+               OR owner_admin_id = 0
+               OR $2::int IS NULL
+             )
            ORDER BY id ASC
            LIMIT 1
            FOR UPDATE SKIP LOCKED`,
-          [replacementProductName, replacementPlatform, ownerAdminId]
+          [replacementPlatform, ownerAdminId]
         );
       }
 
@@ -4173,26 +4098,4 @@ initDatabase()
 
 // REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28
 
-// SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36
-
-// FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09
-// Nota: se evita castear order_data::jsonb en todos los reportes para no romper cuando haya order_data antiguo.
-// La cantidad queda guardada en order_data y el frontend corrige visualmente productos tipo "x2".
-
-// FIX DEFINITIVO CANTIDAD CON COLUMNA ORDERS.QUANTITY - 2026-06-08 23:42:29
-
-// FIX ERROR ALIAS O EN REPORTES - 2026-06-08 23:56:44
-
-// FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26
-
-// FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38
-
-// REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43
-
-// FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40
-
-// FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00
-
-// FIX TIENDA NO ABRE PRODUCTOS - 2026-06-09 02:00:33
-
-// FIX TIENDA SE CIERRA AL ABRIR - 2026-06-09 02:06:40
+// FIX ESTABLE TIENDA COMBO REPORTES - 2026-06-09 02:15:25

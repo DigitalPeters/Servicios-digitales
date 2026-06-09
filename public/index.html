@@ -4321,446 +4321,101 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 })();
 
 
+
 // ===============================
-// SUMADOR DE PRODUCTOS / PERFILES EN TIENDA
-// Permite comprar varias cuentas de una misma plataforma en un solo pedido.
+// FIX ESTABLE: COMBOS REPORTABLES SIN ROMPER TIENDA - 2026-06-09 02:15:25
+// No modifica toggleProduct ni el despliegue de tienda.
 // ===============================
 (function(){
-  function isStreamingProductForQuantity(product){
-    const type = String(product?.product_type || '').toLowerCase();
-    const cat = String(product?.category || '').toLowerCase();
-    const name = String(product?.name || '').toLowerCase();
-    return type === 'streaming_auto' || cat.includes('plataforma') || cat.includes('perfil') || name.includes('perfil');
+  // Ocultar cualquier input de cantidad si quedó de versiones anteriores, sin tocar contenedores.
+  function removeMultiQtyUI(){
+    document.querySelectorAll('[id^="qty-"]').forEach(input => {
+      input.value = 1;
+      input.style.display = 'none';
+      const label = input.previousElementSibling;
+      if(label && (label.textContent||'').toLowerCase().includes('cantidad')) label.style.display='none';
+    });
+    document.querySelectorAll('.small-text').forEach(el => {
+      const t=(el.textContent||'').toLowerCase();
+      if(t.includes('varias cuentas') || t.includes('varios perfiles') || t.includes('misma plataforma')) el.style.display='none';
+    });
   }
 
-  window.renderProductRow = function(product){
-    const stockEnabled=Number(product.stock_enabled||0)===1;
-    const stock=Number(product.stock||0);
-    const soldOut=stockEnabled&&stock<=0;
-    const showQty=isStreamingProductForQuantity(product);
-    const maxAttr=stockEnabled ? `max="${Math.max(1, stock)}"` : '';
-    const quantityBox = showQty ? `
-      <label class="field-label">Cantidad de perfiles/cuentas</label>
-      <input id="qty-${product.id}" type="number" min="1" ${maxAttr} value="1" oninput="updateProductTotal(${product.id})" />
-      <p class="small-text">Puedes comprar varias cuentas/perfiles de esta misma plataforma en un solo pedido.</p>
-      <div class="order-data">
-        <b>Total estimado:</b> $<span id="total-${product.id}">${formatMoney(product.price)}</span>
-      </div>
-    ` : '';
-
-    return `<div class="product-row" data-product-id="${product.id}">
-      <div class="product-header" onclick="toggleProduct(${product.id})">
-        <div><div class="product-name">${safeText(product.name)}</div><span class="chip">${safeText(product.category||'Otros')}</span></div>
-        <div><div class="price">$${formatMoney(product.price)}</div>${stockEnabled?`<div class="stock ${soldOut?'out':''}">${soldOut?'Sin stock':'Stock: '+stock}</div>`:''}</div>
-        <div>⌄</div>
-      </div>
-      <div id="product-details-${product.id}" class="product-details">
-        <p class="product-description">${safeText(product.description||'')}</p>
-        <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
-        ${quantityBox}
-        ${renderProductInputs(product)}
-        <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut?'disabled':''}>${soldOut?'Sin stock':'Comprar'}</button>
-      </div>
-    </div>`;
-  };
-
-  window.updateProductTotal = function(productId){
-    const product=allProducts.find(p=>Number(p.id)===Number(productId));
-    if(!product)return;
-    const qtyInput=document.getElementById(`qty-${productId}`);
-    const qty=Math.max(1, Number(qtyInput?.value || 1));
-    const totalEl=document.getElementById(`total-${productId}`);
-    if(totalEl)totalEl.textContent=formatMoney(Number(product.price||0)*qty);
-  };
-
+  // Compra individual; no cambia el abrir/cerrar del producto.
   window.buyProduct = async function(productId){
-    try{
-      const product=allProducts.find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
-      if(!product)throw new Error('Producto no encontrado');
+    try {
+      const product = (window.allProducts || []).find(p=>Number(p.id)===Number(productId)) ||
+        await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
+      if(!product) throw new Error('Producto no encontrado');
 
-      const qtyInput=document.getElementById(`qty-${productId}`);
-      const quantity=isStreamingProductForQuantity(product) ? Math.max(1, Number(qtyInput?.value || 1)) : 1;
-      const total=Number(product.price||0)*quantity;
+      if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
 
-      const confirmText = quantity > 1
-        ? `Vas a comprar: ${product.name}\nCantidad: ${quantity}\nTotal: $${formatMoney(total)}\n\nLas cuentas se entregarán juntas y los términos aparecerán una sola vez al final.\n¿Confirmas la compra?`
-        : `Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`;
-
-      if(!confirm(confirmText))return;
-
-      const fields=parseJsonArray(product.required_fields);
-      const order_data={};
-      fields.forEach(f=>{
+      const fields = parseJsonArray(product.required_fields);
+      const order_data = {};
+      fields.forEach(f => {
         const input=document.getElementById(`field-${productId}-${f}`);
         order_data[f]=input?input.value.trim():'';
       });
 
-      const data=await api('/api/buy/'+productId,{
+      const data = await api('/api/buy/'+productId, {
         method:'POST',
-        body:JSON.stringify({order_data, quantity})
+        body:JSON.stringify({order_data, quantity:1})
       });
 
-      showMessage(data.message||'Compra realizada');
+      showMessage(data.message || 'Compra realizada');
       await loadApp();
       showSection('orders');
-    }catch(e){
-      showMessage(e.message,'error');
+    } catch(e) {
+      showMessage(e.message || 'Error comprando producto','error');
     }
   };
 
-  const oldFilterProductsQty = typeof filterProducts === 'function' ? filterProducts : null;
-  if(oldFilterProductsQty){
-    filterProducts = function(){
-      const result = oldFilterProductsQty();
-      setTimeout(()=>document.querySelectorAll('[id^="qty-"]').forEach(input=>{
-        const id=String(input.id).replace('qty-','');
-        if(typeof updateProductTotal==='function') updateProductTotal(id);
-      }),50);
-      return result;
-    };
-    window.filterProducts=filterProducts;
-  }
-})();
-
-
-// ===============================
-// FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09
-// Evita romper SQL y corrige conteo visual cuando producto viene como "Nombre x2".
-// ===============================
-(function(){
-  function extractQtyFromName(name){
-    const m = String(name || '').match(/\s+x(\d+)$/i);
-    return m ? Math.max(1, Number(m[1] || 1)) : 1;
-  }
-  function cleanQtyName(name){
-    return String(name || '').replace(/\s+x\d+$/i, '').trim();
-  }
-  window.extractQtyFromName = extractQtyFromName;
-  window.cleanQtyName = cleanQtyName;
-
-  function mergeTopProductsQty(products){
-    const map = new Map();
-    (products || []).forEach(p => {
-      const rawName = p.product_name || p.name || p.product || '';
-      const cleanName = cleanQtyName(rawName);
-      const qty = Number(p.orders ?? p.count ?? p.total ?? 0) || extractQtyFromName(rawName);
-      const key = cleanName.toLowerCase();
-      const prev = map.get(key) || {...p, product_name: cleanName, name: cleanName, orders: 0};
-      prev.orders = Number(prev.orders || 0) + qty;
-      prev.count = Number(prev.orders || 0);
-      prev.total = Number(prev.orders || 0);
-      map.set(key, prev);
-    });
-    return Array.from(map.values());
-  }
-  window.mergeTopProductsQty = mergeTopProductsQty;
-
-  const oldRenderDashboardChartsQtySafe = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
-  if (oldRenderDashboardChartsQtySafe) {
-    renderDashboardCharts = function(data){
-      if (data && Array.isArray(data.top_products)) {
-        data.top_products = mergeTopProductsQty(data.top_products);
-      }
-      return oldRenderDashboardChartsQtySafe(data);
-    };
-    window.renderDashboardCharts = renderDashboardCharts;
-  }
-
-  const oldLoadSalesReportQtySafe = typeof loadSalesReport === 'function' ? loadSalesReport : null;
-  if (oldLoadSalesReportQtySafe) {
-    loadSalesReport = async function(forceToday=false){
-      try {
-        return await oldLoadSalesReportQtySafe(forceToday);
-      } catch(e) {
-        console.warn('Reporte de ventas falló, revisa endpoint:', e);
-        showMessage(e.message || 'Error generando reporte de ventas', 'error');
-      }
-    };
-    window.loadSalesReport = loadSalesReport;
-  }
-})();
-
-
-// ===============================
-// FIX DEFINITIVO CANTIDAD REPORTES - 2026-06-08 23:42:29
-// Si un pedido trae quantity=2, los gráficos/reportes muestran 2 vendidos.
-// ===============================
-(function(){
-  function normalizeTopProductCounts(data){
-    if (!data || !Array.isArray(data.top_products)) return data;
-    data.top_products = data.top_products.map(p => {
-      const name = String(p.product_name || p.name || '');
-      const qtyFromName = (name.match(/\s+x(\d+)$/i) || [])[1];
-      const reported = Number(p.orders ?? p.count ?? p.total ?? 0) || 0;
-      const qty = Math.max(reported, Number(qtyFromName || 0) || reported || 1);
-      return {...p, orders: qty, count: qty, total: qty};
-    });
-    return data;
-  }
-
-  const oldRenderDashboardChartsQuantityFinal = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
-  if (oldRenderDashboardChartsQuantityFinal) {
-    renderDashboardCharts = function(data){
-      return oldRenderDashboardChartsQuantityFinal(normalizeTopProductCounts(data));
-    };
-    window.renderDashboardCharts = renderDashboardCharts;
-  }
-})();
-
-
-// ===============================
-// FIX FUSIONAR PRODUCTOS X2 - 2026-06-09 00:05:26
-// Netflix perfil x2 debe sumarse como 2 dentro de Netflix perfil.
-// ===============================
-(function(){
-  function baseProductNameForQty(name){
-    return String(name || '').replace(/\s+x\d+$/i, '').trim();
-  }
-  function qtyFromProductName(name){
-    const m = String(name || '').match(/\s+x(\d+)$/i);
-    return m ? Math.max(1, Number(m[1] || 1)) : 1;
-  }
-  function normalizeTopProductsXQty(list){
-    const map = new Map();
-    (list || []).forEach(p => {
-      const raw = p.product_name || p.name || p.product || '';
-      const base = baseProductNameForQty(raw);
-      const reported = Number(p.orders ?? p.count ?? p.total ?? p.value ?? 0) || 0;
-      const qty = Math.max(reported, qtyFromProductName(raw));
-      const key = base.toLowerCase();
-      const prev = map.get(key) || {...p, product_name: base, name: base, orders: 0, count: 0, total: 0, value: 0};
-      prev.orders = Number(prev.orders || 0) + qty;
-      prev.count = prev.orders;
-      prev.total = prev.orders;
-      prev.value = prev.orders;
-      map.set(key, prev);
-    });
-    return Array.from(map.values()).sort((a,b)=>Number(b.orders||0)-Number(a.orders||0));
-  }
-  window.normalizeTopProductsXQty = normalizeTopProductsXQty;
-
-  const oldRenderDashboardChartsX2Final = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
-  if (oldRenderDashboardChartsX2Final) {
-    renderDashboardCharts = function(data){
-      if (data && Array.isArray(data.top_products)) {
-        data.top_products = normalizeTopProductsXQty(data.top_products);
-      }
-      return oldRenderDashboardChartsX2Final(data);
-    };
-    window.renderDashboardCharts = renderDashboardCharts;
-  }
-
-  const oldRenderTopProductsChartX2Final = typeof renderTopProductsChart === 'function' ? renderTopProductsChart : null;
-  if (oldRenderTopProductsChartX2Final) {
-    renderTopProductsChart = function(list){
-      return oldRenderTopProductsChartX2Final(normalizeTopProductsXQty(list));
-    };
-    window.renderTopProductsChart = renderTopProductsChart;
-  }
-})();
-
-
-// ===============================
-// FIX VISUAL DEFINITIVO X2 - 2026-06-09 00:12:38
-// Fusiona en pantalla "Netflix perfil x2" dentro de "Netflix perfil".
-// ===============================
-(function(){
-  function baseNameX2(name){
-    return String(name || '').replace(/\s+x\d+$/i, '').trim();
-  }
-
-  function qtyFromNameX2(name, current){
-    const m = String(name || '').match(/\s+x(\d+)$/i);
-    const qtyByName = m ? Math.max(1, Number(m[1] || 1)) : 1;
-    const currentNum = Number(current || 0) || 0;
-    return Math.max(qtyByName, currentNum || qtyByName);
-  }
-
-  function fixVisibleTopProductsX2(){
-    const cards = Array.from(document.querySelectorAll('.panel, .dashboard-chart-card, .dash-card, div'));
-    const card = cards.find(el => {
-      const txt = (el.innerText || '').toLowerCase();
-      return txt.includes('productos más vendidos') && (txt.includes('netflix perfil x2') || txt.includes(' x2'));
-    });
-    if (!card) return;
-
-    const text = card.innerText || '';
-    if (!/\sx\d+/i.test(text)) return;
-
-    // Buscar filas/legend items visibles. El diseño usa puntos + nombre + número, así que usamos lectura de texto.
-    const lines = text.split('\n').map(x => x.trim()).filter(Boolean);
-    const startIndex = lines.findIndex(l => l.toLowerCase().includes('productos más vendidos'));
-    const dataLines = lines.slice(Math.max(0, startIndex + 1)).filter(l => {
-      const low = l.toLowerCase();
-      return !low.includes('productos con más') && !low.includes('ver reporte') && !low.includes('pedidos');
-    });
-
-    const map = new Map();
-    for (let i = 0; i < dataLines.length; i++) {
-      const line = dataLines[i];
-      // Si la línea termina en número: "Netflix perfil x2 1"
-      const m = line.match(/^(.*?)(?:\s+)(\d+)$/);
-      if (!m) continue;
-      const rawName = m[1].trim();
-      const rawCount = Number(m[2] || 0);
-      if (!rawName) continue;
-      const base = baseNameX2(rawName);
-      const qty = qtyFromNameX2(rawName, rawCount);
-      const key = base.toLowerCase();
-      map.set(key, { name: base, count: (map.get(key)?.count || 0) + qty });
-    }
-
-    if (!map.size) return;
-    const merged = Array.from(map.values()).sort((a,b)=>b.count-a.count);
-    const total = merged.reduce((s,x)=>s+Number(x.count||0),0);
-
-    // Ubicar contenedor de gráfica/lista conocido.
-    const knownBox = document.getElementById('dashboardTopProductsChart') || card;
-    if (!knownBox) return;
-
-    const colors = ['#f00662','#17135a','#2f6bea','#7c3aed','#06b6d4','#f59e0b'];
-    const rows = merged.map((p,idx)=>`
-      <div class="legend-item">
-        <span class="legend-dot" style="background:${colors[idx % colors.length]}"></span>
-        <span class="legend-name">${p.name}</span>
-        <span class="legend-value">${p.count}</span>
-      </div>
-    `).join('');
-
-    const gradient = merged.length ? merged.map((p,idx)=>{
-      const start = merged.slice(0,idx).reduce((s,x)=>s+(x.count/total)*360,0);
-      const end = start + (p.count/total)*360;
-      return `${colors[idx % colors.length]} ${start}deg ${end}deg`;
-    }).join(',') : '#e5e7eb 0deg 360deg';
-
-    knownBox.innerHTML = `
-      <div class="donut-summary">
-        <div class="donut" style="background:conic-gradient(${gradient})">
-          <div class="donut-center">${total}<span>pedidos</span></div>
-        </div>
-        <div class="legend-list">${rows}</div>
-      </div>
-    `;
-  }
-
-  // También interceptar datos antes de pintar, por si existen estas funciones.
-  function normalizeTopProductsX2(list){
-    const map = new Map();
-    (list || []).forEach(p => {
-      const raw = p.product_name || p.name || p.product || '';
-      const base = baseNameX2(raw);
-      const current = Number(p.orders ?? p.count ?? p.total ?? p.value ?? 0) || 0;
-      const qty = qtyFromNameX2(raw, current);
-      const key = base.toLowerCase();
-      const prev = map.get(key) || {...p, product_name: base, name: base, orders: 0, count: 0, total: 0, value: 0};
-      prev.orders = Number(prev.orders || 0) + qty;
-      prev.count = prev.orders;
-      prev.total = prev.orders;
-      prev.value = prev.orders;
-      map.set(key, prev);
-    });
-    return Array.from(map.values()).sort((a,b)=>Number(b.orders||0)-Number(a.orders||0));
-  }
-  window.normalizeTopProductsX2 = normalizeTopProductsX2;
-
-  const oldRenderDashboardChartsX2Visible = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
-  if (oldRenderDashboardChartsX2Visible) {
-    renderDashboardCharts = function(data){
-      if (data && Array.isArray(data.top_products)) data.top_products = normalizeTopProductsX2(data.top_products);
-      const result = oldRenderDashboardChartsX2Visible(data);
-      setTimeout(fixVisibleTopProductsX2, 80);
-      setTimeout(fixVisibleTopProductsX2, 500);
-      return result;
-    };
-    window.renderDashboardCharts = renderDashboardCharts;
-  }
-
-  const oldLoadDashboardStatsX2Visible = typeof loadDashboardStats === 'function' ? loadDashboardStats : null;
-  if (oldLoadDashboardStatsX2Visible) {
-    loadDashboardStats = async function(){
-      const result = await oldLoadDashboardStatsX2Visible();
-      setTimeout(fixVisibleTopProductsX2, 100);
-      setTimeout(fixVisibleTopProductsX2, 700);
-      return result;
-    };
-    window.loadDashboardStats = loadDashboardStats;
-  }
-
-  const oldLoadAppX2Visible = typeof loadApp === 'function' ? loadApp : null;
-  if (oldLoadAppX2Visible) {
-    loadApp = async function(){
-      const result = await oldLoadAppX2Visible();
-      setTimeout(fixVisibleTopProductsX2, 300);
-      setTimeout(fixVisibleTopProductsX2, 1200);
-      return result;
-    };
-    window.loadApp = loadApp;
-  }
-
-  setInterval(fixVisibleTopProductsX2, 2500);
-  setTimeout(fixVisibleTopProductsX2, 500);
-  setTimeout(fixVisibleTopProductsX2, 1500);
-})();
-
-
-// ===============================
-// REPORTAR FALLA DE CUENTA DE COMBO
-// El usuario puede seleccionar qué cuenta del combo falló.
-// El admin puede reemplazar manual o elegir una disponible de esa plataforma.
-// ===============================
-(function(){
-  async function loadReportableAccountsCombo(){
-    try{
-      const select = document.getElementById('reporteCuentaSelect');
+  async function loadReportableAccounts(){
+    try {
+      const select=document.getElementById('reporteCuentaSelect');
       if(!select) return;
-      const accounts = await api('/api/reportable-accounts');
-      select.innerHTML = '<option value="">Selecciona cuenta entregada o escribe el correo abajo</option>' + (accounts||[]).map(a=>{
-        const label = `#${a.order_id} | ${a.platform || a.product_name || 'Plataforma'} | ${a.account_email || ''}${a.profile_name ? ' | Perfil: '+a.profile_name : ''}`;
+      const accounts=await api('/api/reportable-accounts');
+      select.innerHTML='<option value="">Selecciona cuenta/plataforma entregada</option>'+(accounts||[]).map(a=>{
+        const label=`Pedido #${a.order_id} | ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`;
         return `<option value="${a.id}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
       }).join('');
-    }catch(e){
+    } catch(e) {
       console.warn('No se pudieron cargar cuentas reportables', e);
     }
   }
 
-  function ensureReportableSelect(){
-    const reportSection = document.getElementById('section-reports');
-    if(!reportSection || document.getElementById('reporteCuentaSelect')) return;
-    const correo = document.getElementById('reporteCorreo');
-    if(!correo) return;
-
-    const wrap = document.createElement('div');
-    wrap.innerHTML = `
-      <label class="field-label">Selecciona la cuenta entregada</label>
-      <select id="reporteCuentaSelect" onchange="onSelectReportableAccountCombo()">
+  function ensureReportSelect(){
+    const correo=document.getElementById('reporteCorreo');
+    if(!correo || document.getElementById('reporteCuentaSelect')) return;
+    const div=document.createElement('div');
+    div.innerHTML=`<label class="field-label">Cuenta/plataforma que falló</label>
+      <select id="reporteCuentaSelect" onchange="onSelectReportAccountStable()">
         <option value="">Cargando cuentas...</option>
       </select>
-      <p class="small-text">Si compraste un combo, selecciona exactamente la plataforma/cuenta que falló.</p>
-    `;
-    correo.parentNode.insertBefore(wrap, correo.previousSibling);
-    loadReportableAccountsCombo();
+      <p class="small-text">Si fue un combo, selecciona exactamente la plataforma/cuenta que falló.</p>`;
+    correo.parentNode.insertBefore(div, correo);
+    loadReportableAccounts();
   }
 
-  window.onSelectReportableAccountCombo = function(){
-    const select = document.getElementById('reporteCuentaSelect');
-    const correo = document.getElementById('reporteCorreo');
-    const opt = select?.selectedOptions?.[0];
-    const email = opt?.getAttribute('data-email') || '';
-    if(correo && email) correo.value = email;
+  window.onSelectReportAccountStable=function(){
+    const opt=document.getElementById('reporteCuentaSelect')?.selectedOptions?.[0];
+    const email=opt?.getAttribute('data-email')||'';
+    const correo=document.getElementById('reporteCorreo');
+    if(correo && email) correo.value=email;
   };
 
-  const oldEnviarReporteCuentaCombo = typeof enviarReporteCuenta === 'function' ? enviarReporteCuenta : null;
-  if(oldEnviarReporteCuentaCombo){
-    enviarReporteCuenta = async function(){
-      try{
-        const selectedId = Number(document.getElementById('reporteCuentaSelect')?.value || 0);
+  if(typeof enviarReporteCuenta==='function'){
+    window.enviarReporteCuenta=async function(){
+      try {
+        const selectedId=Number(document.getElementById('reporteCuentaSelect')?.value||0);
         const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
         const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
         const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
-        if(!selectedId && !correo) throw new Error('Selecciona una cuenta o escribe el correo con falla');
+
+        if(!selectedId && !correo) throw new Error('Selecciona la cuenta del combo o escribe el correo con falla');
         if(!explicacion) throw new Error('La explicación es obligatoria');
 
-        const data=await api('/api/account-reports',{
+        const data=await api('/api/account-reports', {
           method:'POST',
           body:JSON.stringify({
             reported_account_id:selectedId || undefined,
@@ -4770,562 +4425,142 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
           })
         });
 
-        showMessage(data.message||'Reporte enviado');
-        const c=document.getElementById('reporteCorreo');
-        const e=document.getElementById('reporteExplicacion');
-        const s=document.getElementById('reporteCuentaSelect');
-        if(c)c.value='';
-        if(e)e.value='';
-        if(s)s.value='';
-        if(typeof loadMyAccountReports === 'function') await loadMyAccountReports();
-        if(typeof loadAccountReports === 'function') await loadAccountReports();
-      }catch(e){
+        showMessage(data.message || 'Reporte enviado');
+        if(document.getElementById('reporteCuentaSelect')) document.getElementById('reporteCuentaSelect').value='';
+        if(document.getElementById('reporteCorreo')) document.getElementById('reporteCorreo').value='';
+        if(document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value='';
+        if(typeof loadMyAccountReports==='function') await loadMyAccountReports();
+      } catch(e) {
         showMessage(e.message || 'Error enviando reporte','error');
       }
     };
-    window.enviarReporteCuenta = enviarReporteCuenta;
+    enviarReporteCuenta=window.enviarReporteCuenta;
   }
 
-  async function chooseReplacementAccountFromInventory(reportId){
-    const data = await api('/api/admin/account-reports/'+reportId+'/replacement-options');
-    const options = data.options || [];
-    if(!options.length) throw new Error('No hay cuentas disponibles para esa plataforma. Captura una cuenta manual.');
+  async function chooseComboAccount(reportId){
+    const data=await api('/api/admin/account-reports/'+reportId+'/order-accounts');
+    const accounts=data.accounts||[];
+    if(accounts.length<=1) return accounts[0]?.id || 0;
+    const list=accounts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | Estado: ${a.status}`).join('\n');
+    const ans=prompt('Selecciona qué cuenta/plataforma del combo será reemplazada:\n\n'+list);
+    if(ans===null) throw new Error('Reemplazo cancelado');
+    const idx=Number(ans)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=accounts.length) throw new Error('Opción inválida');
+    return accounts[idx].id;
+  }
 
-    const list = options.map((a,i)=>`${i+1}) ${a.platform || a.product_name} | ${a.account_email}${a.profile_name ? ' | Perfil: '+a.profile_name : ''}`).join('\n');
-    const answer = prompt('Selecciona el número de la cuenta disponible para reemplazo:\n\n'+list);
-    if(answer === null) throw new Error('Reemplazo cancelado');
-    const idx = Number(answer) - 1;
-    if(!Number.isInteger(idx) || idx < 0 || idx >= options.length) throw new Error('Opción inválida');
+  async function chooseInventoryReplacement(reportId, reportedAccountId){
+    const query = reportedAccountId ? ('?reported_account_id='+reportedAccountId) : '';
+    const data=await api('/api/admin/account-reports/'+reportId+'/replacement-options'+query);
+    const options=data.options||[];
+    if(!options.length) throw new Error('No hay cuentas disponibles para esa plataforma. Captura manualmente una cuenta.');
+    const list=options.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`).join('\n');
+    const ans=prompt('Selecciona la cuenta disponible para entregar:\n\n'+list);
+    if(ans===null) throw new Error('Reemplazo cancelado');
+    const idx=Number(ans)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=options.length) throw new Error('Opción inválida');
     return options[idx].id;
   }
 
-  const oldReplaceReportedAccountCombo = typeof replaceReportedAccount === 'function' ? replaceReportedAccount : null;
-  replaceReportedAccount = async function(reportId){
-    try{
-      const useManual = confirm(
-        '¿Quieres capturar manualmente la cuenta de reemplazo?\n\n' +
-        'Aceptar = Capturar correo, contraseña, perfil y PIN manualmente.\n' +
-        'Cancelar = Elegir una cuenta disponible del inventario de esa plataforma.'
-      );
+  function showCopyBox(text){
+    const old=document.getElementById('replacementCopyBox');
+    if(old) old.remove();
+    const box=document.createElement('div');
+    box.id='replacementCopyBox';
+    box.className='modal-backdrop';
+    box.innerHTML=`<div class="modal-card">
+      <h2>Cuenta de reemplazo entregada</h2>
+      <p class="small-text">Copia estos datos para enviarlos al cliente.</p>
+      <textarea id="replacementCopyText" style="min-height:240px">${safeText(text||'')}</textarea>
+      <div class="two-row">
+        <button class="primary-btn" onclick="copyReplacementTextStable()">Copiar datos</button>
+        <button class="outline-btn" onclick="document.getElementById('replacementCopyBox').remove()">Cerrar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(box);
+  }
 
-      let body = {};
+  window.copyReplacementTextStable=async function(){
+    const text=document.getElementById('replacementCopyText')?.value||'';
+    try {
+      await navigator.clipboard.writeText(text);
+      showMessage('Datos copiados');
+    } catch(e) {
+      const area=document.getElementById('replacementCopyText');
+      if(area) {
+        area.focus();
+        area.select();
+        document.execCommand('copy');
+        showMessage('Datos copiados');
+      }
+    }
+  };
 
-      if(useManual){
-        const account_email = prompt('Correo de la cuenta nueva:');
-        if(!account_email || !account_email.trim()) throw new Error('El correo de la cuenta es obligatorio');
+  window.replaceReportedAccount=async function(reportId){
+    try {
+      const comboAccountId=await chooseComboAccount(reportId);
+      const useManual=confirm('¿Capturar manualmente la cuenta de reemplazo?\n\nAceptar = Manual\nCancelar = Elegir del inventario disponible');
+      let body={};
+      if(comboAccountId) body.reported_account_id=comboAccountId;
 
-        const account_password = prompt('Contraseña de la cuenta nueva:');
-        if(!account_password || !account_password.trim()) throw new Error('La contraseña es obligatoria');
-
-        const profile_name = prompt('Perfil (opcional):', '') || '';
-        const profile_pin = prompt('PIN del perfil (opcional):', '') || '';
-        const access_url = prompt('URL para código/soporte (opcional):', '') || '';
-        const extra_data = prompt('Notas extra / datos adicionales (opcional):', '') || '';
-
-        body = {
-          manual: true,
-          account_email: account_email.trim(),
-          account_password: account_password.trim(),
-          profile_name: profile_name.trim(),
-          profile_pin: profile_pin.trim(),
-          access_url: access_url.trim(),
-          extra_data: extra_data.trim()
+      if(useManual) {
+        const account_email=prompt('Correo de la cuenta nueva:');
+        if(!account_email) throw new Error('Correo obligatorio');
+        const account_password=prompt('Contraseña de la cuenta nueva:');
+        if(!account_password) throw new Error('Contraseña obligatoria');
+        body={
+          ...body,
+          manual:true,
+          account_email:account_email.trim(),
+          account_password:account_password.trim(),
+          profile_name:(prompt('Perfil (opcional):','')||'').trim(),
+          profile_pin:(prompt('PIN (opcional):','')||'').trim(),
+          access_url:(prompt('URL opcional:','')||'').trim(),
+          extra_data:(prompt('Notas extra opcional:','')||'').trim()
         };
-      }else{
-        const replacementId = await chooseReplacementAccountFromInventory(reportId);
-        body = { manual:false, replacement_account_id: replacementId };
+      } else {
+        body={...body, manual:false, replacement_account_id: await chooseInventoryReplacement(reportId, comboAccountId)};
       }
 
-      const data=await api('/api/admin/account-reports/'+reportId+'/replace',{
+      const data=await api('/api/admin/account-reports/'+reportId+'/replace', {
         method:'POST',
         body:JSON.stringify(body)
       });
 
-      showMessage(data.message||'Cuenta reemplazada');
-      await loadAccountReports();
-      if(typeof loadMyAccountReports === 'function') await loadMyAccountReports();
-      if(typeof loadAdminOrders === 'function') await loadAdminOrders();
-      if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
-    }catch(e){
+      showMessage(data.message || 'Cuenta reemplazada');
+      if(data.delivered_account_data) showCopyBox(data.delivered_account_data);
+      if(typeof loadAccountReports==='function') await loadAccountReports();
+      if(typeof loadPlatformInventory==='function') await loadPlatformInventory();
+    } catch(e) {
       showMessage(e.message || 'Error reemplazando cuenta','error');
     }
   };
-  window.replaceReportedAccount = replaceReportedAccount;
-
-  const oldShowSectionComboReports = typeof showSection === 'function' ? showSection : null;
-  if(oldShowSectionComboReports){
-    showSection = function(name){
-      const result = oldShowSectionComboReports(name);
-      if(name === 'reports') setTimeout(()=>{ ensureReportableSelect(); loadReportableAccountsCombo(); },100);
-      return result;
-    };
-    window.showSection = showSection;
-  }
-
-  const oldLoadAppComboReports = typeof loadApp === 'function' ? loadApp : null;
-  if(oldLoadAppComboReports){
-    loadApp = async function(){
-      const result = await oldLoadAppComboReports();
-      setTimeout(ensureReportableSelect,500);
-      return result;
-    };
-    window.loadApp = loadApp;
-  }
-
-  setTimeout(ensureReportableSelect,800);
-})();
-
-
-// ===============================
-// FIX MATCH REEMPLAZO PLATAFORMA - 2026-06-09 00:57:40
-// Permite reemplazar Netflix aunque el inventario diga 'Netflix perfil'
-// y aunque owner_admin_id venga null/global.
-// ===============================
-(function(){
-  const oldChooseReplacementAccountFromInventoryMatchFix = typeof chooseReplacementAccountFromInventory === 'function' ? chooseReplacementAccountFromInventory : null;
-  if (oldChooseReplacementAccountFromInventoryMatchFix) {
-    chooseReplacementAccountFromInventory = async function(reportId){
-      const data = await api('/api/admin/account-reports/'+reportId+'/replacement-options');
-      const options = data.options || [];
-      if(!options.length) throw new Error('No hay cuentas disponibles para esa plataforma ('+(data.platform || 'sin plataforma')+'). Revisa que la cuenta esté en available o captura una cuenta manual.');
-
-      const list = options.map((a,i)=>`${i+1}) ${a.platform || a.product_name} | ${a.account_email}${a.profile_name ? ' | Perfil: '+a.profile_name : ''}`).join('\n');
-      const answer = prompt('Reemplazo para: '+(data.platform || 'plataforma')+'\n\nSelecciona el número de la cuenta disponible:\n\n'+list);
-      if(answer === null) throw new Error('Reemplazo cancelado');
-      const idx = Number(answer) - 1;
-      if(!Number.isInteger(idx) || idx < 0 || idx >= options.length) throw new Error('Opción inválida');
-      return options[idx].id;
-    };
-    window.chooseReplacementAccountFromInventory = chooseReplacementAccountFromInventory;
-  }
-})();
-
-
-
-// FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00
-(function(){
-  // Ocultar/desactivar cualquier campo de cantidad.
-  function hideQtyControls(){
-    document.querySelectorAll('[id^="qty-"]').forEach(i=>{ i.value=1; const p=i.closest('div'); if(p)p.style.display='none'; i.style.display='none'; });
-    document.querySelectorAll('.small-text').forEach(e=>{ const t=(e.textContent||'').toLowerCase(); if(t.includes('varias cuentas')||t.includes('varios perfiles')) e.style.display='none'; });
-  }
-  const oldBuy=typeof buyProduct==='function'?buyProduct:null;
-  buyProduct=async function(productId){
-    try{
-      const product=(window.allProducts||[]).find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
-      if(!product) throw new Error('Producto no encontrado');
-      if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
-      const fields=parseJsonArray(product.required_fields);
-      const order_data={};
-      fields.forEach(f=>{ const input=document.getElementById(`field-${productId}-${f}`); order_data[f]=input?input.value.trim():''; });
-      const data=await api('/api/buy/'+productId,{method:'POST',body:JSON.stringify({order_data,quantity:1})});
-      showMessage(data.message||'Compra realizada');
-      await loadApp();
-      showSection('orders');
-    }catch(e){ showMessage(e.message||'Error comprando producto','error'); }
-  };
-  window.buyProduct=buyProduct;
-
-  // Selector de cuenta específica para reportar falla de combo.
-  async function loadReportableAccountsFinal(){
-    try{
-      const select=document.getElementById('reporteCuentaSelect');
-      if(!select)return;
-      const accounts=await api('/api/reportable-accounts');
-      select.innerHTML='<option value="">Selecciona cuenta/plataforma entregada</option>'+(accounts||[]).map(a=>{
-        const label=`Pedido #${a.order_id} | ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`;
-        return `<option value="${a.id}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
-      }).join('');
-    }catch(e){ console.warn(e); }
-  }
-  function ensureReportableSelectFinal(){
-    const correo=document.getElementById('reporteCorreo');
-    if(!correo||document.getElementById('reporteCuentaSelect'))return;
-    const div=document.createElement('div');
-    div.innerHTML=`<label class="field-label">Cuenta/plataforma que falló</label><select id="reporteCuentaSelect" onchange="onSelectReportableAccountFinal()"><option value="">Cargando cuentas...</option></select><p class="small-text">Si tu compra fue un combo, selecciona exactamente qué cuenta deseas reportar.</p>`;
-    correo.parentNode.insertBefore(div,correo);
-    loadReportableAccountsFinal();
-  }
-  window.onSelectReportableAccountFinal=function(){
-    const opt=document.getElementById('reporteCuentaSelect')?.selectedOptions?.[0];
-    const email=opt?.getAttribute('data-email')||'';
-    const correo=document.getElementById('reporteCorreo');
-    if(correo&&email)correo.value=email;
-  };
-  if(typeof enviarReporteCuenta==='function'){
-    enviarReporteCuenta=async function(){
-      try{
-        const selectedId=Number(document.getElementById('reporteCuentaSelect')?.value||0);
-        const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
-        const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
-        const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
-        if(!selectedId&&!correo)throw new Error('Selecciona la cuenta del combo o escribe el correo con falla');
-        if(!explicacion)throw new Error('La explicación es obligatoria');
-        const data=await api('/api/account-reports',{method:'POST',body:JSON.stringify({reported_account_id:selectedId||undefined,email:correo,issue_type:tipo,description:explicacion})});
-        showMessage(data.message||'Reporte enviado');
-        if(document.getElementById('reporteCuentaSelect'))document.getElementById('reporteCuentaSelect').value='';
-        if(document.getElementById('reporteCorreo'))document.getElementById('reporteCorreo').value='';
-        if(document.getElementById('reporteExplicacion'))document.getElementById('reporteExplicacion').value='';
-        if(typeof loadMyAccountReports==='function')await loadMyAccountReports();
-      }catch(e){ showMessage(e.message||'Error enviando reporte','error'); }
-    };
-    window.enviarReporteCuenta=enviarReporteCuenta;
-  }
-
-  async function chooseComboAccountForReplacement(reportId){
-    const data=await api('/api/admin/account-reports/'+reportId+'/order-accounts');
-    const accounts=data.accounts||[];
-    if(accounts.length<=1)return accounts[0]?.id||0;
-    const list=accounts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | Estado: ${a.status}`).join('\n');
-    const ans=prompt('Selecciona qué cuenta/plataforma del combo será reemplazada:\n\n'+list);
-    if(ans===null)throw new Error('Reemplazo cancelado');
-    const idx=Number(ans)-1;
-    if(!Number.isInteger(idx)||idx<0||idx>=accounts.length)throw new Error('Opción inválida');
-    return accounts[idx].id;
-  }
-  async function chooseReplacementAccount(reportId){
-    const data=await api('/api/admin/account-reports/'+reportId+'/replacement-options');
-    const opts=data.options||[];
-    if(!opts.length)throw new Error('No hay cuentas disponibles para esa plataforma. Captura manualmente una cuenta.');
-    const list=opts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`).join('\n');
-    const ans=prompt('Selecciona la cuenta disponible para entregar:\n\n'+list);
-    if(ans===null)throw new Error('Reemplazo cancelado');
-    const idx=Number(ans)-1;
-    if(!Number.isInteger(idx)||idx<0||idx>=opts.length)throw new Error('Opción inválida');
-    return opts[idx].id;
-  }
-  function showCopyReplacementBox(text){
-    const old=document.getElementById('replacementCopyBox'); if(old)old.remove();
-    const box=document.createElement('div');
-    box.id='replacementCopyBox'; box.className='modal-backdrop';
-    box.innerHTML=`<div class="modal-card"><h2>Cuenta de reemplazo entregada</h2><p class="small-text">Copia estos datos para enviarlos al cliente.</p><textarea id="replacementCopyText" style="min-height:240px">${safeText(text||'')}</textarea><div class="two-row"><button class="primary-btn" onclick="copyReplacementTextNow()">Copiar datos</button><button class="outline-btn" onclick="document.getElementById('replacementCopyBox').remove()">Cerrar</button></div></div>`;
-    document.body.appendChild(box);
-  }
-  window.copyReplacementTextNow=async function(){
-    const text=document.getElementById('replacementCopyText')?.value||'';
-    try{ await navigator.clipboard.writeText(text); showMessage('Datos copiados'); }
-    catch(e){ const a=document.getElementById('replacementCopyText'); if(a){a.focus();a.select();document.execCommand('copy');showMessage('Datos copiados');} }
-  };
-  replaceReportedAccount=async function(reportId){
-    try{
-      const comboId=await chooseComboAccountForReplacement(reportId);
-      const manual=confirm('¿Capturar manualmente la cuenta de reemplazo?\n\nAceptar = Manual\nCancelar = Elegir disponible del inventario');
-      let body={};
-      if(comboId)body.reported_account_id=comboId;
-      if(manual){
-        const account_email=prompt('Correo de la cuenta nueva:'); if(!account_email)throw new Error('Correo obligatorio');
-        const account_password=prompt('Contraseña de la cuenta nueva:'); if(!account_password)throw new Error('Contraseña obligatoria');
-        body={...body,manual:true,account_email:account_email.trim(),account_password:account_password.trim(),profile_name:(prompt('Perfil (opcional):','')||'').trim(),profile_pin:(prompt('PIN (opcional):','')||'').trim(),access_url:(prompt('URL opcional:','')||'').trim(),extra_data:(prompt('Notas extra opcional:','')||'').trim()};
-      }else{
-        body={...body,manual:false,replacement_account_id:await chooseReplacementAccount(reportId)};
-      }
-      const data=await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify(body)});
-      showMessage(data.message||'Cuenta reemplazada');
-      if(data.delivered_account_data)showCopyReplacementBox(data.delivered_account_data);
-      if(typeof loadAccountReports==='function')await loadAccountReports();
-      if(typeof loadPlatformInventory==='function')await loadPlatformInventory();
-    }catch(e){ showMessage(e.message||'Error reemplazando cuenta','error'); }
-  };
-  window.replaceReportedAccount=replaceReportedAccount;
+  replaceReportedAccount=window.replaceReportedAccount;
 
   const oldShow=typeof showSection==='function'?showSection:null;
   if(oldShow){
-    showSection=function(name){ const r=oldShow(name); if(name==='reports')setTimeout(ensureReportableSelectFinal,120); if(name==='store')setTimeout(hideQtyControls,120); return r; };
-    window.showSection=showSection;
+    window.showSection=function(name){
+      const r=oldShow(name);
+      if(name==='reports') setTimeout(ensureReportSelect,150);
+      if(name==='shop' || name==='store') setTimeout(removeMultiQtyUI,250);
+      return r;
+    };
+    showSection=window.showSection;
   }
+
   const oldLoad=typeof loadApp==='function'?loadApp:null;
   if(oldLoad){
-    loadApp=async function(){ const r=await oldLoad(); setTimeout(ensureReportableSelectFinal,600); setTimeout(hideQtyControls,800); return r; };
-    window.loadApp=loadApp;
-  }
-  setInterval(hideQtyControls,2500);
-  setTimeout(ensureReportableSelectFinal,800);
-  setTimeout(hideQtyControls,800);
-})();
-
-
-
-// ===============================
-// FIX TIENDA NO ABRE PRODUCTOS - 2026-06-09 02:00:33
-// Restaura el despliegue de productos/plataformas y mantiene compra individual.
-// ===============================
-(function(){
-  function forceSinglePurchaseNoBreakingDetails(){
-    document.querySelectorAll('[id^="qty-"]').forEach(input => {
-      input.value = 1;
-      input.removeAttribute('max');
-      input.setAttribute('min','1');
-      // NO ocultar el div padre porque puede ser product-details.
-      input.style.display = 'none';
-
-      const label = input.previousElementSibling;
-      if (label && (label.textContent || '').toLowerCase().includes('cantidad')) {
-        label.style.display = 'none';
-      }
-
-      const total = document.getElementById(String(input.id).replace('qty-','total-'));
-      if (total) {
-        const totalBox = total.closest('.order-data');
-        if (totalBox) totalBox.style.display = 'none';
-      }
-    });
-
-    document.querySelectorAll('.small-text').forEach(el => {
-      const t = (el.textContent || '').toLowerCase();
-      if (t.includes('varias cuentas') || t.includes('varios perfiles') || t.includes('misma plataforma')) {
-        el.style.display = 'none';
-      }
-    });
-  }
-
-  // Reforzar toggleProduct para que siempre abra/cierre los detalles.
-  window.toggleProduct = function(productId){
-    const details = document.getElementById('product-details-' + productId);
-    if (!details) return;
-
-    const isHidden =
-      details.classList.contains('open') === false &&
-      (details.style.display === '' || details.style.display === 'none');
-
-    document.querySelectorAll('.product-details').forEach(el => {
-      if (el !== details) {
-        el.classList.remove('open');
-        el.style.display = 'none';
-      }
-    });
-
-    if (details.classList.contains('open') || details.style.display === 'block') {
-      details.classList.remove('open');
-      details.style.display = 'none';
-    } else {
-      details.classList.add('open');
-      details.style.display = 'block';
-    }
-
-    setTimeout(forceSinglePurchaseNoBreakingDetails, 50);
-  };
-
-  // Si algún render anterior dejó product-details sin CSS usable, lo corregimos.
-  function repairProductDetailsDisplay(){
-    document.querySelectorAll('.product-details').forEach(el => {
-      if (!el.classList.contains('open') && el.style.display !== 'block') {
-        el.style.display = 'none';
-      }
-    });
-    forceSinglePurchaseNoBreakingDetails();
-  }
-
-  // Compra individual, sin quantity múltiple.
-  window.buyProduct = async function(productId){
-    try{
-      const product = (window.allProducts || []).find(p => Number(p.id) === Number(productId)) ||
-        await api('/api/products').then(ps => ps.find(p => Number(p.id) === Number(productId)));
-
-      if (!product) throw new Error('Producto no encontrado');
-
-      if (!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
-
-      const fields = parseJsonArray(product.required_fields);
-      const order_data = {};
-      fields.forEach(f => {
-        const input = document.getElementById(`field-${productId}-${f}`);
-        order_data[f] = input ? input.value.trim() : '';
-      });
-
-      const data = await api('/api/buy/' + productId, {
-        method: 'POST',
-        body: JSON.stringify({ order_data, quantity: 1 })
-      });
-
-      showMessage(data.message || 'Compra realizada');
-      await loadApp();
-      showSection('orders');
-    } catch(e) {
-      showMessage(e.message || 'Error comprando producto', 'error');
-    }
-  };
-
-  const oldFilterProductsOpenFix = typeof filterProducts === 'function' ? filterProducts : null;
-  if (oldFilterProductsOpenFix) {
-    window.filterProducts = function(){
-      const result = oldFilterProductsOpenFix();
-      setTimeout(repairProductDetailsDisplay, 80);
-      setTimeout(repairProductDetailsDisplay, 400);
-      return result;
+    window.loadApp=async function(){
+      const r=await oldLoad();
+      setTimeout(ensureReportSelect,600);
+      setTimeout(removeMultiQtyUI,900);
+      return r;
     };
-    filterProducts = window.filterProducts;
+    loadApp=window.loadApp;
   }
 
-  const oldShowSectionOpenFix = typeof showSection === 'function' ? showSection : null;
-  if (oldShowSectionOpenFix) {
-    window.showSection = function(name){
-      const result = oldShowSectionOpenFix(name);
-      if (name === 'store') {
-        setTimeout(repairProductDetailsDisplay, 120);
-        setTimeout(repairProductDetailsDisplay, 600);
-      }
-      return result;
-    };
-    showSection = window.showSection;
-  }
-
-  const oldLoadAppOpenFix = typeof loadApp === 'function' ? loadApp : null;
-  if (oldLoadAppOpenFix) {
-    window.loadApp = async function(){
-      const result = await oldLoadAppOpenFix();
-      setTimeout(repairProductDetailsDisplay, 500);
-      setTimeout(repairProductDetailsDisplay, 1200);
-      return result;
-    };
-    loadApp = window.loadApp;
-  }
-
-  setTimeout(repairProductDetailsDisplay, 700);
-  setTimeout(repairProductDetailsDisplay, 1600);
-})();
-
-
-
-// ===============================
-// FIX TIENDA SE CIERRA AL ABRIR - 2026-06-09 02:06:40
-// El producto debe quedarse abierto para poder comprar.
-// ===============================
-(function(){
-  function hideOnlyQtyInputs(){
-    document.querySelectorAll('[id^="qty-"]').forEach(input => {
-      input.value = 1;
-      input.style.display = 'none';
-      const label = input.previousElementSibling;
-      if (label && (label.textContent || '').toLowerCase().includes('cantidad')) {
-        label.style.display = 'none';
-      }
-      const totalId = String(input.id).replace('qty-', 'total-');
-      const total = document.getElementById(totalId);
-      const totalBox = total ? total.closest('.order-data') : null;
-      if (totalBox) totalBox.style.display = 'none';
-    });
-
-    document.querySelectorAll('.small-text').forEach(el => {
-      const t = (el.textContent || '').toLowerCase();
-      if (
-        t.includes('puedes comprar varias') ||
-        t.includes('misma plataforma en un solo pedido') ||
-        t.includes('varios perfiles') ||
-        t.includes('varias cuentas')
-      ) {
-        el.style.display = 'none';
-      }
-    });
-  }
-
-  // Reemplazo definitivo del desplegable.
-  // No usa clases raras ni reparadores que cierren el producto.
-  window.toggleProduct = function(productId){
-    const details = document.getElementById('product-details-' + productId);
-    if (!details) return;
-
-    const currentlyOpen = details.getAttribute('data-open') === '1';
-
-    document.querySelectorAll('.product-details').forEach(el => {
-      el.setAttribute('data-open', '0');
-      el.style.display = 'none';
-      const row = el.closest('.product-row');
-      if (row) row.classList.remove('open');
-    });
-
-    if (!currentlyOpen) {
-      details.setAttribute('data-open', '1');
-      details.style.display = 'block';
-      const row = details.closest('.product-row');
-      if (row) row.classList.add('open');
-      hideOnlyQtyInputs();
-    }
-  };
-
-  // Evitar que clicks dentro del área de compra cierren el producto.
-  function stopInsideDetailsClosing(){
-    document.querySelectorAll('.product-details').forEach(details => {
-      if (details.getAttribute('data-stop-bound') === '1') return;
-      details.setAttribute('data-stop-bound', '1');
-      details.addEventListener('click', function(ev){
-        ev.stopPropagation();
-      });
-    });
-  }
-
-  // Compra individual.
-  window.buyProduct = async function(productId){
-    try {
-      const product = (window.allProducts || []).find(p => Number(p.id) === Number(productId)) ||
-        await api('/api/products').then(ps => ps.find(p => Number(p.id) === Number(productId)));
-
-      if (!product) throw new Error('Producto no encontrado');
-
-      if (!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
-
-      const fields = parseJsonArray(product.required_fields);
-      const order_data = {};
-
-      fields.forEach(f => {
-        const input = document.getElementById(`field-${productId}-${f}`);
-        order_data[f] = input ? input.value.trim() : '';
-      });
-
-      const data = await api('/api/buy/' + productId, {
-        method: 'POST',
-        body: JSON.stringify({ order_data, quantity: 1 })
-      });
-
-      showMessage(data.message || 'Compra realizada');
-      await loadApp();
-      showSection('orders');
-    } catch(e) {
-      showMessage(e.message || 'Error comprando producto', 'error');
-    }
-  };
-
-  function afterProductRenderFix(){
-    hideOnlyQtyInputs();
-    stopInsideDetailsClosing();
-  }
-
-  const prevFilterProductsCloseFix = typeof filterProducts === 'function' ? filterProducts : null;
-  if (prevFilterProductsCloseFix) {
-    window.filterProducts = function(){
-      const result = prevFilterProductsCloseFix();
-      setTimeout(afterProductRenderFix, 100);
-      setTimeout(afterProductRenderFix, 500);
-      return result;
-    };
-    filterProducts = window.filterProducts;
-  }
-
-  const prevLoadProductsCloseFix = typeof loadProducts === 'function' ? loadProducts : null;
-  if (prevLoadProductsCloseFix) {
-    window.loadProducts = async function(){
-      const result = await prevLoadProductsCloseFix();
-      setTimeout(afterProductRenderFix, 100);
-      setTimeout(afterProductRenderFix, 500);
-      return result;
-    };
-    loadProducts = window.loadProducts;
-  }
-
-  const prevShowSectionCloseFix = typeof showSection === 'function' ? showSection : null;
-  if (prevShowSectionCloseFix) {
-    window.showSection = function(name){
-      const result = prevShowSectionCloseFix(name);
-      if (name === 'shop' || name === 'store') {
-        setTimeout(afterProductRenderFix, 150);
-        setTimeout(afterProductRenderFix, 700);
-      }
-      return result;
-    };
-    showSection = window.showSection;
-  }
-
-  setTimeout(afterProductRenderFix, 800);
-  setTimeout(afterProductRenderFix, 1800);
+  setTimeout(removeMultiQtyUI,800);
+  setTimeout(ensureReportSelect,800);
 })();
 
 </script>
@@ -5336,24 +4571,4 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 
 <!-- REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28 -->
 
-<!-- SUMADOR PRODUCTOS PLATAFORMA CON TERMINOS AL FINAL - 2026-06-08 17:42:36 -->
-
-<!-- FIX SEGURO REPORTES CANTIDAD - 2026-06-08 23:36:09 -->
-
-<!-- FIX DEFINITIVO CANTIDAD CON COLUMNA ORDERS.QUANTITY - 2026-06-08 23:42:29 -->
-
-<!-- FIX ERROR ALIAS O EN REPORTES - 2026-06-08 23:56:44 -->
-
-<!-- FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26 -->
-
-<!-- FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38 -->
-
-<!-- REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43 -->
-
-<!-- FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40 -->
-
-<!-- FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00 -->
-
-<!-- FIX TIENDA NO ABRE PRODUCTOS - 2026-06-09 02:00:33 -->
-
-<!-- FIX TIENDA SE CIERRA AL ABRIR - 2026-06-09 02:06:40 -->
+<!-- FIX ESTABLE TIENDA COMBO REPORTES - 2026-06-09 02:15:25 -->
