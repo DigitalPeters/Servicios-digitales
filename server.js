@@ -663,6 +663,18 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_cost_snapshot NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
+  await pool.query(`UPDATE orders SET quantity = 1 WHERE quantity IS NULL OR quantity < 1`);
+  await pool.query(`
+    UPDATE orders
+    SET quantity = GREATEST(
+      COALESCE(quantity, 1),
+      COALESCE(NULLIF(substring(product_name_snapshot from '\\s+x([0-9]+)$'), '')::int, 1)
+    )
+    WHERE product_name_snapshot ~* '\\s+x[0-9]+$'
+  `);
+
+
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS platform VARCHAR(100)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150)`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS account_email VARCHAR(255)`);
@@ -4099,3 +4111,5 @@ initDatabase()
 // REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28
 
 // FIX ESTABLE TIENDA COMBO REPORTES - 2026-06-09 02:15:25
+
+// FIX CONTABILIZAR HISTORICO X2 COMO CUENTAS VENDIDAS - 2026-06-09 02:27:10

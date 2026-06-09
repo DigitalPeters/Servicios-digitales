@@ -4563,6 +4563,162 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(ensureReportSelect,800);
 })();
 
+
+
+// ===============================
+// FIX CONTABILIZAR X2 COMO CUENTAS VENDIDAS - 2026-06-09 02:27:10
+// Ya no hay compra múltiple, pero pedidos históricos tipo "Netflix perfil x2"
+// deben sumarse como 2 dentro de "Netflix perfil".
+// ===============================
+(function(){
+  function baseNameNoX(name){
+    return String(name || '').replace(/\s+x\d+$/i, '').trim();
+  }
+
+  function qtyFromXName(name, fallback){
+    const m = String(name || '').match(/\s+x(\d+)$/i);
+    const byName = m ? Math.max(1, Number(m[1] || 1)) : 0;
+    const byValue = Number(fallback || 0) || 0;
+    return Math.max(byName || 1, byValue || 1);
+  }
+
+  function mergeProductsX(list){
+    const map = new Map();
+    (list || []).forEach(item => {
+      const raw = item.product_name || item.name || item.product || '';
+      const base = baseNameNoX(raw);
+      const qty = qtyFromXName(raw, item.orders ?? item.count ?? item.total ?? item.value ?? 0);
+      const key = base.toLowerCase();
+      const prev = map.get(key) || {
+        ...item,
+        product_name: base,
+        name: base,
+        product: base,
+        orders: 0,
+        count: 0,
+        total: 0,
+        value: 0
+      };
+      const current = Number(prev.orders || prev.count || prev.total || prev.value || 0) || 0;
+      const newTotal = current + qty;
+      prev.orders = newTotal;
+      prev.count = newTotal;
+      prev.total = newTotal;
+      prev.value = newTotal;
+      map.set(key, prev);
+    });
+    return Array.from(map.values()).sort((a,b)=>Number(b.orders||b.count||0)-Number(a.orders||a.count||0));
+  }
+
+  window.mergeProductsX = mergeProductsX;
+
+  // Intercepta gráficas del dashboard principal.
+  const oldRenderDashboardChartsMergeX = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (oldRenderDashboardChartsMergeX) {
+    window.renderDashboardCharts = function(data){
+      if (data && Array.isArray(data.top_products)) {
+        data.top_products = mergeProductsX(data.top_products);
+      }
+      return oldRenderDashboardChartsMergeX(data);
+    };
+    renderDashboardCharts = window.renderDashboardCharts;
+  }
+
+  // Intercepta posibles renderizadores de productos más vendidos.
+  ['renderTopProductsChart','renderProductsChart','renderSalesByProduct'].forEach(fnName => {
+    const oldFn = window[fnName];
+    if (typeof oldFn === 'function') {
+      window[fnName] = function(list, ...rest){
+        if (Array.isArray(list)) list = mergeProductsX(list);
+        return oldFn(list, ...rest);
+      };
+      try { eval(fnName + ' = window[fnName]'); } catch(e) {}
+    }
+  });
+
+  // Corrección visual por si el backend/listado ya pintó "Netflix perfil x2" separado.
+  function fixVisibleXProducts(){
+    const targets = [
+      document.getElementById('dashboardTopProductsChart'),
+      document.getElementById('salesByProductList')
+    ].filter(Boolean);
+
+    targets.forEach(box => {
+      const text = box.innerText || '';
+      if (!/\sx\d+/i.test(text)) return;
+
+      const lines = text.split('\n').map(x=>x.trim()).filter(Boolean);
+      const map = new Map();
+
+      lines.forEach(line => {
+        const m = line.match(/^(.*?)(?:\s+)(\d+)$/);
+        if (!m) return;
+        const rawName = m[1].trim();
+        const count = Number(m[2] || 0);
+        if (!rawName || rawName.toLowerCase().includes('productos')) return;
+        const base = baseNameNoX(rawName);
+        const qty = qtyFromXName(rawName, count);
+        const key = base.toLowerCase();
+        map.set(key, { name: base, count: (map.get(key)?.count || 0) + qty });
+      });
+
+      if (!map.size) return;
+      const merged = Array.from(map.values()).sort((a,b)=>b.count-a.count);
+      const total = merged.reduce((s,x)=>s+x.count,0);
+
+      if (box.id === 'dashboardTopProductsChart') {
+        const rows = merged.map(p=>`
+          <div class="legend-item">
+            <span class="legend-dot"></span>
+            <span class="legend-name">${p.name}</span>
+            <span class="legend-value">${p.count}</span>
+          </div>
+        `).join('');
+        box.innerHTML = `
+          <div class="donut-summary">
+            <div class="donut">
+              <div class="donut-center">${total}<span>cuentas</span></div>
+            </div>
+            <div class="legend-list">${rows}</div>
+          </div>
+        `;
+      } else {
+        box.innerHTML = merged.map(p=>`
+          <div class="item">
+            <p><b>${p.name}</b></p>
+            <p><b>Cuentas vendidas:</b> ${p.count}</p>
+          </div>
+        `).join('');
+      }
+    });
+  }
+
+  const oldLoadDashboardStatsMergeX = typeof loadDashboardStats === 'function' ? loadDashboardStats : null;
+  if (oldLoadDashboardStatsMergeX) {
+    window.loadDashboardStats = async function(){
+      const result = await oldLoadDashboardStatsMergeX();
+      setTimeout(fixVisibleXProducts, 200);
+      setTimeout(fixVisibleXProducts, 900);
+      return result;
+    };
+    loadDashboardStats = window.loadDashboardStats;
+  }
+
+  const oldLoadSalesReportMergeX = typeof loadSalesReport === 'function' ? loadSalesReport : null;
+  if (oldLoadSalesReportMergeX) {
+    window.loadSalesReport = async function(...args){
+      const result = await oldLoadSalesReportMergeX(...args);
+      setTimeout(fixVisibleXProducts, 200);
+      setTimeout(fixVisibleXProducts, 900);
+      return result;
+    };
+    loadSalesReport = window.loadSalesReport;
+  }
+
+  setTimeout(fixVisibleXProducts, 1200);
+  setInterval(fixVisibleXProducts, 4000);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4572,3 +4728,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28 -->
 
 <!-- FIX ESTABLE TIENDA COMBO REPORTES - 2026-06-09 02:15:25 -->
+
+<!-- FIX CONTABILIZAR HISTORICO X2 COMO CUENTAS VENDIDAS - 2026-06-09 02:27:10 -->
