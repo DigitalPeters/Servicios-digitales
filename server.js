@@ -2369,10 +2369,20 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
            OR lower(product_name) = lower($1)
            OR lower(platform) = lower($2)
            OR lower(product_name) = lower($2)
+           OR lower(platform) LIKE '%' || lower($1) || '%'
+           OR lower($1) LIKE '%' || lower(platform) || '%'
+           OR lower(product_name) LIKE '%' || lower($1) || '%'
+           OR lower($1) LIKE '%' || lower(product_name) || '%'
+           OR lower(platform) LIKE '%' || lower($2) || '%'
+           OR lower($2) LIKE '%' || lower(platform) || '%'
+           OR lower(product_name) LIKE '%' || lower($2) || '%'
+           OR lower($2) LIKE '%' || lower(product_name) || '%'
          )
          AND (
-           ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-           OR owner_admin_id = $3
+           owner_admin_id = $3
+           OR owner_admin_id IS NULL
+           OR owner_admin_id = 0
+           OR $3::int IS NULL
          )
        ORDER BY id ASC
        LIMIT 30`,
@@ -2443,7 +2453,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
     const replacementProductName = report.account_product_name || report.product_name || "";
-    const replacementPlatform = report.platform || report.product_category || report.product_name || "";
+    const replacementPlatform = report.platform || report.account_product_name || report.reported_platform || report.product_category || report.product_name || "";
 
     let newAccount = null;
 
@@ -2492,10 +2502,20 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
                OR lower(platform) = lower($2)
                OR lower(platform) = lower($3)
                OR lower(product_name) = lower($3)
+               OR lower(platform) LIKE '%' || lower($2) || '%'
+               OR lower($2) LIKE '%' || lower(platform) || '%'
+               OR lower(product_name) LIKE '%' || lower($2) || '%'
+               OR lower($2) LIKE '%' || lower(product_name) || '%'
+               OR lower(platform) LIKE '%' || lower($3) || '%'
+               OR lower($3) LIKE '%' || lower(platform) || '%'
+               OR lower(product_name) LIKE '%' || lower($3) || '%'
+               OR lower($3) LIKE '%' || lower(product_name) || '%'
              )
              AND (
-               ($4::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-               OR owner_admin_id = $4
+               owner_admin_id = $4
+               OR owner_admin_id IS NULL
+               OR owner_admin_id = 0
+               OR $4::int IS NULL
              )
            LIMIT 1
            FOR UPDATE`,
@@ -2511,10 +2531,20 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
                OR lower(platform) = lower($1)
                OR lower(platform) = lower($2)
                OR lower(product_name) = lower($2)
+               OR lower(platform) LIKE '%' || lower($1) || '%'
+               OR lower($1) LIKE '%' || lower(platform) || '%'
+               OR lower(product_name) LIKE '%' || lower($1) || '%'
+               OR lower($1) LIKE '%' || lower(product_name) || '%'
+               OR lower(platform) LIKE '%' || lower($2) || '%'
+               OR lower($2) LIKE '%' || lower(platform) || '%'
+               OR lower(product_name) LIKE '%' || lower($2) || '%'
+               OR lower($2) LIKE '%' || lower(product_name) || '%'
              )
              AND (
-               ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-               OR owner_admin_id = $3
+               owner_admin_id = $3
+               OR owner_admin_id IS NULL
+               OR owner_admin_id = 0
+               OR $3::int IS NULL
              )
            ORDER BY id ASC
            LIMIT 1
@@ -4086,3 +4116,5 @@ initDatabase()
 // FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38
 
 // REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43
+
+// FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40

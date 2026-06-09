@@ -4875,6 +4875,31 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(ensureReportableSelect,800);
 })();
 
+
+// ===============================
+// FIX MATCH REEMPLAZO PLATAFORMA - 2026-06-09 00:57:40
+// Permite reemplazar Netflix aunque el inventario diga 'Netflix perfil'
+// y aunque owner_admin_id venga null/global.
+// ===============================
+(function(){
+  const oldChooseReplacementAccountFromInventoryMatchFix = typeof chooseReplacementAccountFromInventory === 'function' ? chooseReplacementAccountFromInventory : null;
+  if (oldChooseReplacementAccountFromInventoryMatchFix) {
+    chooseReplacementAccountFromInventory = async function(reportId){
+      const data = await api('/api/admin/account-reports/'+reportId+'/replacement-options');
+      const options = data.options || [];
+      if(!options.length) throw new Error('No hay cuentas disponibles para esa plataforma ('+(data.platform || 'sin plataforma')+'). Revisa que la cuenta esté en available o captura una cuenta manual.');
+
+      const list = options.map((a,i)=>`${i+1}) ${a.platform || a.product_name} | ${a.account_email}${a.profile_name ? ' | Perfil: '+a.profile_name : ''}`).join('\n');
+      const answer = prompt('Reemplazo para: '+(data.platform || 'plataforma')+'\n\nSelecciona el número de la cuenta disponible:\n\n'+list);
+      if(answer === null) throw new Error('Reemplazo cancelado');
+      const idx = Number(answer) - 1;
+      if(!Number.isInteger(idx) || idx < 0 || idx >= options.length) throw new Error('Opción inválida');
+      return options[idx].id;
+    };
+    window.chooseReplacementAccountFromInventory = chooseReplacementAccountFromInventory;
+  }
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4896,3 +4921,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38 -->
 
 <!-- REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43 -->
+
+<!-- FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40 -->
