@@ -4900,6 +4900,149 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   }
 })();
 
+
+
+// FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00
+(function(){
+  // Ocultar/desactivar cualquier campo de cantidad.
+  function hideQtyControls(){
+    document.querySelectorAll('[id^="qty-"]').forEach(i=>{ i.value=1; const p=i.closest('div'); if(p)p.style.display='none'; i.style.display='none'; });
+    document.querySelectorAll('.small-text').forEach(e=>{ const t=(e.textContent||'').toLowerCase(); if(t.includes('varias cuentas')||t.includes('varios perfiles')) e.style.display='none'; });
+  }
+  const oldBuy=typeof buyProduct==='function'?buyProduct:null;
+  buyProduct=async function(productId){
+    try{
+      const product=(window.allProducts||[]).find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
+      if(!product) throw new Error('Producto no encontrado');
+      if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
+      const fields=parseJsonArray(product.required_fields);
+      const order_data={};
+      fields.forEach(f=>{ const input=document.getElementById(`field-${productId}-${f}`); order_data[f]=input?input.value.trim():''; });
+      const data=await api('/api/buy/'+productId,{method:'POST',body:JSON.stringify({order_data,quantity:1})});
+      showMessage(data.message||'Compra realizada');
+      await loadApp();
+      showSection('orders');
+    }catch(e){ showMessage(e.message||'Error comprando producto','error'); }
+  };
+  window.buyProduct=buyProduct;
+
+  // Selector de cuenta específica para reportar falla de combo.
+  async function loadReportableAccountsFinal(){
+    try{
+      const select=document.getElementById('reporteCuentaSelect');
+      if(!select)return;
+      const accounts=await api('/api/reportable-accounts');
+      select.innerHTML='<option value="">Selecciona cuenta/plataforma entregada</option>'+(accounts||[]).map(a=>{
+        const label=`Pedido #${a.order_id} | ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`;
+        return `<option value="${a.id}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
+      }).join('');
+    }catch(e){ console.warn(e); }
+  }
+  function ensureReportableSelectFinal(){
+    const correo=document.getElementById('reporteCorreo');
+    if(!correo||document.getElementById('reporteCuentaSelect'))return;
+    const div=document.createElement('div');
+    div.innerHTML=`<label class="field-label">Cuenta/plataforma que falló</label><select id="reporteCuentaSelect" onchange="onSelectReportableAccountFinal()"><option value="">Cargando cuentas...</option></select><p class="small-text">Si tu compra fue un combo, selecciona exactamente qué cuenta deseas reportar.</p>`;
+    correo.parentNode.insertBefore(div,correo);
+    loadReportableAccountsFinal();
+  }
+  window.onSelectReportableAccountFinal=function(){
+    const opt=document.getElementById('reporteCuentaSelect')?.selectedOptions?.[0];
+    const email=opt?.getAttribute('data-email')||'';
+    const correo=document.getElementById('reporteCorreo');
+    if(correo&&email)correo.value=email;
+  };
+  if(typeof enviarReporteCuenta==='function'){
+    enviarReporteCuenta=async function(){
+      try{
+        const selectedId=Number(document.getElementById('reporteCuentaSelect')?.value||0);
+        const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
+        const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
+        const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
+        if(!selectedId&&!correo)throw new Error('Selecciona la cuenta del combo o escribe el correo con falla');
+        if(!explicacion)throw new Error('La explicación es obligatoria');
+        const data=await api('/api/account-reports',{method:'POST',body:JSON.stringify({reported_account_id:selectedId||undefined,email:correo,issue_type:tipo,description:explicacion})});
+        showMessage(data.message||'Reporte enviado');
+        if(document.getElementById('reporteCuentaSelect'))document.getElementById('reporteCuentaSelect').value='';
+        if(document.getElementById('reporteCorreo'))document.getElementById('reporteCorreo').value='';
+        if(document.getElementById('reporteExplicacion'))document.getElementById('reporteExplicacion').value='';
+        if(typeof loadMyAccountReports==='function')await loadMyAccountReports();
+      }catch(e){ showMessage(e.message||'Error enviando reporte','error'); }
+    };
+    window.enviarReporteCuenta=enviarReporteCuenta;
+  }
+
+  async function chooseComboAccountForReplacement(reportId){
+    const data=await api('/api/admin/account-reports/'+reportId+'/order-accounts');
+    const accounts=data.accounts||[];
+    if(accounts.length<=1)return accounts[0]?.id||0;
+    const list=accounts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | Estado: ${a.status}`).join('\n');
+    const ans=prompt('Selecciona qué cuenta/plataforma del combo será reemplazada:\n\n'+list);
+    if(ans===null)throw new Error('Reemplazo cancelado');
+    const idx=Number(ans)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=accounts.length)throw new Error('Opción inválida');
+    return accounts[idx].id;
+  }
+  async function chooseReplacementAccount(reportId){
+    const data=await api('/api/admin/account-reports/'+reportId+'/replacement-options');
+    const opts=data.options||[];
+    if(!opts.length)throw new Error('No hay cuentas disponibles para esa plataforma. Captura manualmente una cuenta.');
+    const list=opts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`).join('\n');
+    const ans=prompt('Selecciona la cuenta disponible para entregar:\n\n'+list);
+    if(ans===null)throw new Error('Reemplazo cancelado');
+    const idx=Number(ans)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=opts.length)throw new Error('Opción inválida');
+    return opts[idx].id;
+  }
+  function showCopyReplacementBox(text){
+    const old=document.getElementById('replacementCopyBox'); if(old)old.remove();
+    const box=document.createElement('div');
+    box.id='replacementCopyBox'; box.className='modal-backdrop';
+    box.innerHTML=`<div class="modal-card"><h2>Cuenta de reemplazo entregada</h2><p class="small-text">Copia estos datos para enviarlos al cliente.</p><textarea id="replacementCopyText" style="min-height:240px">${safeText(text||'')}</textarea><div class="two-row"><button class="primary-btn" onclick="copyReplacementTextNow()">Copiar datos</button><button class="outline-btn" onclick="document.getElementById('replacementCopyBox').remove()">Cerrar</button></div></div>`;
+    document.body.appendChild(box);
+  }
+  window.copyReplacementTextNow=async function(){
+    const text=document.getElementById('replacementCopyText')?.value||'';
+    try{ await navigator.clipboard.writeText(text); showMessage('Datos copiados'); }
+    catch(e){ const a=document.getElementById('replacementCopyText'); if(a){a.focus();a.select();document.execCommand('copy');showMessage('Datos copiados');} }
+  };
+  replaceReportedAccount=async function(reportId){
+    try{
+      const comboId=await chooseComboAccountForReplacement(reportId);
+      const manual=confirm('¿Capturar manualmente la cuenta de reemplazo?\n\nAceptar = Manual\nCancelar = Elegir disponible del inventario');
+      let body={};
+      if(comboId)body.reported_account_id=comboId;
+      if(manual){
+        const account_email=prompt('Correo de la cuenta nueva:'); if(!account_email)throw new Error('Correo obligatorio');
+        const account_password=prompt('Contraseña de la cuenta nueva:'); if(!account_password)throw new Error('Contraseña obligatoria');
+        body={...body,manual:true,account_email:account_email.trim(),account_password:account_password.trim(),profile_name:(prompt('Perfil (opcional):','')||'').trim(),profile_pin:(prompt('PIN (opcional):','')||'').trim(),access_url:(prompt('URL opcional:','')||'').trim(),extra_data:(prompt('Notas extra opcional:','')||'').trim()};
+      }else{
+        body={...body,manual:false,replacement_account_id:await chooseReplacementAccount(reportId)};
+      }
+      const data=await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify(body)});
+      showMessage(data.message||'Cuenta reemplazada');
+      if(data.delivered_account_data)showCopyReplacementBox(data.delivered_account_data);
+      if(typeof loadAccountReports==='function')await loadAccountReports();
+      if(typeof loadPlatformInventory==='function')await loadPlatformInventory();
+    }catch(e){ showMessage(e.message||'Error reemplazando cuenta','error'); }
+  };
+  window.replaceReportedAccount=replaceReportedAccount;
+
+  const oldShow=typeof showSection==='function'?showSection:null;
+  if(oldShow){
+    showSection=function(name){ const r=oldShow(name); if(name==='reports')setTimeout(ensureReportableSelectFinal,120); if(name==='store')setTimeout(hideQtyControls,120); return r; };
+    window.showSection=showSection;
+  }
+  const oldLoad=typeof loadApp==='function'?loadApp:null;
+  if(oldLoad){
+    loadApp=async function(){ const r=await oldLoad(); setTimeout(ensureReportableSelectFinal,600); setTimeout(hideQtyControls,800); return r; };
+    window.loadApp=loadApp;
+  }
+  setInterval(hideQtyControls,2500);
+  setTimeout(ensureReportableSelectFinal,800);
+  setTimeout(hideQtyControls,800);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4923,3 +5066,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43 -->
 
 <!-- FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40 -->
+
+<!-- FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00 -->

@@ -1294,7 +1294,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const productId = req.params.productId;
     const userId = req.user.id;
     const orderData = safeJsonObject(req.body.order_data);
-    const requestedQuantity = Math.max(1, Math.min(50, Number(req.body.quantity || 1)));
+    const requestedQuantity = 1; // Multicompra desactivada
 
     await client.query("BEGIN");
 
@@ -1359,7 +1359,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     );
 
     const isPlatformProduct = !isComboProduct && Number(platformCountResult.rows[0]?.total || 0) > 0;
-    const quantity = isPlatformProduct ? requestedQuantity : 1;
+    const quantity = 1; // Multicompra desactivada
     const totalPrice = unitPrice * quantity;
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
@@ -2334,6 +2334,56 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
 
 
 
+
+// CUENTAS ENTREGADAS DE UN PEDIDO
+app.get("/api/orders/:orderId/platform-accounts", authMiddleware, async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId || 0);
+    const orderResult = await pool.query(`SELECT id, user_id FROM orders WHERE id=$1 LIMIT 1`, [orderId]);
+    const order = orderResult.rows[0];
+    if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
+
+    if (req.user.role !== "admin" && Number(order.user_id) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "No autorizado" });
+    }
+
+    const result = await pool.query(
+      `SELECT id, platform, product_name, account_email, profile_name, profile_pin, status, delivered_at
+       FROM platform_accounts
+       WHERE assigned_order_id=$1
+       ORDER BY id ASC`,
+      [orderId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error cuentas pedido:", err.message);
+    res.status(500).json({ error: "Error cargando cuentas del pedido" });
+  }
+});
+
+// CUENTAS DEL PEDIDO DE UN REPORTE
+app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId || 0);
+    const r = await pool.query(`SELECT id, order_id, reported_account_id FROM account_reports WHERE id=$1 LIMIT 1`, [reportId]);
+    const report = r.rows[0];
+    if (!report || !report.order_id) return res.status(404).json({ error: "Reporte sin pedido ligado" });
+
+    const a = await pool.query(
+      `SELECT id, platform, product_name, account_email, profile_name, profile_pin, status, delivered_at
+       FROM platform_accounts
+       WHERE assigned_order_id=$1
+       ORDER BY id ASC`,
+      [report.order_id]
+    );
+    res.json({ report_id: report.id, order_id: report.order_id, reported_account_id: report.reported_account_id, accounts: a.rows });
+  } catch (err) {
+    console.error("Error cuentas reporte:", err.message);
+    res.status(500).json({ error: "Error cargando cuentas del reporte" });
+  }
+});
+
+
 // ADMIN: OPCIONES DE REEMPLAZO PARA REPORTE
 // Trae cuentas disponibles de la misma plataforma/cuenta reportada.
 app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddleware, adminMiddleware, async (req, res) => {
@@ -2355,6 +2405,27 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
     );
 
     const report = reportResult.rows[0];
+
+    if (report && Number(reported_account_id || 0) > 0) {
+      const sel = await client.query(
+        `SELECT * FROM platform_accounts WHERE id=$1 AND assigned_order_id=$2 LIMIT 1 FOR UPDATE`,
+        [Number(reported_account_id), report.order_id]
+      );
+      const selectedAccount = sel.rows[0];
+      if (!selectedAccount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "La cuenta seleccionada no pertenece a ese pedido/combo" });
+      }
+      report.reported_account_id = selectedAccount.id;
+      report.platform = selectedAccount.platform || report.platform;
+      report.account_product_name = selectedAccount.product_name || report.account_product_name;
+      report.resolved_owner_admin_id = selectedAccount.owner_admin_id || report.resolved_owner_admin_id;
+      await client.query(
+        `UPDATE account_reports SET reported_account_id=$1, reported_platform=$2, owner_admin_id=COALESCE(owner_admin_id,$3) WHERE id=$4`,
+        [selectedAccount.id, selectedAccount.platform || selectedAccount.product_name || "", selectedAccount.owner_admin_id || null, reportId]
+      );
+    }
+
     if (!report) return res.status(404).json({ error: "Reporte no encontrado" });
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
@@ -2416,7 +2487,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       profile_pin,
       access_url,
       extra_data,
-      replacement_account_id
+      replacement_account_id,
+      reported_account_id
     } = req.body || {};
 
     await client.query("BEGIN");
@@ -4118,3 +4190,5 @@ initDatabase()
 // REPORTES COMBO CUENTA ESPECIFICA Y REEMPLAZO SELECTIVO - 2026-06-09 00:24:43
 
 // FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40
+
+// FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00
