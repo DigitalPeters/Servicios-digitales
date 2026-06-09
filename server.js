@@ -47,6 +47,51 @@ function formatOrderData(orderData) {
     .join("\n");
 }
 
+
+async function sendDirectUserEmail({ to, subject, text }) {
+  try {
+    if (!isMailConfigured()) {
+      console.log("Correo al usuario NO enviado: faltan variables RESEND_API_KEY o FROM_EMAIL.");
+      return false;
+    }
+
+    if (!to) {
+      console.log("Correo al usuario NO enviado: destinatario vacío.");
+      return false;
+    }
+
+    const { apiKey, fromEmail } = getMailConfig();
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: `Servicios Digitales Peters <${fromEmail}>`,
+        to: [to],
+        subject,
+        text
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error("Error enviando correo al usuario con Resend:", JSON.stringify(result));
+      return false;
+    }
+
+    console.log(`Correo enviado al usuario ${to}: ${subject}`);
+    return true;
+  } catch (err) {
+    console.error("Error enviando correo al usuario:", err.message);
+    return false;
+  }
+}
+
+
 async function sendNewOrderEmail({ orderId, customerName, customerEmail, productName, amount, orderData }) {
   try {
     if (!isMailConfigured()) {
@@ -2002,7 +2047,7 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
     }
 
     const userResult = await client.query(
-      `SELECT id, balance FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT id, name, email, balance FROM users WHERE id = $1 FOR UPDATE`,
       [request.user_id]
     );
 
@@ -2032,11 +2077,34 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
     transactionStarted = false;
 
     if (status === "aprobado") {
-      return res.json({ message: `Solicitud aprobada. Se agregaron $${amountNumber.toFixed(2)} al cliente.` });
+      await sendDirectUserEmail({
+        to: user.email,
+        subject: `Saldo aprobado por $${amountNumber.toFixed(2)}`,
+        text: `Hola ${user.name || "cliente"}.
+
+Tu solicitud de saldo fue aprobada correctamente.
+
+Monto agregado: $${amountNumber.toFixed(2)}
+Respuesta del admin: ${admin_response || "Saldo aprobado y agregado a tu cuenta."}
+
+Ya puedes ingresar a tu panel y realizar tus compras.`
+      });
+
+      return res.json({ message: `Solicitud aprobada. Se agregaron $${amountNumber.toFixed(2)} al cliente y se notificó por correo.` });
     }
 
     if (status === "rechazado") {
-      return res.json({ message: "Solicitud rechazada correctamente." });
+      await sendDirectUserEmail({
+        to: user.email,
+        subject: "Solicitud de saldo rechazada",
+        text: `Hola ${user.name || "cliente"}.
+
+Tu solicitud de saldo fue rechazada.
+
+Respuesta del admin: ${admin_response || "Por favor revisa los datos del comprobante o contacta al administrador."}`
+      });
+
+      return res.json({ message: "Solicitud rechazada correctamente y se notificó por correo." });
     }
 
     res.json({ message: "Solicitud actualizada correctamente." });
@@ -2051,6 +2119,98 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
   }
 });
 
+
+
+
+// ADMIN: NOTIFICAR AL USUARIO SOBRE SOLICITUD DE SALDO
+app.post("/api/admin/balance-requests/:requestId/notify", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const requestId = Number(req.params.requestId || 0);
+
+    const result = await pool.query(
+      `SELECT br.*, u.name AS customer_name, u.email AS customer_email
+       FROM balance_requests br
+       JOIN users u ON u.id = br.user_id
+       WHERE br.id = $1
+         AND ($2::int IS NULL OR br.owner_admin_id = $2)
+       LIMIT 1`,
+      [requestId, req.isPanelAdmin ? req.user.id : null]
+    );
+
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Solicitud no encontrada" });
+
+    const subject = String(row.status || "").toLowerCase() === "aprobado"
+      ? `Saldo aprobado por $${Number(row.amount || 0).toFixed(2)}`
+      : "Actualización de solicitud de saldo";
+
+    const text = `Hola ${row.customer_name || "cliente"}.
+
+Tu solicitud de saldo #${row.id} fue actualizada.
+
+Estado: ${row.status || "pendiente"}
+Monto: $${Number(row.amount || 0).toFixed(2)}
+Respuesta: ${row.admin_response || "Tu solicitud fue revisada por el administrador."}
+
+Entra a tu panel para verificar tu saldo.`;
+
+    const sent = await sendDirectUserEmail({ to: row.customer_email, subject, text });
+
+    res.json({
+      message: sent ? "Notificación de saldo enviada al usuario." : "No se pudo enviar correo. Revisa variables de Resend.",
+      sent
+    });
+  } catch (err) {
+    console.error("Error notificando saldo:", err.message);
+    res.status(500).json({ error: "Error notificando saldo" });
+  }
+});
+
+// ADMIN: NOTIFICAR AL USUARIO SOBRE REPORTE DE FALLA
+app.post("/api/admin/account-reports/:reportId/notify", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId || 0);
+
+    const result = await pool.query(
+      `SELECT ar.*, u.name AS customer_name, u.email AS customer_email
+       FROM account_reports ar
+       JOIN users u ON u.id = ar.user_id
+       WHERE ar.id = $1
+         AND ($2::int IS NULL OR ar.owner_admin_id = $2)
+       LIMIT 1`,
+      [reportId, req.isPanelAdmin ? req.user.id : null]
+    );
+
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Reporte no encontrado" });
+
+    const text = `Hola ${row.customer_name || "cliente"}.
+
+Tu reporte de falla #${row.id} ya fue atendido.
+
+Correo reportado: ${row.email || ""}
+Estado: ${row.status || ""}
+Respuesta del admin:
+
+${row.admin_response || "Tu reporte fue revisado por el administrador."}
+
+Entra a tu panel en Respuesta de fallos para ver/copiar los datos.`;
+
+    const sent = await sendDirectUserEmail({
+      to: row.customer_email,
+      subject: `Tu reporte de falla #${row.id} fue atendido`,
+      text
+    });
+
+    res.json({
+      message: sent ? "Notificación de reporte enviada al usuario." : "No se pudo enviar correo. Revisa variables de Resend.",
+      sent
+    });
+  } catch (err) {
+    console.error("Error notificando reporte:", err.message);
+    res.status(500).json({ error: "Error notificando reporte" });
+  }
+});
 
 
 // USUARIO: CUENTAS REPORTABLES
@@ -2832,7 +2992,7 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
     }
 
     const userResult = await client.query(
-      `SELECT id, balance FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT id, name, email, balance FROM users WHERE id = $1 FOR UPDATE`,
       [order.user_id]
     );
 
@@ -4118,4 +4278,4 @@ initDatabase()
 
 // FIX BOTON COPIAR UNICO RESPUESTA FALLOS - 2026-06-09 03:02:58
 
-// FIX FINAL X2 REPORTE VENTAS - 2026-06-09 03:30:31
+// FIX SALDO PENDIENTE Y NOTIFICACIONES - 2026-06-09 04:01:41
