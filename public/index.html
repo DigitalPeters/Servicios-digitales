@@ -4854,6 +4854,157 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setInterval(addCopyButtonsToFailureResponses, 3000);
 })();
 
+
+
+// ===============================
+// FIX BOTÓN COPIAR ÚNICO EN RESPUESTA DE FALLOS - 2026-06-09 03:02:58
+// Evita botones duplicados y deja solo uno por reporte abierto.
+// ===============================
+(function(){
+  function getFailureReportCard(el){
+    return el.closest('.item') || el.closest('.report-card') || el.closest('.card') || el.closest('.panel') || el.parentElement;
+  }
+
+  function cleanDuplicateCopyButtons(){
+    const buttons = Array.from(document.querySelectorAll('.copy-failure-response-btn'));
+    const seenCards = new Set();
+
+    buttons.forEach(btn => {
+      const card = getFailureReportCard(btn);
+      if (!card) {
+        btn.remove();
+        return;
+      }
+
+      // Si el card no contiene respuesta real, quitar botón.
+      const txt = (card.innerText || '').toLowerCase();
+      const hasResponse = txt.includes('respuesta del admin') || txt.includes('cuenta de streaming entregada') || txt.includes('cuenta reemplazada');
+      if (!hasResponse) {
+        btn.remove();
+        return;
+      }
+
+      // Solo un botón por card.
+      if (seenCards.has(card)) {
+        btn.remove();
+      } else {
+        seenCards.add(card);
+      }
+    });
+  }
+
+  function extractReplacementText(card){
+    if (!card) return '';
+    const full = card.innerText || '';
+    const marker = 'Respuesta del admin:';
+    const idx = full.indexOf(marker);
+    if (idx >= 0) {
+      let text = full.slice(idx + marker.length).trim();
+      text = text.replace(/📋\s*Copiar cuenta de reemplazo/gi, '').trim();
+      return text;
+    }
+    return full.replace(/📋\s*Copiar cuenta de reemplazo/gi, '').trim();
+  }
+
+  window.copyFailureResponseText = async function(btn){
+    const card = getFailureReportCard(btn);
+    const text = extractReplacementText(card);
+
+    if (!text) {
+      showMessage('No encontré datos para copiar', 'error');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showMessage('Datos copiados');
+    } catch(e) {
+      const tmp = document.createElement('textarea');
+      tmp.value = text;
+      document.body.appendChild(tmp);
+      tmp.focus();
+      tmp.select();
+      document.execCommand('copy');
+      tmp.remove();
+      showMessage('Datos copiados');
+    }
+  };
+
+  function addSingleCopyButtons(){
+    cleanDuplicateCopyButtons();
+
+    const cards = Array.from(document.querySelectorAll('.item, .report-card, .card'));
+    cards.forEach(card => {
+      const text = card.innerText || '';
+      const lower = text.toLowerCase();
+
+      const isReplacement =
+        lower.includes('respuesta del admin') &&
+        (
+          lower.includes('cuenta reemplazada') ||
+          lower.includes('cuenta de streaming entregada') ||
+          lower.includes('correo:') ||
+          lower.includes('contraseña:')
+        );
+
+      if (!isReplacement) return;
+
+      // No agregar si ya hay botón en este card.
+      if (card.querySelector(':scope > .copy-failure-response-btn') || card.querySelector('.copy-failure-response-btn')) return;
+
+      const btn = document.createElement('button');
+      btn.className = 'outline-btn copy-failure-response-btn';
+      btn.type = 'button';
+      btn.style.marginTop = '12px';
+      btn.textContent = '📋 Copiar cuenta de reemplazo';
+      btn.onclick = function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        copyFailureResponseText(btn);
+      };
+
+      card.appendChild(btn);
+    });
+
+    cleanDuplicateCopyButtons();
+  }
+
+  const prevLoadMyReportsCopyUnique = typeof loadMyAccountReports === 'function' ? loadMyAccountReports : null;
+  if (prevLoadMyReportsCopyUnique) {
+    window.loadMyAccountReports = async function(){
+      const result = await prevLoadMyReportsCopyUnique();
+      setTimeout(addSingleCopyButtons, 150);
+      setTimeout(addSingleCopyButtons, 700);
+      return result;
+    };
+    loadMyAccountReports = window.loadMyAccountReports;
+  }
+
+  const prevShowSectionCopyUnique = typeof showSection === 'function' ? showSection : null;
+  if (prevShowSectionCopyUnique) {
+    window.showSection = function(name){
+      const result = prevShowSectionCopyUnique(name);
+      setTimeout(addSingleCopyButtons, 200);
+      setTimeout(addSingleCopyButtons, 900);
+      return result;
+    };
+    showSection = window.showSection;
+  }
+
+  const prevLoadAppCopyUnique = typeof loadApp === 'function' ? loadApp : null;
+  if (prevLoadAppCopyUnique) {
+    window.loadApp = async function(){
+      const result = await prevLoadAppCopyUnique();
+      setTimeout(addSingleCopyButtons, 1000);
+      return result;
+    };
+    loadApp = window.loadApp;
+  }
+
+  setTimeout(addSingleCopyButtons, 1000);
+  setInterval(cleanDuplicateCopyButtons, 3000);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4867,3 +5018,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX CONTABILIZAR HISTORICO X2 COMO CUENTAS VENDIDAS - 2026-06-09 02:27:10 -->
 
 <!-- BOTON COPIAR RESPUESTA DE FALLOS - 2026-06-09 02:38:18 -->
+
+<!-- FIX BOTON COPIAR UNICO RESPUESTA FALLOS - 2026-06-09 03:02:58 -->
