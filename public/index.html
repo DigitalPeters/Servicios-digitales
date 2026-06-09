@@ -4559,6 +4559,149 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   }
 })();
 
+
+// ===============================
+// FIX VISUAL DEFINITIVO X2 - 2026-06-09 00:12:38
+// Fusiona en pantalla "Netflix perfil x2" dentro de "Netflix perfil".
+// ===============================
+(function(){
+  function baseNameX2(name){
+    return String(name || '').replace(/\s+x\d+$/i, '').trim();
+  }
+
+  function qtyFromNameX2(name, current){
+    const m = String(name || '').match(/\s+x(\d+)$/i);
+    const qtyByName = m ? Math.max(1, Number(m[1] || 1)) : 1;
+    const currentNum = Number(current || 0) || 0;
+    return Math.max(qtyByName, currentNum || qtyByName);
+  }
+
+  function fixVisibleTopProductsX2(){
+    const cards = Array.from(document.querySelectorAll('.panel, .dashboard-chart-card, .dash-card, div'));
+    const card = cards.find(el => {
+      const txt = (el.innerText || '').toLowerCase();
+      return txt.includes('productos más vendidos') && (txt.includes('netflix perfil x2') || txt.includes(' x2'));
+    });
+    if (!card) return;
+
+    const text = card.innerText || '';
+    if (!/\sx\d+/i.test(text)) return;
+
+    // Buscar filas/legend items visibles. El diseño usa puntos + nombre + número, así que usamos lectura de texto.
+    const lines = text.split('\n').map(x => x.trim()).filter(Boolean);
+    const startIndex = lines.findIndex(l => l.toLowerCase().includes('productos más vendidos'));
+    const dataLines = lines.slice(Math.max(0, startIndex + 1)).filter(l => {
+      const low = l.toLowerCase();
+      return !low.includes('productos con más') && !low.includes('ver reporte') && !low.includes('pedidos');
+    });
+
+    const map = new Map();
+    for (let i = 0; i < dataLines.length; i++) {
+      const line = dataLines[i];
+      // Si la línea termina en número: "Netflix perfil x2 1"
+      const m = line.match(/^(.*?)(?:\s+)(\d+)$/);
+      if (!m) continue;
+      const rawName = m[1].trim();
+      const rawCount = Number(m[2] || 0);
+      if (!rawName) continue;
+      const base = baseNameX2(rawName);
+      const qty = qtyFromNameX2(rawName, rawCount);
+      const key = base.toLowerCase();
+      map.set(key, { name: base, count: (map.get(key)?.count || 0) + qty });
+    }
+
+    if (!map.size) return;
+    const merged = Array.from(map.values()).sort((a,b)=>b.count-a.count);
+    const total = merged.reduce((s,x)=>s+Number(x.count||0),0);
+
+    // Ubicar contenedor de gráfica/lista conocido.
+    const knownBox = document.getElementById('dashboardTopProductsChart') || card;
+    if (!knownBox) return;
+
+    const colors = ['#f00662','#17135a','#2f6bea','#7c3aed','#06b6d4','#f59e0b'];
+    const rows = merged.map((p,idx)=>`
+      <div class="legend-item">
+        <span class="legend-dot" style="background:${colors[idx % colors.length]}"></span>
+        <span class="legend-name">${p.name}</span>
+        <span class="legend-value">${p.count}</span>
+      </div>
+    `).join('');
+
+    const gradient = merged.length ? merged.map((p,idx)=>{
+      const start = merged.slice(0,idx).reduce((s,x)=>s+(x.count/total)*360,0);
+      const end = start + (p.count/total)*360;
+      return `${colors[idx % colors.length]} ${start}deg ${end}deg`;
+    }).join(',') : '#e5e7eb 0deg 360deg';
+
+    knownBox.innerHTML = `
+      <div class="donut-summary">
+        <div class="donut" style="background:conic-gradient(${gradient})">
+          <div class="donut-center">${total}<span>pedidos</span></div>
+        </div>
+        <div class="legend-list">${rows}</div>
+      </div>
+    `;
+  }
+
+  // También interceptar datos antes de pintar, por si existen estas funciones.
+  function normalizeTopProductsX2(list){
+    const map = new Map();
+    (list || []).forEach(p => {
+      const raw = p.product_name || p.name || p.product || '';
+      const base = baseNameX2(raw);
+      const current = Number(p.orders ?? p.count ?? p.total ?? p.value ?? 0) || 0;
+      const qty = qtyFromNameX2(raw, current);
+      const key = base.toLowerCase();
+      const prev = map.get(key) || {...p, product_name: base, name: base, orders: 0, count: 0, total: 0, value: 0};
+      prev.orders = Number(prev.orders || 0) + qty;
+      prev.count = prev.orders;
+      prev.total = prev.orders;
+      prev.value = prev.orders;
+      map.set(key, prev);
+    });
+    return Array.from(map.values()).sort((a,b)=>Number(b.orders||0)-Number(a.orders||0));
+  }
+  window.normalizeTopProductsX2 = normalizeTopProductsX2;
+
+  const oldRenderDashboardChartsX2Visible = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (oldRenderDashboardChartsX2Visible) {
+    renderDashboardCharts = function(data){
+      if (data && Array.isArray(data.top_products)) data.top_products = normalizeTopProductsX2(data.top_products);
+      const result = oldRenderDashboardChartsX2Visible(data);
+      setTimeout(fixVisibleTopProductsX2, 80);
+      setTimeout(fixVisibleTopProductsX2, 500);
+      return result;
+    };
+    window.renderDashboardCharts = renderDashboardCharts;
+  }
+
+  const oldLoadDashboardStatsX2Visible = typeof loadDashboardStats === 'function' ? loadDashboardStats : null;
+  if (oldLoadDashboardStatsX2Visible) {
+    loadDashboardStats = async function(){
+      const result = await oldLoadDashboardStatsX2Visible();
+      setTimeout(fixVisibleTopProductsX2, 100);
+      setTimeout(fixVisibleTopProductsX2, 700);
+      return result;
+    };
+    window.loadDashboardStats = loadDashboardStats;
+  }
+
+  const oldLoadAppX2Visible = typeof loadApp === 'function' ? loadApp : null;
+  if (oldLoadAppX2Visible) {
+    loadApp = async function(){
+      const result = await oldLoadAppX2Visible();
+      setTimeout(fixVisibleTopProductsX2, 300);
+      setTimeout(fixVisibleTopProductsX2, 1200);
+      return result;
+    };
+    window.loadApp = loadApp;
+  }
+
+  setInterval(fixVisibleTopProductsX2, 2500);
+  setTimeout(fixVisibleTopProductsX2, 500);
+  setTimeout(fixVisibleTopProductsX2, 1500);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4576,3 +4719,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX ERROR ALIAS O EN REPORTES - 2026-06-08 23:56:44 -->
 
 <!-- FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26 -->
+
+<!-- FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38 -->

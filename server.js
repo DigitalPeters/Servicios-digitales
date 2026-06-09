@@ -667,6 +667,13 @@ async function initDatabase() {
 
   await pool.query(`
     UPDATE orders
+    SET quantity = GREATEST(quantity, COALESCE(NULLIF(substring(product_name_snapshot from '\\s+x([0-9]+)$'), '')::int, 1))
+    WHERE product_name_snapshot ~* '\\s+x[0-9]+$'
+  `);
+
+
+  await pool.query(`
+    UPDATE orders
     SET quantity = COALESCE(NULLIF(substring(product_name_snapshot from '\\s+x([0-9]+)$'), '')::int, 1)
     WHERE product_name_snapshot ~* '\\s+x[0-9]+$'
       AND (quantity IS NULL OR quantity <= 1)
@@ -3899,3 +3906,5 @@ initDatabase()
 // FIX ERROR ALIAS O EN REPORTES - 2026-06-08 23:56:44
 
 // FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26
+
+// FIX VISUAL DEFINITIVO X2 PRODUCTOS MAS VENDIDOS - 2026-06-09 00:12:38
