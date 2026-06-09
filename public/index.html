@@ -5005,6 +5005,226 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setInterval(cleanDuplicateCopyButtons, 3000);
 })();
 
+
+
+// ===============================
+// FIX FINAL X2 EN REPORTE DE VENTAS - 2026-06-09 03:30:31
+// Ya no existe compra múltiple nueva, pero pedidos anteriores tipo "Netflix perfil x2"
+// deben contarse como 2 perfiles vendidos y mostrarse como "Netflix perfil".
+// ===============================
+(function(){
+  function baseProductName(name){
+    return String(name || '').replace(/\s+x\d+$/i, '').trim();
+  }
+
+  function qtyFromProductName(name, currentValue){
+    const match = String(name || '').match(/\s+x(\d+)$/i);
+    const qtyByName = match ? Math.max(1, Number(match[1] || 1)) : 0;
+    const qtyByValue = Number(currentValue || 0) || 0;
+    return Math.max(qtyByName || 1, qtyByValue || 1);
+  }
+
+  function mergeProductSales(list){
+    const map = new Map();
+
+    (list || []).forEach(item => {
+      const rawName = item.product_name || item.name || item.product || item.producto || '';
+      const base = baseProductName(rawName);
+      if (!base) return;
+
+      const qty = qtyFromProductName(
+        rawName,
+        item.orders ?? item.count ?? item.total ?? item.value ?? item.quantity ?? item.pedidos ?? 0
+      );
+
+      const key = base.toLowerCase();
+      const prev = map.get(key) || {
+        ...item,
+        product_name: base,
+        name: base,
+        product: base,
+        producto: base,
+        orders: 0,
+        count: 0,
+        total: 0,
+        value: 0,
+        quantity: 0,
+        pedidos: 0
+      };
+
+      const current = Number(prev.orders || prev.count || prev.total || prev.value || prev.quantity || prev.pedidos || 0) || 0;
+      const newTotal = current + qty;
+
+      prev.product_name = base;
+      prev.name = base;
+      prev.product = base;
+      prev.producto = base;
+      prev.orders = newTotal;
+      prev.count = newTotal;
+      prev.total = newTotal;
+      prev.value = newTotal;
+      prev.quantity = newTotal;
+      prev.pedidos = newTotal;
+
+      // Mantener montos/costos/ganancias si vienen del backend.
+      prev.amount = Number(prev.amount || 0) + Number(item.amount || 0);
+      prev.sale = Number(prev.sale || 0) + Number(item.sale || 0);
+      prev.sales = Number(prev.sales || 0) + Number(item.sales || 0);
+      prev.venta = Number(prev.venta || 0) + Number(item.venta || 0);
+      prev.cost = Number(prev.cost || 0) + Number(item.cost || 0);
+      prev.costo = Number(prev.costo || 0) + Number(item.costo || 0);
+      prev.profit = Number(prev.profit || 0) + Number(item.profit || 0);
+      prev.ganancia = Number(prev.ganancia || 0) + Number(item.ganancia || 0);
+
+      map.set(key, prev);
+    });
+
+    return Array.from(map.values()).sort((a,b) => Number(b.orders || b.count || 0) - Number(a.orders || a.count || 0));
+  }
+
+  window.mergeProductSalesX2 = mergeProductSales;
+
+  // Interceptar dashboard.
+  const prevRenderDashboardChartsX2Report = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (prevRenderDashboardChartsX2Report) {
+    window.renderDashboardCharts = function(data){
+      if (data && Array.isArray(data.top_products)) {
+        data.top_products = mergeProductSales(data.top_products);
+      }
+      return prevRenderDashboardChartsX2Report(data);
+    };
+    renderDashboardCharts = window.renderDashboardCharts;
+  }
+
+  // Interceptar reporte de ventas si tiene renderizadores separados.
+  ['renderTopProductsChart','renderProductsChart','renderSalesByProduct','renderSalesProducts','renderProductSalesReport'].forEach(fnName => {
+    const oldFn = window[fnName];
+    if (typeof oldFn === 'function') {
+      window[fnName] = function(list, ...rest){
+        if (Array.isArray(list)) list = mergeProductSales(list);
+        return oldFn(list, ...rest);
+      };
+      try { eval(fnName + ' = window[fnName]'); } catch(e) {}
+    }
+  });
+
+  // Fallback visual: si ya está pintado "Netflix perfil x2 1", lo fusiona en la pantalla.
+  function fixVisibleProductsX2(){
+    const candidates = [
+      document.getElementById('dashboardTopProductsChart'),
+      document.getElementById('salesByProductList'),
+      document.getElementById('salesProductsReport'),
+      document.getElementById('topProductsReport')
+    ].filter(Boolean);
+
+    // Buscar también tarjetas con texto "Ventas por producto" o "Productos más vendidos".
+    document.querySelectorAll('.panel, .item, .card, .dashboard-card, div').forEach(el => {
+      const text = (el.innerText || '').toLowerCase();
+      if (
+        (text.includes('productos más vendidos') || text.includes('ventas por producto')) &&
+        /\sx\d+/i.test(el.innerText || '')
+      ) {
+        candidates.push(el);
+      }
+    });
+
+    const unique = Array.from(new Set(candidates));
+
+    unique.forEach(box => {
+      const text = box.innerText || '';
+      if (!/\sx\d+/i.test(text)) return;
+
+      const lines = text.split('\n').map(x => x.trim()).filter(Boolean);
+      const map = new Map();
+
+      lines.forEach(line => {
+        // Formato: "Netflix perfil x2 1"
+        const match = line.match(/^(.*?)(?:\s+)(\d+)$/);
+        if (!match) return;
+
+        const rawName = match[1].trim();
+        if (!rawName || rawName.toLowerCase().includes('productos') || rawName.toLowerCase().includes('ventas')) return;
+
+        const qtyShown = Number(match[2] || 0);
+        const base = baseProductName(rawName);
+        const qty = qtyFromProductName(rawName, qtyShown);
+        const key = base.toLowerCase();
+
+        map.set(key, {
+          name: base,
+          count: (map.get(key)?.count || 0) + qty
+        });
+      });
+
+      if (!map.size) return;
+
+      const merged = Array.from(map.values()).sort((a,b)=>b.count-a.count);
+      const total = merged.reduce((sum,x)=>sum+x.count,0);
+
+      const rows = merged.map(p => `
+        <div class="legend-item">
+          <span class="legend-dot"></span>
+          <span class="legend-name">${p.name}</span>
+          <span class="legend-value">${p.count}</span>
+        </div>
+      `).join('');
+
+      if ((box.innerText || '').toLowerCase().includes('productos más vendidos')) {
+        box.innerHTML = `
+          <h2>Productos más vendidos</h2>
+          <p class="small-text">Productos con más cuentas vendidas hoy.</p>
+          <div class="donut-summary">
+            <div class="donut">
+              <div class="donut-center">${total}<span>cuentas</span></div>
+            </div>
+            <div class="legend-list">${rows}</div>
+          </div>
+        `;
+      } else if ((box.innerText || '').toLowerCase().includes('ventas por producto')) {
+        box.innerHTML = `
+          <h2>Ventas por producto</h2>
+          <div class="legend-list">${rows}</div>
+        `;
+      }
+    });
+  }
+
+  const prevLoadDashboardStatsX2Report = typeof loadDashboardStats === 'function' ? loadDashboardStats : null;
+  if (prevLoadDashboardStatsX2Report) {
+    window.loadDashboardStats = async function(){
+      const result = await prevLoadDashboardStatsX2Report();
+      setTimeout(fixVisibleProductsX2, 200);
+      setTimeout(fixVisibleProductsX2, 900);
+      return result;
+    };
+    loadDashboardStats = window.loadDashboardStats;
+  }
+
+  const prevLoadSalesReportX2Report = typeof loadSalesReport === 'function' ? loadSalesReport : null;
+  if (prevLoadSalesReportX2Report) {
+    window.loadSalesReport = async function(...args){
+      const result = await prevLoadSalesReportX2Report(...args);
+      setTimeout(fixVisibleProductsX2, 200);
+      setTimeout(fixVisibleProductsX2, 900);
+      return result;
+    };
+    loadSalesReport = window.loadSalesReport;
+  }
+
+  const prevLoadAppX2Report = typeof loadApp === 'function' ? loadApp : null;
+  if (prevLoadAppX2Report) {
+    window.loadApp = async function(){
+      const result = await prevLoadAppX2Report();
+      setTimeout(fixVisibleProductsX2, 1000);
+      return result;
+    };
+    loadApp = window.loadApp;
+  }
+
+  setTimeout(fixVisibleProductsX2, 1200);
+  setInterval(fixVisibleProductsX2, 4000);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -5020,3 +5240,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- BOTON COPIAR RESPUESTA DE FALLOS - 2026-06-09 02:38:18 -->
 
 <!-- FIX BOTON COPIAR UNICO RESPUESTA FALLOS - 2026-06-09 03:02:58 -->
+
+<!-- FIX FINAL X2 REPORTE VENTAS - 2026-06-09 03:30:31 -->
