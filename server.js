@@ -664,6 +664,14 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
+
+  await pool.query(`
+    UPDATE orders
+    SET quantity = COALESCE(NULLIF(substring(product_name_snapshot from '\\s+x([0-9]+)$'), '')::int, 1)
+    WHERE product_name_snapshot ~* '\\s+x[0-9]+$'
+      AND (quantity IS NULL OR quantity <= 1)
+  `);
+
   await pool.query(`UPDATE orders SET quantity = 1 WHERE quantity IS NULL OR quantity < 1`);
 
 
@@ -3889,3 +3897,5 @@ initDatabase()
 // FIX DEFINITIVO CANTIDAD CON COLUMNA ORDERS.QUANTITY - 2026-06-08 23:42:29
 
 // FIX ERROR ALIAS O EN REPORTES - 2026-06-08 23:56:44
+
+// FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26

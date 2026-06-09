@@ -4507,6 +4507,58 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   }
 })();
 
+
+// ===============================
+// FIX FUSIONAR PRODUCTOS X2 - 2026-06-09 00:05:26
+// Netflix perfil x2 debe sumarse como 2 dentro de Netflix perfil.
+// ===============================
+(function(){
+  function baseProductNameForQty(name){
+    return String(name || '').replace(/\s+x\d+$/i, '').trim();
+  }
+  function qtyFromProductName(name){
+    const m = String(name || '').match(/\s+x(\d+)$/i);
+    return m ? Math.max(1, Number(m[1] || 1)) : 1;
+  }
+  function normalizeTopProductsXQty(list){
+    const map = new Map();
+    (list || []).forEach(p => {
+      const raw = p.product_name || p.name || p.product || '';
+      const base = baseProductNameForQty(raw);
+      const reported = Number(p.orders ?? p.count ?? p.total ?? p.value ?? 0) || 0;
+      const qty = Math.max(reported, qtyFromProductName(raw));
+      const key = base.toLowerCase();
+      const prev = map.get(key) || {...p, product_name: base, name: base, orders: 0, count: 0, total: 0, value: 0};
+      prev.orders = Number(prev.orders || 0) + qty;
+      prev.count = prev.orders;
+      prev.total = prev.orders;
+      prev.value = prev.orders;
+      map.set(key, prev);
+    });
+    return Array.from(map.values()).sort((a,b)=>Number(b.orders||0)-Number(a.orders||0));
+  }
+  window.normalizeTopProductsXQty = normalizeTopProductsXQty;
+
+  const oldRenderDashboardChartsX2Final = typeof renderDashboardCharts === 'function' ? renderDashboardCharts : null;
+  if (oldRenderDashboardChartsX2Final) {
+    renderDashboardCharts = function(data){
+      if (data && Array.isArray(data.top_products)) {
+        data.top_products = normalizeTopProductsXQty(data.top_products);
+      }
+      return oldRenderDashboardChartsX2Final(data);
+    };
+    window.renderDashboardCharts = renderDashboardCharts;
+  }
+
+  const oldRenderTopProductsChartX2Final = typeof renderTopProductsChart === 'function' ? renderTopProductsChart : null;
+  if (oldRenderTopProductsChartX2Final) {
+    renderTopProductsChart = function(list){
+      return oldRenderTopProductsChartX2Final(normalizeTopProductsXQty(list));
+    };
+    window.renderTopProductsChart = renderTopProductsChart;
+  }
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -4522,3 +4574,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX DEFINITIVO CANTIDAD CON COLUMNA ORDERS.QUANTITY - 2026-06-08 23:42:29 -->
 
 <!-- FIX ERROR ALIAS O EN REPORTES - 2026-06-08 23:56:44 -->
+
+<!-- FIX FUSIONAR X2 CANTIDAD PRODUCTOS MAS VENDIDOS - 2026-06-09 00:05:26 -->
