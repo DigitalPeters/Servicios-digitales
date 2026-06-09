@@ -5043,6 +5043,147 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(hideQtyControls,800);
 })();
 
+
+
+// ===============================
+// FIX TIENDA NO ABRE PRODUCTOS - 2026-06-09 02:00:33
+// Restaura el despliegue de productos/plataformas y mantiene compra individual.
+// ===============================
+(function(){
+  function forceSinglePurchaseNoBreakingDetails(){
+    document.querySelectorAll('[id^="qty-"]').forEach(input => {
+      input.value = 1;
+      input.removeAttribute('max');
+      input.setAttribute('min','1');
+      // NO ocultar el div padre porque puede ser product-details.
+      input.style.display = 'none';
+
+      const label = input.previousElementSibling;
+      if (label && (label.textContent || '').toLowerCase().includes('cantidad')) {
+        label.style.display = 'none';
+      }
+
+      const total = document.getElementById(String(input.id).replace('qty-','total-'));
+      if (total) {
+        const totalBox = total.closest('.order-data');
+        if (totalBox) totalBox.style.display = 'none';
+      }
+    });
+
+    document.querySelectorAll('.small-text').forEach(el => {
+      const t = (el.textContent || '').toLowerCase();
+      if (t.includes('varias cuentas') || t.includes('varios perfiles') || t.includes('misma plataforma')) {
+        el.style.display = 'none';
+      }
+    });
+  }
+
+  // Reforzar toggleProduct para que siempre abra/cierre los detalles.
+  window.toggleProduct = function(productId){
+    const details = document.getElementById('product-details-' + productId);
+    if (!details) return;
+
+    const isHidden =
+      details.classList.contains('open') === false &&
+      (details.style.display === '' || details.style.display === 'none');
+
+    document.querySelectorAll('.product-details').forEach(el => {
+      if (el !== details) {
+        el.classList.remove('open');
+        el.style.display = 'none';
+      }
+    });
+
+    if (details.classList.contains('open') || details.style.display === 'block') {
+      details.classList.remove('open');
+      details.style.display = 'none';
+    } else {
+      details.classList.add('open');
+      details.style.display = 'block';
+    }
+
+    setTimeout(forceSinglePurchaseNoBreakingDetails, 50);
+  };
+
+  // Si algún render anterior dejó product-details sin CSS usable, lo corregimos.
+  function repairProductDetailsDisplay(){
+    document.querySelectorAll('.product-details').forEach(el => {
+      if (!el.classList.contains('open') && el.style.display !== 'block') {
+        el.style.display = 'none';
+      }
+    });
+    forceSinglePurchaseNoBreakingDetails();
+  }
+
+  // Compra individual, sin quantity múltiple.
+  window.buyProduct = async function(productId){
+    try{
+      const product = (window.allProducts || []).find(p => Number(p.id) === Number(productId)) ||
+        await api('/api/products').then(ps => ps.find(p => Number(p.id) === Number(productId)));
+
+      if (!product) throw new Error('Producto no encontrado');
+
+      if (!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
+
+      const fields = parseJsonArray(product.required_fields);
+      const order_data = {};
+      fields.forEach(f => {
+        const input = document.getElementById(`field-${productId}-${f}`);
+        order_data[f] = input ? input.value.trim() : '';
+      });
+
+      const data = await api('/api/buy/' + productId, {
+        method: 'POST',
+        body: JSON.stringify({ order_data, quantity: 1 })
+      });
+
+      showMessage(data.message || 'Compra realizada');
+      await loadApp();
+      showSection('orders');
+    } catch(e) {
+      showMessage(e.message || 'Error comprando producto', 'error');
+    }
+  };
+
+  const oldFilterProductsOpenFix = typeof filterProducts === 'function' ? filterProducts : null;
+  if (oldFilterProductsOpenFix) {
+    window.filterProducts = function(){
+      const result = oldFilterProductsOpenFix();
+      setTimeout(repairProductDetailsDisplay, 80);
+      setTimeout(repairProductDetailsDisplay, 400);
+      return result;
+    };
+    filterProducts = window.filterProducts;
+  }
+
+  const oldShowSectionOpenFix = typeof showSection === 'function' ? showSection : null;
+  if (oldShowSectionOpenFix) {
+    window.showSection = function(name){
+      const result = oldShowSectionOpenFix(name);
+      if (name === 'store') {
+        setTimeout(repairProductDetailsDisplay, 120);
+        setTimeout(repairProductDetailsDisplay, 600);
+      }
+      return result;
+    };
+    showSection = window.showSection;
+  }
+
+  const oldLoadAppOpenFix = typeof loadApp === 'function' ? loadApp : null;
+  if (oldLoadAppOpenFix) {
+    window.loadApp = async function(){
+      const result = await oldLoadAppOpenFix();
+      setTimeout(repairProductDetailsDisplay, 500);
+      setTimeout(repairProductDetailsDisplay, 1200);
+      return result;
+    };
+    loadApp = window.loadApp;
+  }
+
+  setTimeout(repairProductDetailsDisplay, 700);
+  setTimeout(repairProductDetailsDisplay, 1600);
+})();
+
 </script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
@@ -5068,3 +5209,5 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
 <!-- FIX MATCH REEMPLAZO NETFLIX AVAILABLE - 2026-06-09 00:57:40 -->
 
 <!-- FIX FINAL COMBO REPORTES REEMPLAZO COPY SIN MULTICOMPRA - 2026-06-09 01:41:00 -->
+
+<!-- FIX TIENDA NO ABRE PRODUCTOS - 2026-06-09 02:00:33 -->
