@@ -4246,51 +4246,38 @@ app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware,
   }
 });
 // ==========================================
-// NUEVA RUTA: REEMPLAZO MANUAL DE CUENTAS (ADMIN)
+// INGRESO MANUAL DIRECTO SIN BUSCAR INVENTARIO
 // ==========================================
-app.post("/api/admin/reemplazo-manual", async (req, res) => {
+app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
   try {
     const { reportId, email, password, profile, pin, url } = req.body;
-
+    
     if (!reportId || !email || !password) {
-      return res.status(400).json({ error: "El ID del reporte, el correo y la contraseña son obligatorios." });
+      return res.status(400).json({ error: "Faltan datos obligatorios." });
     }
 
-    // 1. Insertamos la nueva cuenta en tu base de datos de inventario ('accounts')
-    // Esto garantiza que la cuenta exista oficialmente en el sistema y sea reportable después.
-    let newAccountId = null;
-    try {
-      const accountInsert = await pool.query(
-        "INSERT INTO accounts (email, password, profile, pin, url, status) VALUES ($1, $2, $3, $4, $5, 'sold') RETURNING id",
-        [email, password, profile || '', pin || '', url || '']
-      );
-      newAccountId = accountInsert.rows[0].id;
-    } catch (dbErr) {
-      // Respaldo por si tu tabla usa columnas simplificadas
-      console.log("Aplicando registro de cuenta básico...");
-      const accountInsertBasic = await pool.query(
-        "INSERT INTO accounts (email, password, status) VALUES ($1, $2, 'sold') RETURNING id",
-        [email, password]
-      );
-      newAccountId = accountInsertBasic.rows[0].id;
-    }
+    // Se crea la respuesta estructurada que verá el cliente
+    const respuestaAdmin = `✅ REEMPLAZO MANUAL ENTREGADO:\n• Correo: ${email}\n• Contraseña: ${password}\n• Perfil: ${profile || 'N/A'}\n• PIN: ${pin || 'N/A'}\n• URL: ${url || 'N/A'}`;
 
-    // 2. Redactamos la respuesta estructurada que verá el cliente en su sección de fallas
-    const respuestaAdmin = `✅ REEMPLAZO MANUAL ENTREGADO POR ADMIN:\n• Correo: ${email}\n• Contraseña: ${password}\n• Perfil: ${profile || 'No aplica'}\n• PIN: ${pin || 'No aplica'}\n• URL: ${url || 'No aplica'}`;
-
-    // 3. Actualizamos el reporte original marcándolo como resuelto ('resolved') y guardando los datos
+    // Actualiza el reporte y lo marca como resuelto
     await pool.query(
       "UPDATE account_reports SET status = 'resolved', admin_response = $1, updated_at = NOW() WHERE id = $2",
       [respuestaAdmin, reportId]
     );
 
-    res.json({ success: true, message: "Cuenta registrada e insertada en el sistema con éxito." });
+    // Intenta guardar la cuenta en el inventario para el futuro (sin romper el proceso si falla)
+    try {
+      await pool.query(
+        "INSERT INTO platform_accounts (email, password, status) VALUES ($1, $2, 'sold')",
+        [email, password]
+      );
+    } catch(e) { console.log("Solo se actualizó el reporte."); }
+
+    res.json({ success: true, message: "Cuenta entregada con éxito." });
   } catch (err) {
-    console.error("Error procesando reemplazo manual:", err.message);
-    res.status(500).json({ error: "Error interno del servidor: " + err.message });
+    res.status(500).json({ error: "Error interno: " + err.message });
   }
 });
-
 initDatabase()
   .then(() => {
     app.listen(PORT, () => {

@@ -5199,70 +5199,63 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
   setTimeout(addNotifyButtons, 1500);
 })();
 // ==========================================
-// FUNCION DE REEMPLAZO MANUAL DESDE EL PANEL
+<script>
 // ==========================================
-async function ejecutarReemplazoManual(reportId) {
-  if (!reportId) {
-    reportId = prompt("Introduce el ID del reporte numérico que deseas solucionar:");
-    if (!reportId) return;
-  }
-
-  // Te pedirá los 5 datos uno por uno de forma sencilla
-  const email = prompt("1 de 5 - Ingrese el nuevo CORREO electrónico de la cuenta:");
+// BOTÓN MORADO DE INGRESO MANUAL SEGURO
+// ==========================================
+async function forzarIngresoManual(reportId) {
+  const email = prompt("1/5 - Ingrese el NUEVO CORREO electrónico:");
   if (!email) return;
-
-  const password = prompt("2 de 5 - Ingrese la nueva CONTRASEÑA:");
+  const password = prompt("2/5 - Ingrese la NUEVA CONTRASEÑA:");
   if (!password) return;
+  const profile = prompt("3/5 - PERFIL asignado (Opcional):") || "";
+  const pin = prompt("4/5 - PIN de acceso (Opcional):") || "";
+  const url = prompt("5/5 - URL de acceso (Opcional):") || "";
 
-  const profile = prompt("3 de 5 - Ingrese el PERFIL asignado (Ej: Perfil 2) o deje vacío:") || "";
-  const pin = prompt("4 de 5 - Ingrese el PIN de acceso (Ej: 4321) o deje vacío:") || "";
-  const url = prompt("5 de 5 - Ingrese la URL de acceso (si aplica) o deje vacío:") || "";
-
-  if (!confirm(`¿Confirmas subir esta cuenta al sistema y cerrar este reporte?\n\nCorreo: ${email}`)) return;
+  if (!confirm(`¿Confirmas entregar esta cuenta al cliente?\nCorreo: ${email}`)) return;
 
   try {
-    const response = await fetch('/api/admin/reemplazo-manual', {
+    const res = await fetch('/api/admin/reemplazo-manual-seguro', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reportId, email, password, profile, pin, url })
     });
     
-    const data = await response.json();
+    const data = await res.json();
     if (data.success) {
-      alert("¡Éxito! La cuenta se guardó en la base de datos (ya es reportable) y el cliente recibió los datos.");
-      if (typeof loadAdminReports === 'function') loadAdminReports();
+      alert("¡Éxito! La cuenta se entregó al cliente correctamente.");
+      if (typeof loadAccountReports === 'function') loadAccountReports();
       else location.reload();
     } else {
-      alert("Error: " + (data.error || "No se pudo procesar el reemplazo"));
+      alert("Error: " + data.error);
     }
   } catch (err) {
-    alert("Error de conexión con Render: " + err.message);
+    alert("Error de conexión: " + err.message);
   }
 }
 
-// Inyector automático: Agrega el botón de "Reemplazo Manual" al panel de administración sin romper tu diseño
+// Inyector: Agrega el botón morado a todos los reportes automáticamente
 setInterval(() => {
   const bloquesFallas = document.querySelectorAll('.item, .card, tr');
   bloquesFallas.forEach(bloque => {
     const texto = bloque.innerHTML;
-    // Si detecta un reporte abierto y no tiene nuestro botón azul, lo crea automáticamente
-    if ((texto.includes('Reporte') || texto.includes('Falla')) && !bloque.querySelector('.btn-manual-reemplazo')) {
+    if ((texto.includes('Reporte') || texto.includes('Falla')) && !bloque.querySelector('.btn-ingreso-manual')) {
       const idEncontrado = texto.match(/#(\d+)/);
       const reportId = idEncontrado ? idEncontrado[1] : null;
-      const contenedorBotones = bloque.querySelector('.order-data, td:last-child') || bloque;
+      const contenedor = bloque.querySelector('.order-data, td:last-child') || bloque;
       
-      if (reportId && contenedorBotones) {
-        const botonManual = document.createElement('button');
-        botonManual.className = 'btn-manual-reemplazo';
-        botonManual.innerHTML = '✍️ Reemplazo Manual';
-        botonManual.style.cssText = 'background: #2563eb; color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; margin-left: 8px; border: none; cursor: pointer; display: inline-block; font-weight: bold;';
-        botonManual.onclick = () => ejecutarReemplazoManual(reportId);
-        contenedorBotones.appendChild(botonManual);
+      if (reportId && contenedor) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-ingreso-manual';
+        btn.innerHTML = '⚡ Ingreso Manual';
+        btn.style.cssText = 'background: #9333ea; color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; margin-left: 8px; border: none; cursor: pointer; display: inline-block; font-weight: bold; margin-top: 6px;';
+        btn.onclick = () => forzarIngresoManual(reportId);
+        contenedor.appendChild(btn);
       }
     }
   });
-}, 2500);
-</script>
+}, 2000);
+</script></script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
 </body>
