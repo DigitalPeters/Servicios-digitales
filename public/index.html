@@ -85,7 +85,7 @@
     <main class="main">
       <div class="topbar">
         <div class="searchbox"><span>🔎</span><input id="globalSearch" placeholder="Buscar producto..." oninput="filterProducts()" /></div>
-        <div class="top-actions"><span class="pill open">Abierto</span><span class="pill">Online</span><b id="topUserName">Usuario</b></div>
+        <div class="top-actions"><span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span><span class="pill open">Abierto</span><span class="pill">Online</span><b id="topUserName">Usuario</b></div>
       </div>
 
       <section id="section-dashboard" class="section active">
@@ -173,6 +173,14 @@
 
       <section id="section-reports" class="section">
         <div class="panel"><h2>Reportar falla</h2><p class="small-text">Reporta una falla para que el administrador revise el caso.</p><label class="field-label">Correo con falla</label><input id="reporteCorreo" placeholder="correo@ejemplo.com" /><label class="field-label">Tipo de falla</label><select id="reporteTipo"><option value="contraseña incorrecta">Contraseña incorrecta</option><option value="codigo de viaje">Código de viaje</option><option value="codigo de acceso disney">Código de acceso Disney</option><option value="codigo de hbo">Código de HBO</option><option value="otro">Otro</option></select><label class="field-label">Explicación</label><textarea id="reporteExplicacion" placeholder="Describe el problema"></textarea><button class="primary-btn" onclick="enviarReporteCuenta()">Enviar reporte</button></div>
+        
+        <div class="panel" style="margin-top: 22px;">
+          <div class="panel-head">
+            <h2>Mis reportes y respuestas</h2>
+            <button class="outline-btn" style="width:auto" onclick="loadMyReports()">Actualizar</button>
+          </div>
+          <div id="myReportsList">Cargando reportes...</div>
+        </div>
       </section>
 
       <section id="section-distributor" class="section">
@@ -474,6 +482,23 @@ function renderWarrantyNotice(o){
   if(!w)return '';
   return `<div class="order-data"><b>Garantía:</b><p style="margin:5px 0"><b>Entrega:</b> ${w.start.toLocaleDateString('es-MX')} &nbsp; <b>Vence:</b> ${w.end.toLocaleDateString('es-MX')} &nbsp; <b>Días restantes:</b> <span class="${w.active?'success':'error'}">${w.daysRemaining}</span></p></div>`;
 }
+async function loadMyReports(){
+  try {
+    const reports = await api('/api/my-account-reports');
+    const box = document.getElementById('myReportsList');
+    if(!box) return;
+    box.innerHTML = reports.length ? reports.map(r => `
+      <div class="item">
+        <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status)}</span></p>
+        <p><b>Correo reportado:</b> ${safeText(r.email)}</p>
+        <p><b>Falla:</b> ${safeText(r.issue_type)}</p>
+        <p><b>Explicación:</b> ${safeText(r.description)}</p>
+        <div class="order-data response-text" style="background:#eef2ff; margin-top: 10px;"><b>Respuesta del admin:</b><br>${safeText(r.admin_response || 'En revisión por el administrador...')}</div>
+      </div>
+    `).join('') : 'No has reportado fallas.';
+  } catch(e) { console.warn(e); }
+}
+
 function renderMyOrders(){
   const search=(document.getElementById('myOrdersSearch')?.value||'').toLowerCase().trim();
   const statusFilter=document.getElementById('myOrdersStatusFilter')?.value||'';
@@ -1763,7 +1788,10 @@ showSection = function(name){
   syncAdminVisibilitySafe();
   if(name==='shop' && typeof loadProducts==='function') loadProducts();
   if(name==='orders' && typeof loadMyOrders==='function') loadMyOrders();
-  if(name==='reports') setTimeout(()=>document.getElementById('reporteCorreo')?.focus(),80);
+  if(name==='reports') {
+    setTimeout(()=>document.getElementById('reporteCorreo')?.focus(),80);
+    if(typeof loadMyReports==='function') loadMyReports();
+  }
   if(name==='admin' && isAdminUserSafe()){
     Promise.allSettled([
       typeof loadUsers==='function'?loadUsers():Promise.resolve(),
@@ -1862,7 +1890,16 @@ loadApp = async function(){
     ]);
   }
 
-  showSection('dashboard');
+  set('topUserBalance', formatMoney(currentUser.balance));
+  if(typeof loadMyReports==='function') loadMyReports();
+
+  if(currentUser.role === 'admin' || (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')) {
+    showSection('dashboard');
+  } else {
+    document.querySelector('[data-section="dashboard"]')?.classList.add('hidden');
+    document.querySelector('[data-section="account"]')?.classList.add('hidden');
+    showSection('shop');
+  }
 };
 
 
