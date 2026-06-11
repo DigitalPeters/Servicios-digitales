@@ -4692,17 +4692,16 @@ async function botonDePanico() {
 
 // Inyector: Dibuja automáticamente un botón rojo en tu menú lateral
 setInterval(() => {
-  const adminMenus = document.querySelectorAll('.menu');
-  adminMenus.forEach(menu => {
-    // Solo lo inyecta si el usuario está logueado como administrador
-    if (document.querySelector('.admin-only') && !document.getElementById('btn-panico-admin')) {
-      const btn = document.createElement('button');
-      btn.id = 'btn-panico-admin';
-      btn.className = 'menu-btn admin-only'; // Clase de seguridad
-      btn.style.cssText = 'background: #dc2626; color: white; font-weight: bold; margin-top: 25px; border: 2px solid #7f1d1d; cursor: pointer;';
-      btn.innerHTML = '🚨 Resetear Clave';
-      btn.onclick = botonDePanico;
-      menu.appendChild(btn);
-    }
-  });
-}, 2000);
+  const menu = document.querySelector('.menu');
+  
+  // Si el menú existe y el botón aún no se ha dibujado, lo inyecta
+  if (menu && !document.getElementById('btn-panico-admin')) {
+    const btn = document.createElement('button');
+    btn.id = 'btn-panico-admin';
+    btn.className = 'menu-btn'; 
+    btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
+    btn.innerHTML = '🚨 Resetear Clave';
+    btn.onclick = botonDePanico;
+    menu.appendChild(btn);
+  }
+}, 1000);
