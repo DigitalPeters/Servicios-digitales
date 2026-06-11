@@ -20,6 +20,9 @@ app.use(cors());
 app.use(compression()); // <-- EXPRIME LA PÁGINA PARA QUE CARGUE RÁPIDO
 app.use(express.static("public"));
 app.get("/test-recuperacion", (req,res)=>{
+  res.send("OK TEST");
+});
+app.get("/test-recuperacion", (req,res)=>{
   res.send("OK");
 });
 
