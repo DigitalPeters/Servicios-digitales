@@ -131,16 +131,18 @@ body.dark-mode .dash-icon {
     padding: 4px 8px !important;
   }
 }
-/* ==========================================
-   REDISEÑO DINÁMICO DE LA TIENDA DE PRODUCTOS
-   ========================================== */
+/* CORRECCIÓN: EVITAR QUE LOS PRODUCTOS SE ESCONDAN BAJO EL MENÚ */
 .products-list {
   display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
+  /* Redujimos de 280 a 240px para que se acomoden mejor y no choquen */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
   gap: 20px !important;
-  padding: 10px 0 !important;
+  padding: 10px 20px !important; /* Le devolvemos el espacio a los lados */
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  margin: 0 auto !important; /* Centrado perfecto */
 }
-
 .product-row {
   border: none !important;
   border-radius: 20px !important;
