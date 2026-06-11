@@ -131,87 +131,23 @@ body.dark-mode .dash-icon {
     padding: 4px 8px !important;
   }
 }
-/* CORRECCIÓN: EVITAR QUE LOS PRODUCTOS SE ESCONDAN BAJO EL MENÚ */
+/* CORRECCIÓN DEFINITIVA: ALINEACIÓN PERFECTA SIN CHOCAR CON LA BARRA LATERAL */
 .products-list {
   display: grid !important;
-  /* Redujimos de 280 a 240px para que se acomoden mejor y no choquen */
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
-  gap: 20px !important;
-  padding: 10px 20px !important; /* Le devolvemos el espacio a los lados */
+  gap: 16px !important;
+  padding: 10px 0 !important; /* Quitamos el espacio lateral sobrante */
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-  margin: 0 auto !important; /* Centrado perfecto */
-}
-.product-row {
-  border: none !important;
-  border-radius: 20px !important;
-  background: var(--card) !important;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06) !important;
-  overflow: hidden !important;
-  transition: all 0.3s ease !important;
-  display: flex !important;
-  flex-direction: column !important;
-  position: relative !important;
+  margin: 0 !important; /* Quitamos el centrado que lo empujaba hacia la izquierda */
+  justify-content: start !important; /* Obligamos a los productos a empezar desde la línea segura */
 }
 
-/* Efecto flotante al pasar el mouse/dedo */
-.product-row:hover {
-  transform: translateY(-5px) !important;
-  box-shadow: 0 12px 32px rgba(109, 93, 252, 0.15) !important;
+/* Seguro extra: Evita que cualquier elemento de la página intente irse hacia la izquierda */
+.main {
+  overflow-x: hidden !important;
 }
-
-.product-header {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  gap: 12px !important;
-  padding: 24px !important;
-  cursor: pointer !important;
-  position: relative !important;
-}
-
-/* Zona del Título y Categoría */
-.product-header > div:nth-child(1) {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  gap: 6px !important;
-  width: 100% !important;
-  padding-right: 40px !important; /* Espacio para que la flecha no tape el texto */
-}
-
-.product-name {
-  font-weight: 900 !important;
-  font-size: 20px !important;
-  color: var(--primary) !important;
-  line-height: 1.3 !important;
-  white-space: normal !important; /* Corrige que el nombre no se corte */
-  overflow: visible !important;
-}
-
-.chip {
-  background: var(--soft) !important;
-  color: var(--accent) !important;
-  padding: 6px 12px !important;
-  border-radius: 12px !important;
-  font-size: 11px !important;
-  font-weight: 900 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-}
-
-/* Zona del Precio y Stock */
-.product-header > div:nth-child(2) {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  width: 100% !important;
-  margin-top: 8px !important;
-  padding-top: 16px !important;
-  border-top: 1px solid var(--border) !important;
-}
-
 .price {
   font-size: 24px !important;
   font-weight: 900 !important;
