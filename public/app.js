@@ -4524,3 +4524,78 @@ function cargarGrafica() {
 
 // Ejecutar la gráfica cuando la página termine de cargar
 setTimeout(cargarGrafica, 1000);
+
+// ==========================================
+// SEGUNDA GRÁFICA ANIMADA: USUARIOS TOP
+// ==========================================
+function cargarGraficaUsuarios() {
+  const ctx = document.getElementById('graficaUsuarios');
+  if (!ctx) return;
+
+  new Chart(ctx, {
+    type: 'doughnut', // Estilo dona moderno animado
+    data: {
+      labels: ['Admin', 'Vendedor Juan', 'Distribuidor Pedro'],
+      datasets: [{
+        data: [1200, 850, 430], // Datos simulados de ejemplo
+        backgroundColor: ['#6d5dfc', '#4ade80', '#f43f5e'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom' }
+      }
+    }
+  });
+}
+// Forzar que carguen ambas gráficas al iniciar
+setTimeout(() => {
+  if (typeof cargarGrafica === 'function') cargarGrafica();
+  cargarGraficaUsuarios();
+}, 1200);
+
+// ==========================================
+// FUNCIONAMIENTO DEL MODO OSCURO
+// ==========================================
+function toggleDarkMode() {
+  document.body.classList.toggle('dark-mode');
+  const btn = document.getElementById('theme-toggle');
+  if (document.body.classList.contains('dark-mode')) {
+    btn.innerHTML = '☀️';
+    localStorage.setItem('theme', 'dark');
+  } else {
+    btn.innerHTML = '🌙';
+    localStorage.setItem('theme', 'light');
+  }
+}
+// Auto-aplicar preferencia guardada al entrar
+if (localStorage.getItem('theme') === 'dark') {
+  document.body.classList.add('dark-mode');
+  setTimeout(() => { if(document.getElementById('theme-toggle')) document.getElementById('theme-toggle').innerHTML = '☀️'; }, 500);
+}
+
+// ==========================================
+// BUSCADOR EN TIEMPO REAL INTELIGENTE
+// ==========================================
+setTimeout(() => {
+  // Buscamos la casilla de búsqueda existente en tu catálogo
+  const inputBuscar = document.querySelector('input[placeholder*="Buscar"], #searchProduct, .search-bar input');
+  if (inputBuscar) {
+    inputBuscar.addEventListener('input', (e) => {
+      const texto = e.target.value.toLowerCase().trim();
+      // Buscamos todas las tarjetas de productos en la tienda
+      const tarjetas = document.querySelectorAll('.product-card, .catalog-item, .item-producto');
+      
+      tarjetas.forEach(tarjeta => {
+        const nombreProducto = tarjeta.textContent.toLowerCase();
+        if (nombreProducto.includes(texto)) {
+          tarjeta.style.display = ''; // Lo muestra si coincide
+        } else {
+          tarjeta.style.display = 'none'; // Lo oculta si no coincide
+        }
+      });
+    });
+  }
+}, 1500);

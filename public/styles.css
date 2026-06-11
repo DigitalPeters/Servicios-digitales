@@ -30,3 +30,53 @@
 
     .announcement-admin-list .item{background:#fff}
     .urgent-card{border:2px solid #ef4444!important}
+/* MODO OSCURO */
+body.dark-mode {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --text: #f8fafc;
+  --border: #334155;
+  --soft: #1e1b4b;
+}
+body.dark-mode .panel, body.dark-mode .dash-card, body.dark-mode .sidebar {
+  background: var(--card);
+  color: var(--text);
+  border-color: var(--border);
+}
+body.dark-mode input, body.dark-mode select, body.dark-mode textarea {
+  background: #1e293b;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+/* MENÚ INFERIOR MÓVIL */
+.mobile-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  height: 60px;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 999;
+  box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
+}
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.mobile-nav-item span {
+  font-size: 20px;
+}
+@media (max-width: 768px) {
+  .sidebar { display: none !important; }
+  .app-layout { display: block !important; padding-bottom: 70px !important; }
+  .mobile-nav { display: flex; }
+}
