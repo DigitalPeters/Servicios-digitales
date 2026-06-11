@@ -4599,3 +4599,66 @@ setTimeout(() => {
     });
   }
 }, 1500);
+// ==========================================
+// RECUPERACIÓN DE CONTRASEÑA CON CÓDIGO (GMAIL)
+// ==========================================
+async function recuperarContrasena() {
+  const email = prompt("Paso 1/3 - Introduce tu correo electrónico:");
+  if (!email) return;
+
+  alert("Procesando... Te estamos enviando un código de 6 dígitos al correo.");
+
+  try {
+    // 1. Pedimos el código al servidor
+    const res = await fetch('/api/solicitar-codigo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase() })
+    });
+    
+    const data = await res.json();
+    if (!data.success) {
+      return alert("❌ Error: " + data.error);
+    }
+
+    // 2. Si el correo se envió, le pedimos el código al usuario
+    const codigo = prompt(`Paso 2/3 - ¡Correo enviado!\n\nRevisa la bandeja de entrada o SPAM de ${email} e ingresa el código de 6 dígitos:`).trim();
+    if (!codigo) return;
+
+    // 3. Pedimos la nueva contraseña
+    const nuevaContrasena = prompt("Paso 3/3 - Escribe la NUEVA contraseña que deseas usar para tu cuenta:");
+    if (!nuevaContrasena) return;
+
+    // 4. Enviamos todo a verificar
+    const resCambio = await fetch('/api/cambiar-contrasena', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), codigo, nuevaContrasena })
+    });
+
+    const dataCambio = await resCambio.json();
+    if (dataCambio.success) {
+      alert("✅ ¡Excelente! Tu contraseña fue cambiada. Ya puedes iniciar sesión con tu nueva clave.");
+    } else {
+      alert("❌ Error: " + dataCambio.error);
+    }
+  } catch (err) {
+    alert("❌ Error de conexión: " + err.message);
+  }
+}
+
+// Inyector: Agrega el enlace de "¿Olvidaste tu contraseña?" debajo del botón de Iniciar Sesión
+setInterval(() => {
+  const botonesLogin = Array.from(document.querySelectorAll('button')).filter(b => b.textContent.includes('Iniciar sesión') || b.textContent.includes('Ingresar'));
+  
+  if (botonesLogin.length > 0 && !document.getElementById('btn-olvide-pass')) {
+    const enlace = document.createElement('a');
+    enlace.id = 'btn-olvide-pass';
+    enlace.href = '#';
+    enlace.textContent = '¿Olvidaste tu contraseña?';
+    enlace.style.cssText = 'display: block; text-align: center; margin-top: 15px; color: var(--accent); font-size: 14px; text-decoration: none; font-weight: bold; cursor: pointer;';
+    enlace.onclick = (e) => { e.preventDefault(); recuperarContrasena(); };
+    
+    botonesLogin[0].parentNode.appendChild(enlace);
+  }
+}, 2000);

@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const compression = require("compression"); // <-- NUEVO COMPRESOR
+const nodemailer = require("nodemailer");
 
 const app = express();
 
@@ -4273,6 +4274,74 @@ app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
   } catch (err) {
     console.error("Error en botón morado:", err.message);
     res.status(500).json({ error: "Error interno: " + err.message });
+  }
+});
+// ==========================================
+// RECUPERACIÓN DE CONTRASEÑA CON CÓDIGO DE 6 DÍGITOS
+// ==========================================
+const codigosRecuperacion = new Map(); // Memoria temporal para los códigos
+
+app.post("/api/solicitar-codigo", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Ingresa un correo." });
+
+    const userCheck = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (userCheck.rows.length === 0) return res.status(404).json({ error: "Cuenta no encontrada." });
+
+    // 1. Generar código de 6 dígitos
+    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    codigosRecuperacion.set(email, codigo);
+
+    // 2. Configurar Gmail (IMPORTANTE: Usa una Contraseña de Aplicación de Google)
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER || 'gdpedro75@gmail.com', // PON AQUÍ TU GMAIL
+        pass: process.env.GMAIL_PASS || 'qqjfbhemlqnpqnsl'    // PON AQUÍ TU CONTRASEÑA DE APP
+      }
+    });
+
+    // 3. Enviar el correo
+    await transporter.sendMail({
+      from: '"Soporte Técnico" <' + (process.env.GMAIL_USER || 'tu_correo_de_soporte@gmail.com') + '>',
+      to: email,
+      subject: "Tu Código de Recuperación",
+      html: `
+        <div style="font-family: Arial; padding: 20px; color: #333; text-align: center;">
+          <h2>Recuperación de Contraseña</h2>
+          <p>Tu código de seguridad de 6 dígitos es:</p>
+          <h1 style="background: #eef2ff; color: #6d5dfc; padding: 15px; letter-spacing: 5px; border-radius: 8px;">${codigo}</h1>
+          <p>Ingresa este código en la página para crear tu nueva contraseña.</p>
+        </div>`
+    });
+
+    res.json({ success: true, message: "Código enviado a tu correo." });
+  } catch (err) {
+    console.error("Error enviando código:", err.message);
+    res.status(500).json({ error: "Error al enviar el correo." });
+  }
+});
+
+app.post("/api/cambiar-contrasena", async (req, res) => {
+  try {
+    const { email, codigo, nuevaContrasena } = req.body;
+    
+    // Verificamos que el código coincida
+    if (codigosRecuperacion.get(email) !== codigo) {
+       return res.status(400).json({ error: "Código incorrecto o expirado." });
+    }
+    
+    // Si es correcto, guardamos la nueva clave
+    const hashedPass = await bcrypt.hash(nuevaContrasena, 10);
+    await pool.query("UPDATE users SET password = $1 WHERE email = $2", [hashedPass, email]);
+    
+    // Borramos el código para que no se pueda reusar
+    codigosRecuperacion.delete(email); 
+
+    res.json({ success: true, message: "Contraseña actualizada." });
+  } catch (err) {
+    res.status(500).json({ error: "Error actualizando contraseña." });
   }
 });
 initDatabase()
