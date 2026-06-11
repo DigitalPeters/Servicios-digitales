@@ -4662,3 +4662,33 @@ setInterval(() => {
     botonesLogin[0].parentNode.appendChild(enlace);
   }
 }, 2000);
+
+// ==========================================
+// PARCHE: DESBLOQUEO INMORTAL DE STOCK PARA IPTV
+// ==========================================
+setInterval(() => {
+  // Buscamos todas las tarjetas de la tienda
+  document.querySelectorAll('.product-row').forEach(row => {
+    const nombreProducto = row.querySelector('.product-name')?.textContent?.toLowerCase() || '';
+    
+    // Si el producto dice "iptv"
+    if (nombreProducto.includes('iptv')) {
+      const botonComprar = row.querySelector('.primary-btn');
+      const etiquetaStock = row.querySelector('.stock');
+      
+      // Le quitamos el bloqueo al botón y cambiamos el texto
+      if (botonComprar && botonComprar.disabled) {
+        botonComprar.disabled = false;
+        botonComprar.textContent = 'Comprar';
+        botonComprar.style.background = '#008c2e'; // Verde para indicar que sí se puede
+      }
+      
+      // Ocultamos o cambiamos la etiqueta roja de "Sin stock"
+      if (etiquetaStock && etiquetaStock.classList.contains('out')) {
+        etiquetaStock.textContent = 'Entrega Manual';
+        etiquetaStock.classList.remove('out');
+        etiquetaStock.style.color = '#6d5dfc'; // Color morado de tu marca
+      }
+    }
+  });
+}, 1000); // Revisa cada segundo para asegurarse de que siempre esté desbloqueado
