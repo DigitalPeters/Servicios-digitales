@@ -4690,18 +4690,42 @@ async function botonDePanico() {
   }
 }
 
-// Inyector: Dibuja automáticamente un botón rojo en tu menú lateral
-setInterval(() => {
-  const menu = document.querySelector('.menu');
-  
-  // Si el menú existe y el botón aún no se ha dibujado, lo inyecta
-  if (menu && !document.getElementById('btn-panico-admin')) {
-    const btn = document.createElement('button');
-    btn.id = 'btn-panico-admin';
-    btn.className = 'menu-btn'; 
-    btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
-    btn.innerHTML = '🚨 Resetear Clave';
-    btn.onclick = botonDePanico;
-    menu.appendChild(btn);
+// Inyector Inteligente: Pregunta al servidor tu nivel de acceso antes de dibujar el botón
+async function inyectarBotonPanicoSeguro() {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) return; // Si no hay sesión iniciada, se detiene
+
+    // 1. Le preguntamos a tu servidor de forma segura quién es este usuario
+    const respuesta = await fetch('/api/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (respuesta.ok) {
+      const usuario = await respuesta.json();
+      
+      // 2. Revisamos si tiene permisos reales de jefe (Admin global, Panel Propietario o Subadmin)
+      if (usuario.role === 'admin' || usuario.is_panel_admin || usuario.is_subadmin) {
+        
+        // 3. Como SÍ es administrador, activamos el dibujo del botón rojo
+        setInterval(() => {
+          const menu = document.querySelector('.menu');
+          if (menu && !document.getElementById('btn-panico-admin')) {
+            const btn = document.createElement('button');
+            btn.id = 'btn-panico-admin';
+            btn.className = 'menu-btn'; 
+            btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
+            btn.innerHTML = '🚨 Resetear Clave';
+            btn.onclick = botonDePanico; 
+            menu.appendChild(btn);
+          }
+        }, 1000);
+      }
+    }
+  } catch (error) {
+    console.error("No se pudo verificar el nivel de usuario", error);
   }
-}, 1000);
+}
+
+// Ejecutamos la comprobación de seguridad al entrar a la página
+inyectarBotonPanicoSeguro();
