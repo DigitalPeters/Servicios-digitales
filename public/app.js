@@ -4494,3 +4494,167 @@ setInterval(() => {
     }
   });
 }, 2000);
+// ==========================================
+// RECUPERACIÓN DE CONTRASEÑA
+// ==========================================
+
+function mostrarRecuperacion() {
+
+  const html = `
+    <div id="recoveryModal" class="modal-overlay">
+      <div class="modal-box">
+
+        <h2>Recuperar contraseña</h2>
+
+        <input
+          id="recoveryEmail"
+          type="email"
+          placeholder="Tu correo"
+        />
+
+        <button onclick="solicitarCodigo()">
+          Enviar código
+        </button>
+
+        <hr>
+
+        <input
+          id="recoveryCode"
+          placeholder="Código recibido"
+        />
+
+        <input
+          id="newPassword"
+          type="password"
+          placeholder="Nueva contraseña"
+        />
+
+        <button onclick="cambiarContrasena()">
+          Cambiar contraseña
+        </button>
+
+        <button onclick="cerrarRecuperacion()">
+          Cerrar
+        </button>
+
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    html
+  );
+
+}
+
+function cerrarRecuperacion() {
+
+  const modal =
+    document.getElementById(
+      "recoveryModal"
+    );
+
+  if(modal) modal.remove();
+
+}
+
+async function solicitarCodigo() {
+
+  const email =
+    document.getElementById(
+      "recoveryEmail"
+    ).value;
+
+  try {
+
+    const res =
+      await fetch(
+        "/api/solicitar-codigo",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify({
+            email
+          })
+        }
+      );
+
+    const data =
+      await res.json();
+
+    alert(
+      data.message ||
+      data.error
+    );
+
+  } catch(err){
+
+    alert(
+      "Error enviando código"
+    );
+
+  }
+
+}
+
+async function cambiarContrasena() {
+
+  const email =
+    document.getElementById(
+      "recoveryEmail"
+    ).value;
+
+  const codigo =
+    document.getElementById(
+      "recoveryCode"
+    ).value;
+
+  const nuevaContrasena =
+    document.getElementById(
+      "newPassword"
+    ).value;
+
+  try {
+
+    const res =
+      await fetch(
+        "/api/cambiar-contrasena",
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json"
+          },
+          body:JSON.stringify({
+            email,
+            codigo,
+            nuevaContrasena
+          })
+        }
+      );
+
+    const data =
+      await res.json();
+
+    alert(
+      data.message ||
+      data.error
+    );
+
+    if(data.success){
+
+      cerrarRecuperacion();
+
+    }
+
+  } catch(err){
+
+    alert(
+      "Error cambiando contraseña"
+    );
+
+  }
+
+}

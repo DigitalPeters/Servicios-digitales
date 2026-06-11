@@ -30,3 +30,37 @@
 
     .announcement-admin-list .item{background:#fff}
     .urgent-card{border:2px solid #ef4444!important}
+.modal-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.6);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:99999;
+}
+
+.modal-box{
+  background:#fff;
+  padding:25px;
+  border-radius:12px;
+  width:400px;
+  max-width:95%;
+}
+
+.modal-box h2{
+  margin-bottom:15px;
+}
+
+.modal-box input{
+  width:100%;
+  margin-bottom:10px;
+  padding:12px;
+}
+
+.modal-box button{
+  width:100%;
+  margin-bottom:10px;
+  padding:12px;
+  cursor:pointer;
+}
