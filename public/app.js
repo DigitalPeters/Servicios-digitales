@@ -4742,3 +4742,13 @@ setInterval(async () => {
     }
   }
 }, 1000);
+// ==========================================
+// INICIO DE GRÁFICAS (AHORRO DE RECURSOS)
+// ==========================================
+// Espera 2 segundos al entrar para asegurar que la sesión cargó, y dibuja UNA SOLA VEZ.
+// Para actualizar los datos, simplemente recarga la página (F5).
+setTimeout(() => {
+  if (localStorage.getItem('token')) {
+    cargarGraficas();
+  }
+}, 2000);
