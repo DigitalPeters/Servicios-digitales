@@ -4494,3 +4494,33 @@ setInterval(() => {
     }
   });
 }, 2000);
+// ==========================================
+// GRÁFICA MODERNA CON CHART.JS
+// ==========================================
+function cargarGrafica() {
+  const ctx = document.getElementById('graficaVentas');
+  if (!ctx) return;
+
+  new Chart(ctx, {
+    type: 'bar', // Puedes cambiar 'bar' por 'doughnut' para una gráfica de dona
+    data: {
+      labels: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
+      datasets: [{
+        label: 'Ventas de la semana ($)',
+        data: [150, 230, 180, 320, 290, 450, 300], // Aquí luego conectaremos tus datos reales
+        backgroundColor: '#6d5dfc', // El color de tu marca
+        borderRadius: 6 // Bordes redondeados para que se vea moderna
+      }]
+    },
+    options: {
+      responsive: true,
+      animation: {
+        duration: 1500,
+        easing: 'easeOutQuart'
+      }
+    }
+  });
+}
+
+// Ejecutar la gráfica cuando la página termine de cargar
+setTimeout(cargarGrafica, 1000);

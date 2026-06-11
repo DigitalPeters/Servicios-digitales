@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Servicios Digitales Peters</title>
   <link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div id="message" class="message"></div>
@@ -72,13 +73,11 @@
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
         </div>
         <div id="dashboardChartsPanel" class="row hidden">
-          <div class="panel dashboard-chart-card">
-            <div class="panel-head"><div><h2>Productos más vendidos</h2><p class="chart-note">Productos con más pedidos exitosos hoy.</p></div><button class="outline-btn" style="width:auto" onclick="openSalesReport()">Ver reporte</button></div>
-            <div id="dashboardTopProductsChart" class="empty-chart">Sin ventas todavía.</div>
-          </div>
-          <div class="panel dashboard-chart-card">
-            <div class="panel-head"><div><h2>Usuarios que más venden</h2><p class="chart-note">Ranking por monto vendido hoy.</p></div><button class="outline-btn" style="width:auto" onclick="openSalesReport()">Ver reporte</button></div>
-            <div id="dashboardTopUsersChart" class="empty-chart">Sin ventas todavía.</div>
+          <div class="panel dashboard-chart-card" style="width: 100%;">
+            <div class="panel-head">
+              <div><h2>Resumen de Ventas</h2><p class="chart-note">Gráfica animada de ventas semanales.</p></div>
+            </div>
+            <canvas id="graficaVentas"></canvas>
           </div>
         </div>
         <div id="recentOrdersList" class="hidden"></div>
