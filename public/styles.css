@@ -208,236 +208,138 @@ body.dark-mode .product-details {
 body.dark-mode .product-row:hover {
   box-shadow: 0 12px 32px rgba(109, 93, 252, 0.2) !important;
 }
+
+} /* <- ESTA LLAVE MÁGICA REPARA CUALQUIER ERROR OCULTO ANTERIOR */
+
 /* ==========================================
-   SEPARADOR DE CATEGORÍAS A LO LARGO DE LA PANTALLA
+   1. BLINDAJE ABSOLUTO DE LA BARRA LATERAL
+   ========================================== */
+body { 
+  margin: 0 !important; 
+  padding: 0 !important; 
+  overflow-x: hidden !important; 
+}
+
+.sidebar { 
+  width: 280px !important; 
+  position: fixed !important; 
+  left: 0 !important; 
+  top: 0 !important; 
+  bottom: 0 !important; 
+  z-index: 1000 !important; 
+}
+
+/* Forzamos a TODAS las pantallas a respetar la barra izquierda */
+.main { 
+  margin-left: 280px !important; 
+  width: calc(100% - 280px) !important; 
+  max-width: calc(100% - 280px) !important; 
+  min-height: 100vh !important;
+  box-sizing: border-box !important; 
+  padding: 24px !important; 
+  position: relative !important;
+}
+
+@media (max-width: 768px) {
+  .main { 
+    margin-left: 0 !important; 
+    width: 100% !important; 
+    max-width: 100% !important; 
+    padding: 14px !important; 
+  }
+}
+
+/* ==========================================
+   2. TIENDA ORGANIZADA (TARJETAS PERFECTAS)
+   ========================================== */
+.products-list {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+  gap: 20px !important;
+  width: 100% !important;
+  padding: 10px 0 !important;
+  margin: 0 !important;
+}
+
+.product-row {
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--card) !important;
+  border-radius: 16px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05) !important;
+  margin: 0 !important;
+  width: 100% !important;
+  overflow: hidden !important;
+}
+
+.product-header {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  padding: 20px !important;
+  position: relative !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* ZONA 1: Nombre del producto arriba */
+.product-header > div:nth-child(1) {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  padding-right: 35px !important; /* Espacio para que la flecha no tape */
+  margin-bottom: 15px !important;
+}
+
+.product-name {
+  display: block !important;
+  font-size: 19px !important;
+  font-weight: 900 !important;
+  margin-bottom: 8px !important;
+  line-height: 1.3 !important;
+  white-space: normal !important;
+}
+
+/* ZONA 2: Precio (Forzado a ir abajo) */
+.product-header > div:nth-child(2) {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  border-top: 1px solid var(--border) !important;
+  padding-top: 15px !important;
+}
+
+.price {
+  display: block !important;
+  font-size: 24px !important;
+  font-weight: bold !important;
+  color: #008c2e !important;
+  margin-bottom: 4px !important;
+}
+
+body.dark-mode .price { 
+  color: #4ade80 !important; 
+}
+
+/* ZONA 3: La Flechita */
+.product-header > div:nth-child(3) {
+  position: absolute !important;
+  top: 20px !important;
+  right: 20px !important;
+}
+
+/* ==========================================
+   3. SEPARADOR DE CATEGORÍAS LARGO
    ========================================== */
 .category-title {
-  grid-column: 1 / -1 !important; /* ¡Esta es la magia que lo estira de lado a lado! */
-  background: var(--primary) !important; /* Color azul oscuro de tu marca */
-  color: #ffffff !important; /* Letras blancas siempre */
+  grid-column: 1 / -1 !important;
+  background: var(--primary) !important;
+  color: #ffffff !important;
   padding: 14px 20px !important;
   border-radius: 12px !important;
   font-size: 20px !important;
   font-weight: 900 !important;
   margin-top: 20px !important;
   margin-bottom: 5px !important;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1) !important;
-  text-transform: uppercase !important;
-  letter-spacing: 1.5px !important;
-  display: flex !important;
-  align-items: center !important;
-}
-
-/* ==========================================
-   CORRECCIÓN DE TEXTOS INVISIBLES EN MODO OSCURO (TIENDA)
-   ========================================== */
-/* Asegurar que el título del producto siempre sea blanco */
-body.dark-mode .product-name {
-  color: #ffffff !important; 
-}
-
-/* El precio resalta en verde brillante */
-body.dark-mode .price {
-  color: #4ade80 !important; 
-}
-
-/* Forzar que todos los textos dentro de los detalles sean grises claritos/blancos */
-body.dark-mode .product-details,
-body.dark-mode .product-details p,
-body.dark-mode .product-details b,
-body.dark-mode .product-details .small-text,
-body.dark-mode .product-details label,
-body.dark-mode .product-description {
-  color: #cbd5e1 !important; 
-}
-
-/* Los campos para escribir dentro de la tarjeta se vuelven oscuros con letras blancas */
-body.dark-mode .product-details input,
-body.dark-mode .product-details select,
-body.dark-mode .product-details textarea {
-  background: #1e293b !important;
-  color: #ffffff !important;
-  border: 1px solid #334155 !important;
-}
-
-/* Fondo correcto para el recuadro de detalles */
-body.dark-mode .product-details {
-  background: #0f172a !important;
-  border-top: 2px dashed #334155 !important;
-}
-/* ==========================================
-   RESCATE VISUAL: TIENDA PERFECTA Y SEGURA
-   ========================================== */
-/* 1. Contenedor que jamás se saldrá de la pantalla */
-.products-list {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 16px !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-}
-
-/* 2. Tarjetas con tamaño seguro (2 por fila en PC) */
-.product-row {
-  width: calc(50% - 8px) !important; 
-  min-width: 250px !important;
-  flex-grow: 1 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  border: none !important;
-  border-radius: 16px !important;
-  background: var(--card) !important;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important;
-  margin: 0 !important; 
-  position: relative !important;
-}
-
-/* Celulares: 1 tarjeta por fila */
-@media (max-width: 768px) {
-  .product-row {
-    width: 100% !important;
-  }
-}
-
-/* 3. Forzar que el texto se apile hacia abajo */
-.product-header {
-  display: block !important; /* Esto rompe la alineación horizontal forzada */
-  padding: 20px !important;
-  position: relative !important;
-}
-
-/* 4. Nombre del producto arriba */
-.product-name {
-  display: block !important;
-  font-size: 19px !important;
-  font-weight: 900 !important;
-  margin-bottom: 6px !important;
-  width: 85% !important; /* Deja espacio para la flecha */
-  line-height: 1.3 !important;
-}
-
-/* 5. Etiqueta de categoría en medio */
-.product-header .chip {
-  display: inline-block !important;
-  margin-bottom: 12px !important;
-}
-
-/* 6. Precio abajo, resaltado */
-.price {
-  display: block !important;
-  font-size: 24px !important;
-  font-weight: bold !important;
-  color: #008c2e !important;
-  margin-top: 5px !important;
-}
-
-body.dark-mode .price {
-  color: #4ade80 !important;
-}
-
-/* 7. La flechita arrinconada arriba a la derecha */
-.product-header > div:nth-child(3) {
-  position: absolute !important;
-  top: 20px !important;
-  right: 20px !important;
-  font-size: 22px !important;
-  color: var(--muted) !important;
-}
-/* ==========================================
-   1. BLINDAJE MAESTRO DEL LAYOUT (NADA BAJO EL MENÚ)
-   ========================================== */
-/* En PC: Forzamos a TODAS las secciones a empezar después de los 280px de la barra */
-@media (min-width: 769px) {
-  .main {
-    margin-left: 280px !important;
-    width: calc(100% - 280px) !important;
-    max-width: calc(100% - 280px) !important;
-    box-sizing: border-box !important;
-    padding: 24px !important;
-  }
-}
-
-/* ==========================================
-   2. TIENDA PERFECTA (NOMBRE ARRIBA, PRECIO ABAJO)
-   ========================================== */
-.products-list {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
-  gap: 20px !important;
-  width: 100% !important;
-  padding: 10px 0 !important;
-}
-
-.product-row {
-  background: var(--card) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important;
-  display: flex !important;
-  flex-direction: column !important;
-  border: 1px solid var(--border) !important;
-  margin: 0 !important;
-}
-
-/* Forzamos a apilar el contenido de arriba hacia abajo */
-.product-header {
-  display: flex !important;
-  flex-direction: column !important; 
-  padding: 20px !important;
-  position: relative !important;
-  height: 100% !important;
-}
-
-/* Bloque 1: Nombre y Categoría (ARRIBA) */
-.product-header > div:nth-child(1) {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  width: 85% !important; /* Respeta el espacio de la flecha */
-  margin-bottom: 16px !important;
-}
-
-.product-name {
-  font-size: 19px !important;
-  font-weight: 900 !important;
-  margin-bottom: 8px !important;
-  line-height: 1.2 !important;
-}
-
-/* Bloque 2: Precio y Stock (ABAJO) */
-.product-header > div:nth-child(2) {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  width: 100% !important;
-  border-top: 1px solid var(--border) !important; /* Línea divisoria elegante */
-  padding-top: 16px !important;
-  margin-top: auto !important; /* Empuja el precio siempre al fondo de la tarjeta */
-}
-
-.price {
-  font-size: 24px !important;
-  font-weight: 900 !important;
-  color: #008c2e !important;
-  margin-bottom: 6px !important;
-}
-
-body.dark-mode .price {
-  color: #4ade80 !important;
-}
-
-/* Bloque 3: La Flechita (Esquina Superior Derecha) */
-.product-header > div:nth-child(3) {
-  position: absolute !important;
-  top: 20px !important;
-  right: 20px !important;
-  width: 32px !important;
-  height: 32px !important;
-  background: var(--soft) !important;
-  color: var(--accent) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  border-radius: 50% !important;
 }
