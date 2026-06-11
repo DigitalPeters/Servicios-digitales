@@ -4,6 +4,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const compression = require("compression"); // <-- NUEVO COMPRESOR
 
 const app = express();
 
@@ -12,6 +13,9 @@ const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
 
 app.use(bodyParser.json({ limit: "10mb" }));
 app.use(cors());
+app.use(express.static("public"));
+app.use(cors());
+app.use(compression()); // <-- EXPRIME LA PÁGINA PARA QUE CARGUE RÁPIDO
 app.use(express.static("public"));
 
 // ===============================
@@ -4246,7 +4250,7 @@ app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware,
   }
 });
 // ==========================================
-// INGRESO MANUAL DIRECTO SIN BUSCAR INVENTARIO
+// INGRESO MANUAL DIRECTO SIN BUSCAR INVENTARIO (VERSIÓN SEGURA)
 // ==========================================
 app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
   try {
@@ -4256,25 +4260,18 @@ app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
       return res.status(400).json({ error: "Faltan datos obligatorios." });
     }
 
-    // Se crea la respuesta estructurada que verá el cliente
+    // Se crea la respuesta estructurada
     const respuestaAdmin = `✅ REEMPLAZO MANUAL ENTREGADO:\n• Correo: ${email}\n• Contraseña: ${password}\n• Perfil: ${profile || 'N/A'}\n• PIN: ${pin || 'N/A'}\n• URL: ${url || 'N/A'}`;
 
-    // Actualiza el reporte y lo marca como resuelto
+    // Consulta SQL súper básica y segura que no exige columnas extra
     await pool.query(
-      "UPDATE account_reports SET status = 'resolved', admin_response = $1, updated_at = NOW() WHERE id = $2",
+      "UPDATE account_reports SET status = 'reemplazo', admin_response = $1 WHERE id = $2",
       [respuestaAdmin, reportId]
     );
 
-    // Intenta guardar la cuenta en el inventario para el futuro (sin romper el proceso si falla)
-    try {
-      await pool.query(
-        "INSERT INTO platform_accounts (email, password, status) VALUES ($1, $2, 'sold')",
-        [email, password]
-      );
-    } catch(e) { console.log("Solo se actualizó el reporte."); }
-
-    res.json({ success: true, message: "Cuenta entregada con éxito." });
+    res.json({ success: true, message: "Cuenta entregada con éxito al cliente." });
   } catch (err) {
+    console.error("Error en botón morado:", err.message);
     res.status(500).json({ error: "Error interno: " + err.message });
   }
 });
