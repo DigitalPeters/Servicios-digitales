@@ -345,3 +345,99 @@ body.dark-mode .price {
   font-size: 22px !important;
   color: var(--muted) !important;
 }
+/* ==========================================
+   1. BLINDAJE MAESTRO DEL LAYOUT (NADA BAJO EL MENÚ)
+   ========================================== */
+/* En PC: Forzamos a TODAS las secciones a empezar después de los 280px de la barra */
+@media (min-width: 769px) {
+  .main {
+    margin-left: 280px !important;
+    width: calc(100% - 280px) !important;
+    max-width: calc(100% - 280px) !important;
+    box-sizing: border-box !important;
+    padding: 24px !important;
+  }
+}
+
+/* ==========================================
+   2. TIENDA PERFECTA (NOMBRE ARRIBA, PRECIO ABAJO)
+   ========================================== */
+.products-list {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
+  gap: 20px !important;
+  width: 100% !important;
+  padding: 10px 0 !important;
+}
+
+.product-row {
+  background: var(--card) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border: 1px solid var(--border) !important;
+  margin: 0 !important;
+}
+
+/* Forzamos a apilar el contenido de arriba hacia abajo */
+.product-header {
+  display: flex !important;
+  flex-direction: column !important; 
+  padding: 20px !important;
+  position: relative !important;
+  height: 100% !important;
+}
+
+/* Bloque 1: Nombre y Categoría (ARRIBA) */
+.product-header > div:nth-child(1) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  width: 85% !important; /* Respeta el espacio de la flecha */
+  margin-bottom: 16px !important;
+}
+
+.product-name {
+  font-size: 19px !important;
+  font-weight: 900 !important;
+  margin-bottom: 8px !important;
+  line-height: 1.2 !important;
+}
+
+/* Bloque 2: Precio y Stock (ABAJO) */
+.product-header > div:nth-child(2) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  width: 100% !important;
+  border-top: 1px solid var(--border) !important; /* Línea divisoria elegante */
+  padding-top: 16px !important;
+  margin-top: auto !important; /* Empuja el precio siempre al fondo de la tarjeta */
+}
+
+.price {
+  font-size: 24px !important;
+  font-weight: 900 !important;
+  color: #008c2e !important;
+  margin-bottom: 6px !important;
+}
+
+body.dark-mode .price {
+  color: #4ade80 !important;
+}
+
+/* Bloque 3: La Flechita (Esquina Superior Derecha) */
+.product-header > div:nth-child(3) {
+  position: absolute !important;
+  top: 20px !important;
+  right: 20px !important;
+  width: 32px !important;
+  height: 32px !important;
+  background: var(--soft) !important;
+  color: var(--accent) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+}
