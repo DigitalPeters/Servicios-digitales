@@ -1,4 +1,5 @@
 const express = require("express");
+console.log("VERSION RECUPERACION 11-JUN-2026");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
