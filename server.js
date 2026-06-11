@@ -4329,9 +4329,12 @@ setTimeout(() => {
 
     res.json({ success: true, message: "Código enviado a tu correo." });
   } catch (err) {
-    console.error("Error enviando código:", err.message);
-    res.status(500).json({ error: "Error al enviar el correo." });
-  }
+  console.error("ERROR COMPLETO RECUPERACION:", err);
+
+  res.status(500).json({
+    error: err.message
+  });
+}
 });
 
 app.post("/api/cambiar-contrasena", async (req, res) => {
