@@ -4289,6 +4289,7 @@ app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
 // RECUPERACIÓN DE CONTRASEÑA CON CÓDIGO DE 6 DÍGITOS
 // ==========================================
 app.post("/api/solicitar-codigo", async (req, res) => {
+console.log("ENTRO A SOLICITAR CODIGO");
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Ingresa un correo." });
