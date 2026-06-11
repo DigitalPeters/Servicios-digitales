@@ -8,6 +8,7 @@ const compression = require("compression"); // <-- NUEVO COMPRESOR
 const nodemailer = require("nodemailer");
 
 const app = express();
+const codigosRecuperacion = new Map();
 
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
@@ -4293,13 +4294,16 @@ app.post("/api/solicitar-codigo", async (req, res) => {
     // 1. Generar código de 6 dígitos
     const codigo = Math.floor(100000 + Math.random() * 900000).toString();
     codigosRecuperacion.set(email, codigo);
+setTimeout(() => {
+  codigosRecuperacion.delete(email);
+}, 15 * 60 * 1000);
 
     // 2. Configurar Gmail (IMPORTANTE: Usa una Contraseña de Aplicación de Google)
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: process.env.GMAIL_USER || 'gdpedro75@gmail.com', // PON AQUÍ TU GMAIL
-        pass: process.env.GMAIL_PASS || 'qqjfbhemlqnpqnsl'    // PON AQUÍ TU CONTRASEÑA DE APP
+        pass: process.env.GMAIL_PASS || 'xxxxxxxxxxx'    // PON AQUÍ TU CONTRASEÑA DE APP
       }
     });
 
