@@ -4658,3 +4658,51 @@ async function cambiarContrasena() {
   }
 
 }
+// ==========================================
+// BOTÓN DE PÁNICO: INTERFAZ DE ADMINISTRADOR
+// ==========================================
+async function botonDePanico() {
+  const email = prompt("🚨 BOTÓN DE PÁNICO (Admin) 🚨\n\nIngresa el CORREO EXACTO del cliente al que le vas a resetear la contraseña:");
+  if (!email) return;
+
+  const confirmacion = confirm(`¿Estás seguro de resetear la cuenta de:\n${email}?\n\nSu nueva contraseña será temporalmente: 123456`);
+  if (!confirmacion) return;
+
+  try {
+    const token = localStorage.getItem('token'); 
+    const res = await fetch('/api/admin/panic-reset', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ email: email })
+    });
+    
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ ¡ÉXITO!\n\n${data.message}\n\nDile a tu cliente que inicie sesión con 123456 y que la cambie desde su cuenta.`);
+    } else {
+      alert("❌ Error: " + data.error);
+    }
+  } catch (err) {
+    alert("❌ Error de red: " + err.message);
+  }
+}
+
+// Inyector: Dibuja automáticamente un botón rojo en tu menú lateral
+setInterval(() => {
+  const adminMenus = document.querySelectorAll('.menu');
+  adminMenus.forEach(menu => {
+    // Solo lo inyecta si el usuario está logueado como administrador
+    if (document.querySelector('.admin-only') && !document.getElementById('btn-panico-admin')) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-panico-admin';
+      btn.className = 'menu-btn admin-only'; // Clase de seguridad
+      btn.style.cssText = 'background: #dc2626; color: white; font-weight: bold; margin-top: 25px; border: 2px solid #7f1d1d; cursor: pointer;';
+      btn.innerHTML = '🚨 Resetear Clave';
+      btn.onclick = botonDePanico;
+      menu.appendChild(btn);
+    }
+  });
+}, 2000);

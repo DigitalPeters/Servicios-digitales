@@ -4363,6 +4363,34 @@ app.post("/api/cambiar-contrasena", async (req, res) => {
     res.status(500).json({ error: "Error actualizando contraseña." });
   }
 });
+
+// ==========================================
+// BOTÓN DE PÁNICO (RESETEO A 123456 POR CORREO)
+// ==========================================
+app.post("/api/admin/panic-reset", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Ingresa el correo del usuario." });
+
+    // Generamos la contraseña temporal universal: 123456
+    const hashedPass = await bcrypt.hash("123456", 10);
+    
+    // Buscamos al usuario y le aplicamos el castigo/reinicio
+    const result = await pool.query(
+      "UPDATE users SET password = $1 WHERE lower(email) = $2 RETURNING email, name", 
+      [hashedPass, email.trim().toLowerCase()]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "No se encontró ninguna cuenta con el correo: " + email });
+    }
+
+    res.json({ success: true, message: `La contraseña de ${result.rows[0].email} ahora es: 123456` });
+  } catch (err) {
+    console.error("Error en botón de pánico:", err.message);
+    res.status(500).json({ error: "Error interno al intentar resetear la clave." });
+  }
+});
 initDatabase()
   .then(() => {
     app.listen(PORT, () => {
