@@ -1,4 +1,13 @@
-:root {
+const fs = require('fs');
+
+try {
+  // 1. Quitamos el parche viejo del HTML
+  let html = fs.readFileSync('public/index.html', 'utf8');
+  html = html.replace(/<style id="rescate-total">[\s\S]*?<\/style>/, '');
+  fs.writeFileSync('public/index.html', html);
+
+  // 2. Este es el CSS 100% limpio, ordenado y a prueba de errores
+  const cssPerfecto = `:root {
   --bg: #f4f6fb; --card: #fff; --text: #0f172a; --muted: #64748b; 
   --primary: #17135a; --primary2: #2d267a; --accent: #6d5dfc; 
   --border: #e5e7eb; --success: #008c2e; --danger: #dc2626; 
@@ -120,3 +129,10 @@ body.dark-mode .product-name { color: #fff; }
 body.dark-mode .product-details { background: var(--bg); border-color: var(--border); }
 body.dark-mode .dash-value, body.dark-mode .dash-label, body.dark-mode h1, body.dark-mode h2, body.dark-mode .section-title, body.dark-mode .small-text, body.dark-mode b, body.dark-mode label, body.dark-mode .mobile-nav-item { color: #f8fafc; }
 body.dark-mode .price { color: #4ade80 !important; }
+`;
+
+  fs.writeFileSync('public/styles.css', cssPerfecto);
+  console.log("✅ CSS reconstruido desde cero con éxito. La página debería verse perfecta.");
+} catch(e) {
+  console.log("Error:", e.message);
+}
