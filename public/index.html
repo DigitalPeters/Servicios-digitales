@@ -4,11 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Servicios Digitales Peters</title>
-  <link rel="stylesheet" href="styles.css?v=1781152446401">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  
-  \n</head>
+  <link rel="stylesheet" href="styles.css?v=1781154937616">
+</head>
 <body>
   <div id="message" class="message"></div>
 
@@ -55,7 +52,7 @@
     <main class="main">
       <div class="topbar">
         <div class="searchbox"><span>🔎</span><input id="globalSearch" placeholder="Buscar producto..." oninput="filterProducts()" /></div>
-        <div class="top-actions"><span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span><span class="pill open">Abierto</span><span class="pill">Online</span><b id="topUserName">Usuario</b><button id="theme-toggle" style="background:none;font-size:20px;padding:0 8px;margin-left:10px;" onclick="toggleDarkMode()">🌙</button></div>
+        <div class="top-actions"><span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span><span class="pill open">Abierto</span><span class="pill">Online</span><b id="topUserName">Usuario</b></div>
       </div>
 
       <section id="section-dashboard" class="section active">
@@ -74,21 +71,14 @@
           <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()"><div class="dash-icon">📥</div><div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div></div>
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
         </div>
-                <div id="dashboardChartsPanel" class="row hidden" style="gap: 16px;">
-          <div class="panel dashboard-chart-card" style="flex: 1; min-width: 280px;">
-            <div class="panel-head">
-              <div><h2>Resumen de Ventas</h2><p class="chart-note">Ventas semanales.</p></div>
-            </div>
-            <canvas id="graficaVentas"></canvas>
+        <div id="dashboardChartsPanel" class="row hidden">
+          <div class="panel dashboard-chart-card">
+            <div class="panel-head"><div><h2>Productos más vendidos</h2><p class="chart-note">Productos con más pedidos exitosos hoy.</p></div><button class="outline-btn" style="width:auto" onclick="openSalesReport()">Ver reporte</button></div>
+            <div id="dashboardTopProductsChart" class="empty-chart">Sin ventas todavía.</div>
           </div>
-          <div class="panel dashboard-chart-card" style="flex: 1; min-width: 280px;">
-            <div class="panel-head">
-              <div><h2>Usuarios TOP</h2><p class="chart-note">Ranking de mejores vendedores.</p></div>
-            </div>
-            <canvas id="graficaUsuarios"></canvas>
-          </div>
-        </div>
-            <canvas id="graficaVentas"></canvas>
+          <div class="panel dashboard-chart-card">
+            <div class="panel-head"><div><h2>Usuarios que más venden</h2><p class="chart-note">Ranking por monto vendido hoy.</p></div><button class="outline-btn" style="width:auto" onclick="openSalesReport()">Ver reporte</button></div>
+            <div id="dashboardTopUsersChart" class="empty-chart">Sin ventas todavía.</div>
           </div>
         </div>
         <div id="recentOrdersList" class="hidden"></div>
@@ -315,16 +305,7 @@
 <script src="app.js"></script>
 
 <!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
-
-    <div class="mobile-nav">
-      <div class="mobile-nav-item" onclick="showSection('shop')"><span>🛒</span><small>Tienda</small></div>
-      <div class="mobile-nav-item" onclick="showSection('orders')"><span>📦</span><small>Pedidos</small></div>
-      <div class="mobile-nav-item" onclick="showSection('reports')"><span>⚠</span><small>Fallas</small></div>
-      <div class="mobile-nav-item admin-only" onclick="showSection('dashboard')"><span>📊</span><small>Panel</small></div>
-      <div class="mobile-nav-item" onclick="logout()" style="color: #dc2626;"><span>🚪</span><small>Salir</small></div>
-    </div>
-    </div>
-    </body>
+</body>
 </html>
 
 <!-- REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28 -->
