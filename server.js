@@ -1488,7 +1488,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       [productName, productCategory]
     );
 
-    const isPlatformProduct = Number(platformCountResult.rows[0]?.total || 0) > 0;
+    const isIptv = productName.toLowerCase().includes('iptv') || productCategory.toLowerCase().includes('iptv');
+    const isPlatformProduct = !isIptv && Number(platformCountResult.rows[0]?.total || 0) > 0;
     let assignedAccount = null;
     let deliveredAccountData = "";
     let orderStatus = "accion_en_espera";
