@@ -4281,8 +4281,6 @@ app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
 // ==========================================
 // RECUPERACIÓN DE CONTRASEÑA CON CÓDIGO DE 6 DÍGITOS
 // ==========================================
-const codigosRecuperacion = new Map(); // Memoria temporal para los códigos
-
 app.post("/api/solicitar-codigo", async (req, res) => {
   try {
     const { email } = req.body;
