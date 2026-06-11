@@ -98,3 +98,36 @@ body.dark-mode .mobile-nav-item {
 body.dark-mode .dash-icon {
   opacity: 0.8;
 }
+/* OPTIMIZACIÓN DE LA BARRA SUPERIOR PARA CELULARES */
+@media (max-width: 768px) {
+  /* Ocultamos las etiquetas de Abierto y Online en celulares para ganar espacio */
+  .top-actions .pill:not(:first-child) {
+    display: none !important;
+  }
+
+  /* Forzamos a la barra a ordenarse limpiamente de extremo a extremo */
+  .top-actions {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    gap: 8px !important;
+  }
+
+  /* Cortamos el nombre con puntos suspensivos (...) si llega a ser muy largo */
+  #topUserName {
+    max-width: 100px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+  }
+
+  /* Fijamos el botón de modo oscuro para que nunca se mueva de la esquina derecha */
+  #theme-toggle {
+    margin-left: auto !important;
+    flex-shrink: 0 !important;
+    padding: 4px 8px !important;
+  }
+}
