@@ -4659,7 +4659,7 @@ async function cambiarContrasena() {
 
 }
 // ==========================================
-// BOTÓN DE PÁNICO: INTERFAZ DE ADMINISTRADOR
+// BOTÓN DE PÁNICO: INTERFAZ DE ADMINISTRADOR DEFINITIVA
 // ==========================================
 async function botonDePanico() {
   const email = prompt("🚨 BOTÓN DE PÁNICO (Admin) 🚨\n\nIngresa el CORREO EXACTO del cliente al que le vas a resetear la contraseña:");
@@ -4690,42 +4690,55 @@ async function botonDePanico() {
   }
 }
 
-// Inyector Inteligente: Pregunta al servidor tu nivel de acceso antes de dibujar el botón
-async function inyectarBotonPanicoSeguro() {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) return; // Si no hay sesión iniciada, se detiene
+// Guardias de control de sesión en segundo plano
+let statusVerificado = false;
+let esAdministrador = false;
 
-    // 1. Le preguntamos a tu servidor de forma segura quién es este usuario
-    const respuesta = await fetch('/api/me', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    if (respuesta.ok) {
-      const usuario = await respuesta.json();
-      
-      // 2. Revisamos si tiene permisos reales de jefe (Admin global, Panel Propietario o Subadmin)
-      if (usuario.role === 'admin' || usuario.is_panel_admin || usuario.is_subadmin) {
-        
-        // 3. Como SÍ es administrador, activamos el dibujo del botón rojo
-        setInterval(() => {
-          const menu = document.querySelector('.menu');
-          if (menu && !document.getElementById('btn-panico-admin')) {
-            const btn = document.createElement('button');
-            btn.id = 'btn-panico-admin';
-            btn.className = 'menu-btn'; 
-            btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
-            btn.innerHTML = '🚨 Resetear Clave';
-            btn.onclick = botonDePanico; 
-            menu.appendChild(btn);
-          }
-        }, 1000);
-      }
-    }
-  } catch (error) {
-    console.error("No se pudo verificar el nivel de usuario", error);
+// Bucle inteligente: Controla visualmente quién ve el botón en tiempo real
+setInterval(async () => {
+  const token = localStorage.getItem('token');
+  
+  // Si no hay token de sesión (pantalla de login o se cerró sesión)
+  if (!token) {
+    statusVerificado = false;
+    esAdministrador = false;
+    const btnExistente = document.getElementById('btn-panico-admin');
+    if (btnExistente) btnExistente.remove();
+    return;
   }
-}
 
-// Ejecutamos la comprobación de seguridad al entrar a la página
-inyectarBotonPanicoSeguro();
+  // Si hay sesión iniciada pero aún no hemos verificado el rango del usuario
+  if (!statusVerificado) {
+    statusVerificado = true; // Bloqueamos para hacer una única consulta segura
+    try {
+      const res = await fetch('/api/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const usuario = await res.json();
+        // Verificamos si es Admin, Dueño de Panel o Subadmin
+        if (usuario.role === 'admin' || usuario.is_panel_admin || usuario.is_subadmin) {
+          esAdministrador = true;
+        }
+      } else {
+        statusVerificado = false; // Si hubo un fallo de conexión, reintentamos después
+      }
+    } catch (err) {
+      statusVerificado = false;
+    }
+  }
+
+  // Si el bucle ya confirmó que SÍ eres administrador, te dibuja el botón seguro
+  if (esAdministrador) {
+    const menu = document.querySelector('.menu');
+    if (menu && !document.getElementById('btn-panico-admin')) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-panico-admin';
+      btn.className = 'menu-btn'; 
+      btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
+      btn.innerHTML = '🚨 Resetear Clave';
+      btn.onclick = botonDePanico;
+      menu.appendChild(btn);
+    }
+  }
+}, 1000);
