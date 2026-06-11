@@ -1,108 +1,171 @@
 const fs = require('fs');
 
 try {
-  // 1. LEER EL ARCHIVO ACTUAL
-  let html = fs.readFileSync('public/index.html', 'utf8');
+  let css = fs.readFileSync('public/styles.css', 'utf8');
 
-  // 2. MODIFICAR EL CONTENEDOR DE GRÁFICAS (PASO B CORREGIDO PARA DOS GRÁFICAS)
-  const bloqueGraficasViejo = /<div id="dashboardChartsPanel" class="row hidden">[\s\S]*?<\/div>\s*<\/div>/;
-  
-  const bloqueGraficasNuevo = `        <div id="dashboardChartsPanel" class="row hidden" style="gap: 16px;">
-          <div class="panel dashboard-chart-card" style="flex: 1; min-width: 280px;">
-            <div class="panel-head">
-              <div><h2>Resumen de Ventas</h2><p class="chart-note">Ventas semanales.</p></div>
-            </div>
-            <canvas id="graficaVentas"></canvas>
-          </div>
-          <div class="panel dashboard-chart-card" style="flex: 1; min-width: 280px;">
-            <div class="panel-head">
-              <div><h2>Usuarios TOP</h2><p class="chart-note">Ranking de mejores vendedores.</p></div>
-            </div>
-            <canvas id="graficaUsuarios"></canvas>
-          </div>
-        </div>`;
+  // 1. Buscar si existen nuestros bloques anteriores y borrarlos para que no estorben
+  const posiblesTextos = [
+    "REDISEÑO DINÁMICO",
+    "SEPARADOR DE CATEGORÍAS",
+    "RESCATE VISUAL",
+    "BLINDAJE MAESTRO"
+  ];
 
-  html = html.replace(bloqueGraficasViejo, bloqueGraficasNuevo);
-
-  // 3. INYECTAR EL BOTÓN DE MODO OSCURO EN LA BARRA SUPERIOR
-  html = html.replace('<b id="topUserName">Usuario</b>', '<b id="topUserName">Usuario</b><button id="theme-toggle" style="background:none;font-size:20px;padding:0 8px;margin-left:10px;" onclick="toggleDarkMode()">🌙</button>');
-
-  // 4. INYECTAR EL MENÚ DE NAVEGACIÓN INFERIOR PARA CELULARES
-  if (!html.includes('class="mobile-nav"')) {
-    const menuInferiorHTML = `
-    <div class="mobile-nav">
-      <div class="mobile-nav-item" onclick="showSection('shop')"><span>🛒</span><small>Tienda</small></div>
-      <div class="mobile-nav-item" onclick="showSection('orders')"><span>📦</span><small>Pedidos</small></div>
-      <div class="mobile-nav-item" onclick="showSection('reports')"><span>⚠</span><small>Fallas</small></div>
-      <div class="mobile-nav-item admin-only" onclick="showSection('dashboard')"><span>📊</span><small>Panel</small></div>
-    </div>
-    </body>`;
-    html = html.replace('</body>', menuInferiorHTML);
+  let indiceCorte = css.length;
+  for (let texto of posiblesTextos) {
+    let idx = css.indexOf(texto);
+    if (idx !== -1 && idx < indiceCorte) {
+      let inicioComentario = css.lastIndexOf("/*", idx);
+      if (inicioComentario !== -1) indiceCorte = inicioComentario;
+      else indiceCorte = idx;
+    }
   }
 
-  fs.writeFileSync('public/index.html', html);
-  console.log("✅ index.html actualizado con las nuevas estructuras visuales.");
+  // Cortar el archivo justo antes de nuestros intentos fallidos
+  if (indiceCorte < css.length) {
+    css = css.substring(0, indiceCorte);
+  }
 
-  // 5. AGREGAR ESTILOS PARA EL MENÚ MÓVIL Y MODO OSCURO EN STYLES.CSS
-  let css = fs.readFileSync('public/styles.css', 'utf8');
-  
-  if (!css.includes('.mobile-nav')) {
-    const nuevosEstilos = `
-/* MODO OSCURO */
-body.dark-mode {
-  --bg: #0f172a;
-  --card: #1e293b;
-  --text: #f8fafc;
-  --border: #334155;
-  --soft: #1e1b4b;
-}
-body.dark-mode .panel, body.dark-mode .dash-card, body.dark-mode .sidebar {
-  background: var(--card);
-  color: var(--text);
-  border-color: var(--border);
-}
-body.dark-mode input, body.dark-mode select, body.dark-mode textarea {
-  background: #1e293b;
-  color: #f8fafc;
-  border-color: #334155;
+  // 2. Inyectar el código definitivo con la llave sanadora al principio
+  const codigoPerfecto = `
+} /* <- ESTA LLAVE MÁGICA REPARA CUALQUIER ERROR OCULTO ANTERIOR */
+
+/* ==========================================
+   1. BLINDAJE ABSOLUTO DE LA BARRA LATERAL
+   ========================================== */
+body { 
+  margin: 0 !important; 
+  padding: 0 !important; 
+  overflow-x: hidden !important; 
 }
 
-/* MENÚ INFERIOR MÓVIL */
-.mobile-nav {
-  display: none;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  height: 60px;
-  justify-content: space-around;
-  align-items: center;
-  z-index: 999;
-  box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
+.sidebar { 
+  width: 280px !important; 
+  position: fixed !important; 
+  left: 0 !important; 
+  top: 0 !important; 
+  bottom: 0 !important; 
+  z-index: 1000 !important; 
 }
-.mobile-nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
+
+/* Forzamos a TODAS las pantallas a respetar la barra izquierda */
+.main { 
+  margin-left: 280px !important; 
+  width: calc(100% - 280px) !important; 
+  max-width: calc(100% - 280px) !important; 
+  min-height: 100vh !important;
+  box-sizing: border-box !important; 
+  padding: 24px !important; 
+  position: relative !important;
 }
-.mobile-nav-item span {
-  font-size: 20px;
-}
+
 @media (max-width: 768px) {
-  .sidebar { display: none !important; }
-  .app-layout { display: block !important; padding-bottom: 70px !important; }
-  .mobile-nav { display: flex; }
+  .main { 
+    margin-left: 0 !important; 
+    width: 100% !important; 
+    max-width: 100% !important; 
+    padding: 14px !important; 
+  }
+}
+
+/* ==========================================
+   2. TIENDA ORGANIZADA (TARJETAS PERFECTAS)
+   ========================================== */
+.products-list {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+  gap: 20px !important;
+  width: 100% !important;
+  padding: 10px 0 !important;
+  margin: 0 !important;
+}
+
+.product-row {
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--card) !important;
+  border-radius: 16px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05) !important;
+  margin: 0 !important;
+  width: 100% !important;
+  overflow: hidden !important;
+}
+
+.product-header {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  padding: 20px !important;
+  position: relative !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* ZONA 1: Nombre del producto arriba */
+.product-header > div:nth-child(1) {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  padding-right: 35px !important; /* Espacio para que la flecha no tape */
+  margin-bottom: 15px !important;
+}
+
+.product-name {
+  display: block !important;
+  font-size: 19px !important;
+  font-weight: 900 !important;
+  margin-bottom: 8px !important;
+  line-height: 1.3 !important;
+  white-space: normal !important;
+}
+
+/* ZONA 2: Precio (Forzado a ir abajo) */
+.product-header > div:nth-child(2) {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  border-top: 1px solid var(--border) !important;
+  padding-top: 15px !important;
+}
+
+.price {
+  display: block !important;
+  font-size: 24px !important;
+  font-weight: bold !important;
+  color: #008c2e !important;
+  margin-bottom: 4px !important;
+}
+
+body.dark-mode .price { 
+  color: #4ade80 !important; 
+}
+
+/* ZONA 3: La Flechita */
+.product-header > div:nth-child(3) {
+  position: absolute !important;
+  top: 20px !important;
+  right: 20px !important;
+}
+
+/* ==========================================
+   3. SEPARADOR DE CATEGORÍAS LARGO
+   ========================================== */
+.category-title {
+  grid-column: 1 / -1 !important;
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  padding: 14px 20px !important;
+  border-radius: 12px !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+  margin-top: 20px !important;
+  margin-bottom: 5px !important;
 }
 `;
-    fs.writeFileSync('public/styles.css', css + nuevosEstilos);
-    console.log("🎨 styles.css actualizado con estilos de modo oscuro y menú móvil.");
-  }
 
-} catch (error) {
-  console.error("❌ Error:", error.message);
+  fs.writeFileSync('public/styles.css', css + codigoPerfecto);
+  console.log("✅ ¡Archivo reparado y limpiado! Todo debería verse perfecto ahora.");
+} catch (e) {
+  console.error("❌ Error:", e.message);
 }
