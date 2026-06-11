@@ -270,3 +270,60 @@ body.dark-mode .product-details {
 body.dark-mode .product-row:hover {
   box-shadow: 0 12px 32px rgba(109, 93, 252, 0.2) !important;
 }
+/* ==========================================
+   SEPARADOR DE CATEGORÍAS A LO LARGO DE LA PANTALLA
+   ========================================== */
+.category-title {
+  grid-column: 1 / -1 !important; /* ¡Esta es la magia que lo estira de lado a lado! */
+  background: var(--primary) !important; /* Color azul oscuro de tu marca */
+  color: #ffffff !important; /* Letras blancas siempre */
+  padding: 14px 20px !important;
+  border-radius: 12px !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+  margin-top: 20px !important;
+  margin-bottom: 5px !important;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1.5px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* ==========================================
+   CORRECCIÓN DE TEXTOS INVISIBLES EN MODO OSCURO (TIENDA)
+   ========================================== */
+/* Asegurar que el título del producto siempre sea blanco */
+body.dark-mode .product-name {
+  color: #ffffff !important; 
+}
+
+/* El precio resalta en verde brillante */
+body.dark-mode .price {
+  color: #4ade80 !important; 
+}
+
+/* Forzar que todos los textos dentro de los detalles sean grises claritos/blancos */
+body.dark-mode .product-details,
+body.dark-mode .product-details p,
+body.dark-mode .product-details b,
+body.dark-mode .product-details .small-text,
+body.dark-mode .product-details label,
+body.dark-mode .product-description {
+  color: #cbd5e1 !important; 
+}
+
+/* Los campos para escribir dentro de la tarjeta se vuelven oscuros con letras blancas */
+body.dark-mode .product-details input,
+body.dark-mode .product-details select,
+body.dark-mode .product-details textarea {
+  background: #1e293b !important;
+  color: #ffffff !important;
+  border: 1px solid #334155 !important;
+}
+
+/* Fondo correcto para el recuadro de detalles */
+body.dark-mode .product-details {
+  background: #0f172a !important;
+  border-top: 2px dashed #334155 !important;
+}
