@@ -4305,13 +4305,18 @@ setTimeout(() => {
 }, 15 * 60 * 1000);
 
     // 2. Configurar Gmail (IMPORTANTE: Usa una Contraseña de Aplicación de Google)
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER || 'gdpedro75@gmail.com', // PON AQUÍ TU GMAIL
-        pass: process.env.GMAIL_PASS || 'xxxxxxxxxxx'    // PON AQUÍ TU CONTRASEÑA DE APP
-      }
-    });
+  const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000
+});
 
     // 3. Enviar el correo
     await transporter.sendMail({
