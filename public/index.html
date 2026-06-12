@@ -85,9 +85,29 @@
         <div id="recentOrdersList" class="hidden"></div>
       </section>
 
-      <section id="section-account" class="section">
-        <h1 class="section-title">Mi cuenta</h1><div class="panel"><div class="account-grid"><div class="account-box"><div class="account-label">Nombre</div><div class="account-value" id="userName"></div></div><div class="account-box"><div class="account-label">Correo</div><div class="account-value" id="userEmail"></div></div><div class="account-box"><div class="account-label">Rol</div><div class="account-value" id="userRole"></div></div><div class="account-box"><div class="account-label">Saldo</div><div class="account-value">$<span id="userBalance"></span></div></div></div></div>
-      </section>
+     <section id="section-account" class="section">
+  <h1 class="section-title">Mi cuenta</h1>
+  
+  <div class="panel">
+    <div class="account-grid">
+      <div class="account-box"><div class="account-label">Nombre</div><div class="account-value" id="userName"></div></div>
+      <div class="account-box"><div class="account-label">Correo</div><div class="account-value" id="userEmail"></div></div>
+      <div class="account-box"><div class="account-label">Rol</div><div class="account-value" id="userRole"></div></div>
+      <div class="account-box"><div class="account-label">Saldo</div><div class="account-value">$<span id="userBalance"></span></div></div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top: 20px;">
+    <h3 style="margin-bottom: 15px; color: #fff;">🔒 Cambiar Contraseña</h3>
+    <p style="margin-bottom: 15px; font-size: 14px; color: #aaa;">Si tu contraseña fue reseteada, ingresa la temporal y crea una nueva.</p>
+    
+    <input type="password" id="pass-actual" placeholder="Contraseña actual" style="width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #444; background: #2a2a40; color: white; box-sizing: border-box;">
+    
+    <input type="password" id="pass-nueva" placeholder="Nueva contraseña (mínimo 6 caracteres)" style="width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; border: 1px solid #444; background: #2a2a40; color: white; box-sizing: border-box;">
+    
+    <button onclick="cambiarMiPassword()" style="width: 100%; padding: 12px; background: #6d5dfc; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">Actualizar mi seguridad</button>
+  </div>
+</section>
 
       <section id="section-shop" class="section">
         <div class="panel"><div class="panel-head"><div><h2>Tienda</h2><p class="small-text">Da clic en un producto para desplegar detalles y comprar.</p></div></div><div class="tools"><input id="productSearch" placeholder="Buscar producto..." oninput="filterProducts()" /><select id="categoryFilter" onchange="filterProducts()"><option value="">Todas las categorías</option></select></div><div id="productsList" class="products-list"></div></div>
