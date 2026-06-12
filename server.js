@@ -4428,6 +4428,42 @@ app.post("/api/cambiar-contrasena", async (req, res) => {
     res.status(500).json({ error: "Error actualizando contraseña." });
   }
 });
+// ==========================================
+// ENDPOINT: CAMBIAR CONTRASEÑA DE CLIENTE
+// ==========================================
+const bcrypt = require('bcrypt'); // Si ya lo tienes hasta arriba del archivo, puedes borrar esta línea
+
+app.post("/api/user/change-password", authMiddleware, async (req, res) => {
+  try {
+    const { currentPass, newPass } = req.body;
+    const userId = req.user.id; // El authMiddleware nos asegura quién es el usuario
+
+    // 1. Buscamos al usuario en la base de datos
+    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Usuario no encontrado" });
+    }
+    const user = userResult.rows[0];
+
+    // 2. Comparamos la contraseña actual que escribió con la que tenemos guardada
+    const validPassword = await bcrypt.compare(currentPass, user.password);
+    if (!validPassword) {
+      return res.status(400).json({ success: false, error: "La contraseña actual es incorrecta" });
+    }
+
+    // 3. Si todo está bien, encriptamos la nueva contraseña para máxima seguridad
+    const salt = await bcrypt.genSalt(10);
+    const hashedNewPassword = await bcrypt.hash(newPass, salt);
+
+    // 4. Reemplazamos la vieja por la nueva en PostgreSQL
+    await pool.query("UPDATE users SET password = $1 WHERE id = $2", [hashedNewPassword, userId]);
+
+    res.json({ success: true, message: "Contraseña actualizada con éxito" });
+  } catch (err) {
+    console.error("Error al cambiar contraseña:", err.message);
+    res.status(500).json({ success: false, error: "Error interno del servidor al actualizar" });
+  }
+});
 
 // ==========================================
 // BOTÓN DE PÁNICO (RESETEO A 123456 POR CORREO)

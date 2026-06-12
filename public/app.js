@@ -4752,3 +4752,51 @@ setTimeout(() => {
     cargarGraficas();
   }
 }, 2000);
+// ==========================================
+// CAMBIO DE CONTRASEÑA DESDE EL PERFIL
+// ==========================================
+async function cambiarMiPassword() {
+  const currentPass = document.getElementById('pass-actual').value;
+  const newPass = document.getElementById('pass-nueva').value;
+
+  if (!currentPass || !newPass) {
+    return alert("⚠️ Por favor, llena ambos campos de contraseña.");
+  }
+
+  if (newPass.length < 6) {
+    return alert("⚠️ La nueva contraseña debe tener al menos 6 caracteres por tu seguridad.");
+  }
+
+  const confirmacion = confirm("¿Estás seguro de que deseas actualizar tu contraseña?");
+  if (!confirmacion) return;
+
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/user/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ currentPass: currentPass, newPass: newPass })
+    });
+
+    const data = await res.json();
+    
+    if (data.success) {
+      alert("✅ ¡Éxito! Tu contraseña ha sido actualizada correctamente.\nRecuerda usar la nueva la próxima vez que inicies sesión.");
+      // Limpiamos las cajas de texto para que no se queden escritas
+      document.getElementById('pass-actual').value = '';
+      document.getElementById('pass-nueva').value = '';
+    } else {
+      alert("❌ No se pudo cambiar: " + data.error);
+    }
+  } catch (err) {
+    alert("❌ Error de red: " + err.message);
+  }
+}
+
+
+
+
+
