@@ -276,6 +276,8 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
+console.log("DATABASE_URL existe:", !!process.env.DATABASE_URL);
+
 function safeJsonArray(value) {
   try {
     if (Array.isArray(value)) return value;
@@ -4398,9 +4400,10 @@ initDatabase()
     });
   })
   .catch(err => {
-    console.error("Error iniciando base de datos:", err.message);
-    process.exit(1);
-  });
+  console.error("ERROR COMPLETO");
+  console.error(err);
+  process.exit(1);
+});
 
 // FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33
 
