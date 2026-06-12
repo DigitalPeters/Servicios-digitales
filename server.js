@@ -4431,7 +4431,6 @@ app.post("/api/cambiar-contrasena", async (req, res) => {
 // ==========================================
 // ENDPOINT: CAMBIAR CONTRASEÑA DE CLIENTE
 // ==========================================
-const bcrypt = require('bcrypt'); // Si ya lo tienes hasta arriba del archivo, puedes borrar esta línea
 
 app.post("/api/user/change-password", authMiddleware, async (req, res) => {
   try {
