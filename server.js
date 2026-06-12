@@ -1704,6 +1704,69 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
   }
 });
 
+app.patch("/api/admin/platform-accounts/:id",
+  authMiddleware,
+  adminMiddleware,
+  async (req, res) => {
+    try {
+      const id = req.params.id;
+
+      const {
+        platform,
+        product_name,
+        account_email,
+        account_password,
+        profile_name,
+        profile_pin,
+        access_url,
+        status
+      } = req.body;
+
+      const result = await pool.query(
+        `UPDATE platform_accounts
+         SET
+           platform = $1,
+           product_name = $2,
+           account_email = $3,
+           account_password = $4,
+           profile_name = $5,
+           profile_pin = $6,
+           access_url = $7,
+           status = $8
+         WHERE id = $9
+         RETURNING *`,
+        [
+          platform,
+          product_name,
+          account_email,
+          account_password,
+          profile_name,
+          profile_pin,
+          access_url,
+          status,
+          id
+        ]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          error: "Cuenta no encontrada"
+        });
+      }
+
+      res.json({
+        message: "Cuenta actualizada correctamente"
+      });
+
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        error: "Error actualizando cuenta"
+      });
+    }
+  }
+);
+
 // MIS PEDIDOS
 // MIS PEDIDOS
 app.get("/api/my-orders", authMiddleware, async (req, res) => {
