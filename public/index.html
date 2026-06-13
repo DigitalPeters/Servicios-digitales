@@ -81,7 +81,11 @@ onclick="showSection('distributorEarnings')">
 
     <button id="btn-dist-usuarios" onclick="showSection('distributor')" style="padding: 15px 10px; background: #ea580c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">👥 Crear Usuarios</button>
     <button id="btn-dist-precios" onclick="showSection('distributor'); setTimeout(()=>document.getElementById('distributorPricesList').scrollIntoView({behavior:'smooth', block:'start'}), 100);" style="padding: 15px 10px; background: #0891b2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💲 Lista Precios</button>
-    <button id="btn-dist-ganancias" onclick="showSection('reports')" style="padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💰 Mis Ganancias</button>
+    <button id="btn-dist-ganancias" 
+        onclick="showSection('reports')" 
+        style="padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">
+  💰 Mis Ganancias
+</button>
 
     <button onclick="logout()" style="padding: 15px 10px; background: #991b1b; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🚪 Salir</button>
   </div>
