@@ -1017,8 +1017,13 @@ function syncAdminVisibilitySafe(){
     if (sidebar) sidebar.style.display = 'none'; // Esconde barra al vendedor
     setHiddenSafe('panel-botones-vendedor', false); // Muestra botones app al vendedor
     
-    // DETECTOR DE DISTRIBUIDOR: Prende los botones extra
-    const esDist = currentUser && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' || currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+    // DETECTOR UNIVERSAL DE DISTRIBUIDORES A PRUEBA DE BALAS
+    const esDist = currentUser && (
+      currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' || 
+      currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
+      currentUser.account_type === 'admin_distribuidor' || currentUser.account_type === 'distribuidor_del_panel' || currentUser.account_type === 'panel_propietario'
+    );
+    
     const btnUsr = document.getElementById('btn-dist-usuarios');
     const btnPre = document.getElementById('btn-dist-precios');
     if (btnUsr) btnUsr.style.display = esDist ? 'block' : 'none';
