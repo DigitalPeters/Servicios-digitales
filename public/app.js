@@ -1011,16 +1011,7 @@ function syncAdminVisibilitySafe(){
     if(adminSection) adminSection.classList.remove('hidden');
   }
 
-  // MAGIA: BARRA LATERAL Y BOTONES APP
-  const sidebar = document.getElementById('sidebar');
-  if (!isAdmin) {
-    if (sidebar) sidebar.style.display = 'none'; // Desaparece la barra lateral
-    setHiddenSafe('panel-botones-vendedor', false); // Muestra los botones app
-  } else {
-    if (sidebar) sidebar.style.display = ''; // El Admin SÍ ve la barra
-    setHiddenSafe('panel-botones-vendedor', true); // El Admin NO ve los botones app
-  }
-}  // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
+  // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
   const sidebar = document.getElementById('sidebar');
   if (!isAdmin) {
     if (sidebar) sidebar.style.display = 'none'; // Oculta la barra lateral
@@ -1030,7 +1021,10 @@ function syncAdminVisibilitySafe(){
     setHiddenSafe('panel-botones-vendedor', true); // TRUE: Oculta los botones al admin
   }
 }
+
 function setDashboardMenuActiveSafe(){
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
+}function setDashboardMenuActiveSafe(){
   document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
 }
 
