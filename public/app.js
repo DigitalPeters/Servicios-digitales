@@ -4833,55 +4833,7 @@ async function cambiarMiPassword() {
     alert("❌ Error de red: " + err.message);
   }
 }
-// ==========================================
-// BOTÓN FLOTANTE PARA REGRESAR AL MENÚ (SOLO VENDEDORES)
-// ==========================================
-(function(){
- function showSection(name) {
-  // Ocultar todas las secciones
-  const sections = document.querySelectorAll('.section');
-  sections.forEach(s => s.classList.remove('active'));
-  
-  // Mostrar la sección solicitada
-  const target = document.getElementById('section-' + name);
-  if (target) {
-    target.classList.add('active');
-  }
-}
-    const result = originalShowSectionParaBoton(name);
     
-    // --- NUEVA LÓGICA: SI PIDE REPORTES Y ES DISTRIBUIDOR ---
-    if (name === 'reports') {
-      const esDistribuidor = (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' || 
-                             currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
-                             currentUser.account_type === 'admin_distribuidor' || currentUser.account_type === 'distribuidor_del_panel' || currentUser.account_type === 'panel_propietario');
-      
-      if (esDistribuidor && typeof loadDistributorEarnings === 'function') {
-        loadDistributorEarnings(); // Carga las ganancias específicamente
-      }
-    }
-    // -------------------------------------------------------
-
-    let backBtn = document.getElementById('btn-volver-menu');
-    if (!backBtn) {
-      backBtn = document.createElement('button');
-      backBtn.id = 'btn-volver-menu';
-      backBtn.innerHTML = '🏠 Volver al Menú';
-      backBtn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #6d5dfc; color: white; border: none; padding: 14px 28px; border-radius: 50px; font-weight: bold; font-size: 16px; box-shadow: 0 6px 15px rgba(0,0,0,0.5); z-index: 9999; cursor: pointer; display: none;';
-      backBtn.onclick = function() { showSection('dashboard'); };
-      document.body.appendChild(backBtn);
-    }
-
-    if (!isAdminUserSafe() && name !== 'dashboard') {
-      backBtn.style.display = 'block';
-    } else {
-      backBtn.style.display = 'none';
-    }
-
-    return result;
-  };
-  showSection = window.showSection;
-}
 // ==========================================
 // MODO APP PARA DISTRIBUIDORES (LIMPIO)
 // ==========================================
