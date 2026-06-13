@@ -4868,82 +4868,22 @@ async function cambiarMiPassword() {
 })();
 
 // ==========================================
-// MODO APP PARA DISTRIBUIDORES (SUPER INYECTOR)
+// MODO APP PARA DISTRIBUIDORES (LIMPIO)
 // ==========================================
 setInterval(() => {
   if (!currentUser) return;
-  
-  // 1. Aislamos al Dueño Principal (el único que debe tener la barra lateral vieja)
-  const esDuenoPrincipal = currentUser.role === 'admin' && 
-                           !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true') &&
-                           !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true') &&
-                           currentUser.account_type !== 'admin_distribuidor' &&
-                           currentUser.account_type !== 'distribuidor_del_panel' &&
-                           currentUser.account_type !== 'panel_propietario';
-                           
-  // 2. Identificamos si es un Distribuidor (Tiene permiso para crear usuarios)
-  const esDistribuidor = !esDuenoPrincipal && (
-    currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' ||
-    currentUser.account_type === 'admin_distribuidor' || currentUser.account_type === 'distribuidor_del_panel' ||
-    currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
-    currentUser.account_type === 'panel_propietario'
-  );
 
-  const sidebar = document.getElementById('sidebar');
-  const panelBotones = document.getElementById('panel-botones-vendedor');
-  
-  // Si NO es el dueño principal, forzamos el Modo App (Sin barra lateral, solo botones)
-  if (!esDuenoPrincipal) {
-    if (sidebar) sidebar.style.display = 'none';
-    if (panelBotones) {
-        panelBotones.classList.remove('hidden');
-        panelBotones.style.display = 'block';
-    }
-    // Escondemos las tarjetas cuadradas del admin viejo
-    document.querySelectorAll('#section-dashboard .grid-cards').forEach(c => c.style.display = 'none');
-  } else {
-    // Si eres el Dueño, ves tu barra lateral normal y escondemos la App
-    if (sidebar) sidebar.style.display = '';
-    if (panelBotones) {
-        panelBotones.classList.add('hidden');
-        panelBotones.style.display = 'none';
-    }
-  }
-  
-  // 3. Encender o Inyectar los 2 botones extra para el Distribuidor
-  if (esDistribuidor && panelBotones) {
-    const btnUsr = document.getElementById('btn-dist-usuarios');
-    const btnPre = document.getElementById('btn-dist-precios');
-    const btnGan = document.getElementById('btn-dist-ganancias');
-    
-    // Si guardaste bien el HTML hace rato, los encendemos
-    if (btnUsr) btnUsr.style.display = 'block';
-    if (btnPre) btnPre.style.display = 'block';
-    if (btnGan) btnGan.style.display = 'block';
-    
-    // Si por algún motivo el HTML falló, los fabricamos e inyectamos a la fuerza
-    const grid = panelBotones.querySelector('div[style*="grid-template-columns"]');
-    if (grid && !btnUsr && !document.getElementById('btn-injected-usr')) {
-      const b1 = document.createElement('button');
-      b1.id = 'btn-injected-usr';
-      b1.innerHTML = '👥 Crear Usuarios';
-      b1.style.cssText = 'padding: 15px 10px; background: #ea580c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;';
-      b1.onclick = () => showSection('distributor');
-      
-      const b2 = document.createElement('button');
-      b2.id = 'btn-injected-pre';
-      b2.innerHTML = '💲 Lista de Precios';
-      b2.style.cssText = 'padding: 15px 10px; background: #0891b2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;';
-      b2.onclick = () => { showSection('distributor'); setTimeout(() => document.getElementById('distributorPricesList')?.scrollIntoView({behavior:'smooth', block:'start'}), 100); };
-      
-      const btnSalir = grid.querySelector('button[onclick*="logout"]');
-      if (btnSalir) {
-        grid.insertBefore(b1, btnSalir);
-        grid.insertBefore(b2, btnSalir);
-      } else {
-        grid.appendChild(b1);
-        grid.appendChild(b2);
-      }
-    }
-  }
+  const esDistribuidor = (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' || 
+                         currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
+                         currentUser.account_type === 'admin_distribuidor' || currentUser.account_type === 'distribuidor_del_panel' || currentUser.account_type === 'panel_propietario');
+
+  const btnUsr = document.getElementById('btn-dist-usuarios');
+  const btnPre = document.getElementById('btn-dist-precios');
+  const btnGan = document.getElementById('btn-dist-ganancias');
+
+  // Solo mostramos los botones si el usuario es distribuidor
+  if (btnUsr) btnUsr.style.display = esDistribuidor ? 'block' : 'none';
+  if (btnPre) btnPre.style.display = esDistribuidor ? 'block' : 'none';
+  if (btnGan) btnGan.style.display = esDistribuidor ? 'block' : 'none';
+
 }, 1000);
