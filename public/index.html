@@ -72,10 +72,18 @@ onclick="showSection('distributorEarnings')">
 <div id="panel-botones-vendedor" class="panel" style="margin-bottom: 25px; background: #1e1e2f; padding: 20px; border-radius: 8px;">
   <h3 style="text-align: center; color: #fff; margin-bottom: 20px;">¿Qué deseas hacer hoy?</h3>
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
+    
     <button onclick="showSection('shop')" style="padding: 15px 10px; background: #6d5dfc; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🛒 Ir a Tienda</button>
+    
+    <button onclick="showSection('orders')" style="padding: 15px 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📦 Mis Pedidos</button>
+    
     <button onclick="showSection('balance')" style="padding: 15px 10px; background: #008c2e; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">💳 Cargar Saldo</button>
     <button onclick="openReportFaultFormFinal()" style="padding: 15px 10px; background: #dc2626; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">⚠ Reportar Falla</button>
     <button onclick="openFailureResponsesFinal()" style="padding: 15px 10px; background: #b45309; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📬 Respuestas</button>
+
+    <button id="btn-dist-usuarios" onclick="showSection('distributor')" style="padding: 15px 10px; background: #ea580c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">👥 Crear Usuarios</button>
+    <button id="btn-dist-precios" onclick="showSection('distributor'); setTimeout(()=>document.getElementById('distributorPricesList').scrollIntoView({behavior:'smooth', block:'start'}), 100);" style="padding: 15px 10px; background: #0891b2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💲 Lista Precios</button>
+
     <button onclick="logout()" style="padding: 15px 10px; background: #991b1b; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🚪 Salir</button>
   </div>
 </div>
