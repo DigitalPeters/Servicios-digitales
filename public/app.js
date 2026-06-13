@@ -4777,13 +4777,15 @@ setInterval(async () => {
   }
 }, 1000);
 // ==========================================
-// INICIO DE GRÁFICAS (AHORRO DE RECURSOS)
+// INICIO DE GRÁFICAS (PROTEGIDO)
 // ==========================================
-// Espera 2 segundos al entrar para asegurar que la sesión cargó, y dibuja UNA SOLA VEZ.
-// Para actualizar los datos, simplemente recarga la página (F5).
 setTimeout(() => {
   if (localStorage.getItem('token')) {
-    cargarGraficas();
+    if (typeof cargarGraficas === 'function') {
+      cargarGraficas();
+    } else {
+      console.log("ℹ️ Nota: cargarGraficas no está definida, saltando ejecución.");
+    }
   }
 }, 2000);
 // ==========================================
