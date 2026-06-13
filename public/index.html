@@ -36,9 +36,14 @@
     <aside id="sidebar" class="sidebar">
       <div class="brand"><div class="brand-logo">P</div><div><h2>Servicios Digitales Peters</h2><p id="sideEmail">correo</p></div></div>
       <nav class="menu">
-        <button class="menu-btn active" data-section="dashboard" onclick="window.location.reload();">◴ Dashboard</button>
+        <button class="menu-btn active" data-section="dashboard" onclick="showSection('dashboard')">◴ Dashboard</button>
         
-        <button class="menu-btn" data-section="account" onclick="showSection('account')">👤 Mi cuenta</button>
+        <button id="accountMenuBtn"
+class="menu-btn"
+data-section="account"
+onclick="showSection('account')">
+👤 Mi cuenta
+</button>
         <button class="menu-btn" data-section="shop" onclick="showSection('shop')">🛒 Tienda</button>
         <button class="menu-btn" data-section="orders" onclick="showSection('orders')">▤ Mis pedidos</button>
         <button class="menu-btn" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
@@ -46,6 +51,12 @@
         <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
         <button id="adminSalesMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openSalesReport()">📊 Reporte ventas</button>
         <button id="distributorMenuBtn" class="menu-btn hidden" data-section="distributor" onclick="showSection('distributor')">🏪 Mis vendedores</button>
+<button id="distributorEarningsBtn"
+class="menu-btn hidden"
+data-section="distributorEarnings"
+onclick="showSection('distributorEarnings')">
+💵 Ganancias
+</button>
         <button id="ownerAnnouncementsMenuBtn" class="menu-btn hidden" data-section="ownerAnnouncements" onclick="showSection('ownerAnnouncements')">📢 Comunicados</button>
       </nav>
       <div class="sidebar-bottom"><button class="logout-side" onclick="logout()">Cerrar sesión</button></div>
@@ -58,6 +69,16 @@
 
       <section id="section-dashboard" class="section active">
         <h1 class="section-title">Dashboard</h1>
+<div id="panel-botones-vendedor" class="panel" style="margin-bottom: 25px; background: #1e1e2f; padding: 20px; border-radius: 8px;">
+  <h3 style="text-align: center; color: #fff; margin-bottom: 20px;">¿Qué deseas hacer hoy?</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
+    <button onclick="showSection('shop')" style="padding: 15px 10px; background: #6d5dfc; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🛒 Ir a Tienda</button>
+    <button onclick="showSection('balance')" style="padding: 15px 10px; background: #008c2e; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">💳 Cargar Saldo</button>
+    <button onclick="openReportFaultFormFinal()" style="padding: 15px 10px; background: #dc2626; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">⚠ Reportar Falla</button>
+    <button onclick="openFailureResponsesFinal()" style="padding: 15px 10px; background: #b45309; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📬 Respuestas</button>
+    <button onclick="logout()" style="padding: 15px 10px; background: #991b1b; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🚪 Salir</button>
+  </div>
+</div>
         <div class="grid-cards">
           <div class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
           <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
@@ -325,7 +346,6 @@
 
 <script src="app.js"></script>
 
-<!-- FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33 -->
 </body>
 </html>
 

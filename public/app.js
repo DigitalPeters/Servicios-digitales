@@ -997,22 +997,39 @@ function setHiddenSafe(id, hidden){
 
 function syncAdminVisibilitySafe(){
   const isAdmin=isAdminUserSafe();
-  // Ocultamos el menú Admin separado para que no haya duplicados.
   setHiddenSafe('adminMenuBtn', true);
   setHiddenSafe('adminSalesMenuBtn', true);
   setHiddenSafe('dashInventoryCard', !isAdmin);
   setHiddenSafe('dashSalesTodayCard', !isAdmin);
   setHiddenSafe('dashboardChartsPanel', !isAdmin);
-  // Para admin ocultamos la tarjeta Saldo personal; para usuarios normales sí se queda.
   setHiddenSafe('dashBalanceCard', isAdmin);
+  
   if(!isAdmin){
     setHiddenSafe('section-admin', true);
   }else{
     const adminSection=document.getElementById('section-admin');
     if(adminSection) adminSection.classList.remove('hidden');
   }
-}
 
+  // MAGIA: BARRA LATERAL Y BOTONES APP
+  const sidebar = document.getElementById('sidebar');
+  if (!isAdmin) {
+    if (sidebar) sidebar.style.display = 'none'; // Desaparece la barra lateral
+    setHiddenSafe('panel-botones-vendedor', false); // Muestra los botones app
+  } else {
+    if (sidebar) sidebar.style.display = ''; // El Admin SÍ ve la barra
+    setHiddenSafe('panel-botones-vendedor', true); // El Admin NO ve los botones app
+  }
+}  // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
+  const sidebar = document.getElementById('sidebar');
+  if (!isAdmin) {
+    if (sidebar) sidebar.style.display = 'none'; // Oculta la barra lateral
+    setHiddenSafe('panel-botones-vendedor', false); // FALSE: Muestra los botones a los vendedores
+  } else {
+    if (sidebar) sidebar.style.display = ''; // Muestra la barra al admin
+    setHiddenSafe('panel-botones-vendedor', true); // TRUE: Oculta los botones al admin
+  }
+}
 function setDashboardMenuActiveSafe(){
   document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
 }
@@ -1133,12 +1150,13 @@ loadApp = async function(){
   set('topUserBalance', formatMoney(currentUser.balance));
   if(typeof loadMyReports==='function') loadMyReports();
 
-  if(currentUser.role === 'admin' || (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')) {
+ if(currentUser.role === 'admin' || (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')) {
     showSection('dashboard');
   } else {
-    document.querySelector('[data-section="dashboard"]')?.classList.add('hidden');
-    document.querySelector('[data-section="account"]')?.classList.add('hidden');
-    showSection('shop');
+    // ESTO DEJA ENTRAR A LOS VENDEDORES AL PANEL CENTRAL
+    document.querySelector('[data-section="dashboard"]')?.classList.remove('hidden');
+    document.querySelector('[data-section="account"]')?.classList.add('hidden'); 
+    showSection('dashboard');
   }
 };
 
