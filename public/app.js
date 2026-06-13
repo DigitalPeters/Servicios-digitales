@@ -4807,7 +4807,39 @@ async function cambiarMiPassword() {
     alert("❌ Error de red: " + err.message);
   }
 }
+// ==========================================
+// BOTÓN FLOTANTE PARA REGRESAR AL MENÚ (SOLO VENDEDORES)
+// ==========================================
+(function(){
+  const originalShowSectionParaBoton = typeof showSection === 'function' ? showSection : null;
+  if (originalShowSectionParaBoton) {
+    window.showSection = function(name) {
+      const result = originalShowSectionParaBoton(name);
+      
+      let backBtn = document.getElementById('btn-volver-menu');
+      if (!backBtn) {
+        // Creamos el botón la primera vez
+        backBtn = document.createElement('button');
+        backBtn.id = 'btn-volver-menu';
+        backBtn.innerHTML = '🏠 Volver al Menú';
+        // Estilo de botón flotante de App
+        backBtn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #6d5dfc; color: white; border: none; padding: 14px 28px; border-radius: 50px; font-weight: bold; font-size: 16px; box-shadow: 0 6px 15px rgba(0,0,0,0.5); z-index: 9999; cursor: pointer; display: none;';
+        backBtn.onclick = function() { showSection('dashboard'); };
+        document.body.appendChild(backBtn);
+      }
 
+      // Si NO es admin y NO está en el dashboard, le mostramos el botón salvavidas
+      if (!isAdminUserSafe() && name !== 'dashboard') {
+        backBtn.style.display = 'block';
+      } else {
+        backBtn.style.display = 'none';
+      }
+
+      return result;
+    };
+    showSection = window.showSection;
+  }
+})();
 
 
 
