@@ -1011,6 +1011,18 @@ function syncAdminVisibilitySafe(){
     if(adminSection) adminSection.classList.remove('hidden');
   }
 
+  // CONTROL DE BARRA LATERAL Y TARJETAS
+  const sidebar = document.getElementById('sidebar');
+  if (!isAdmin) {
+    if (sidebar) sidebar.style.display = 'none'; // Esconde la barra lateral al vendedor
+    setHiddenSafe('panel-botones-vendedor', false); // Muestra los botones nuevos al vendedor
+    setHiddenSafe('panel-tarjetas-admin', true); // Oculta todas las tarjetas viejas al vendedor
+  } else {
+    if (sidebar) sidebar.style.display = ''; // Muestra la barra al administrador
+    setHiddenSafe('panel-botones-vendedor', true); // Oculta los botones nuevos al administrador
+    setHiddenSafe('panel-tarjetas-admin', false); // Muestra las tarjetas viejas al administrador
+  }
+}
   // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
   const sidebar = document.getElementById('sidebar');
   if (!isAdmin) {
