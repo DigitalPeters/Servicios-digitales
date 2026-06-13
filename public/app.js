@@ -12,6 +12,24 @@ function openUsersFromDashboard(){
     showSection('account');
   }
 }
+
+async function reloadDashboard() {
+  if (!currentUser || currentUser.role !== 'admin') return;
+
+  showMessage('Actualizando panel...');
+
+  await Promise.allSettled([
+    loadUsers(),
+    loadAdminProducts(),
+    loadAdminOrders(),
+    loadBalanceRequests(),
+    loadAccountReports(),
+    loadSalesReport(true),
+    loadPlatformInventory()
+  ]);
+
+  showMessage('Panel actualizado');
+}
 function openProductsFromDashboard(){
   if(currentUser?.role==='admin'){
     showSection('admin');
