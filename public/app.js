@@ -4837,9 +4837,17 @@ async function cambiarMiPassword() {
 // BOTÓN FLOTANTE PARA REGRESAR AL MENÚ (SOLO VENDEDORES)
 // ==========================================
 (function(){
-  const originalShowSectionParaBoton = typeof showSection === 'function' ? showSection : null;
-if (originalShowSectionParaBoton) {
-  window.showSection = function(name) {
+ function showSection(name) {
+  // Ocultar todas las secciones
+  const sections = document.querySelectorAll('.section');
+  sections.forEach(s => s.classList.remove('active'));
+  
+  // Mostrar la sección solicitada
+  const target = document.getElementById('section-' + name);
+  if (target) {
+    target.classList.add('active');
+  }
+}
     const result = originalShowSectionParaBoton(name);
     
     // --- NUEVA LÓGICA: SI PIDE REPORTES Y ES DISTRIBUIDOR ---
@@ -4894,3 +4902,18 @@ setInterval(() => {
   if (btnGan) btnGan.style.display = esDistribuidor ? 'block' : 'none';
 
 }, 1000);
+
+// ==========================================
+// ACCESO DIRECTO A GANANCIAS (SIN ROMPER NADA)
+// ==========================================
+function irADirectoAGanancias() {
+  // 1. Abrimos la sección de reportes
+  showSection('reports');
+  
+  // 2. Ejecutamos la carga de ganancias si existe la función
+  if (typeof loadDistributorEarnings === 'function') {
+    loadDistributorEarnings();
+  } else {
+    console.log("ℹ️ La función de ganancias no está cargada, revisa el archivo de reportes.");
+  }
+}
