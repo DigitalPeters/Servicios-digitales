@@ -4947,13 +4947,3 @@ setInterval(() => {
     }
   }
 }, 1000);
-// Si necesitas inyectarlo a la fuerza porque no está en el HTML:
-    if (grid && !btnGan && !document.getElementById('btn-injected-gan')) {
-      const b3 = document.createElement('button');
-      b3.id = 'btn-injected-gan';
-      b3.innerHTML = '💰 Mis Ganancias';
-      b3.style.cssText = 'padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;';
-      b3.onclick = () => showSection('reports');
-      grid.appendChild(b3);
-    }
-  }
