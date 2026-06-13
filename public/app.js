@@ -1022,18 +1022,7 @@ function syncAdminVisibilitySafe(){
     setHiddenSafe('panel-botones-vendedor', true); // Oculta los botones nuevos al administrador
     setHiddenSafe('panel-tarjetas-admin', false); // Muestra las tarjetas viejas al administrador
   }
-
-  // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
-  const sidebar = document.getElementById('sidebar');
-  if (!isAdmin) {
-    if (sidebar) sidebar.style.display = 'none'; // Oculta la barra lateral
-    setHiddenSafe('panel-botones-vendedor', false); // FALSE: Muestra los botones a los vendedores
-  } else {
-    if (sidebar) sidebar.style.display = ''; // Muestra la barra al admin
-    setHiddenSafe('panel-botones-vendedor', true); // TRUE: Oculta los botones al admin
-  }
 }
-
 function setDashboardMenuActiveSafe(){
   document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
 }function setDashboardMenuActiveSafe(){
