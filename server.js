@@ -2548,7 +2548,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
     const report = reportResult.rows[0];
 
     if (report && Number(report.reported_account_id || 0) > 0) {
-      const selectedAccountResult = await client.query(
+      const selectedAccountResult = await pool.query(
         `SELECT *
          FROM platform_accounts
          WHERE id = $1
@@ -2560,8 +2560,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
 
       const selectedAccount = selectedAccountResult.rows[0];
       if (!selectedAccount) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({ error: "La cuenta seleccionada no pertenece a ese pedido/combo" });
+               return res.status(400).json({ error: "La cuenta seleccionada no pertenece a ese pedido/combo" });
       }
 
       report.reported_account_id = selectedAccount.id;
@@ -2569,7 +2568,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
       report.account_product_name = selectedAccount.product_name || report.account_product_name;
       report.resolved_owner_admin_id = selectedAccount.owner_admin_id || report.resolved_owner_admin_id;
 
-      await client.query(
+      await pool.query(
         `UPDATE account_reports
          SET reported_account_id = $1,
              reported_platform = $2,
