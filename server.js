@@ -2547,7 +2547,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
 
     const report = reportResult.rows[0];
 
-    if (report && Number(reported_account_id || 0) > 0) {
+    if (report && Number(report.reported_account_id || 0) > 0) {
       const selectedAccountResult = await client.query(
         `SELECT *
          FROM platform_accounts
@@ -2555,7 +2555,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
            AND assigned_order_id = $2
          LIMIT 1
          FOR UPDATE`,
-        [Number(reported_account_id), report.order_id]
+        [Number(report.reported_account_id), report.order_id]
       );
 
       const selectedAccount = selectedAccountResult.rows[0];
