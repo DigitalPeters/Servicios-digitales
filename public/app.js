@@ -1022,8 +1022,7 @@ function syncAdminVisibilitySafe(){
     setHiddenSafe('panel-botones-vendedor', true); // Oculta los botones nuevos al administrador
     setHiddenSafe('panel-tarjetas-admin', false); // Muestra las tarjetas viejas al administrador
   }
-}
-}
+
   // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
   const sidebar = document.getElementById('sidebar');
   if (!isAdmin) {
