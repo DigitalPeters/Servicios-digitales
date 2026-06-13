@@ -1011,17 +1011,25 @@ function syncAdminVisibilitySafe(){
     if(adminSection) adminSection.classList.remove('hidden');
   }
 
-  // CONTROL DE BARRA LATERAL Y TARJETAS
+  // CONTROL DE BARRA LATERAL Y BOTONES APP
   const sidebar = document.getElementById('sidebar');
   if (!isAdmin) {
-    if (sidebar) sidebar.style.display = 'none'; // Esconde la barra lateral al vendedor
-    setHiddenSafe('panel-botones-vendedor', false); // Muestra los botones nuevos al vendedor
-    setHiddenSafe('panel-tarjetas-admin', true); // Oculta todas las tarjetas viejas al vendedor
+    if (sidebar) sidebar.style.display = 'none'; // Esconde barra al vendedor
+    setHiddenSafe('panel-botones-vendedor', false); // Muestra botones app al vendedor
   } else {
-    if (sidebar) sidebar.style.display = ''; // Muestra la barra al administrador
-    setHiddenSafe('panel-botones-vendedor', true); // Oculta los botones nuevos al administrador
-    setHiddenSafe('panel-tarjetas-admin', false); // Muestra las tarjetas viejas al administrador
+    if (sidebar) sidebar.style.display = ''; // Muestra barra al admin
+    setHiddenSafe('panel-botones-vendedor', true); // Oculta botones app al admin
   }
+
+  // TRUCO A PRUEBA DE BALAS PARA FULMINAR LAS TARJETAS VIEJAS
+  const tarjetasViejas = document.querySelectorAll('#section-dashboard .grid-cards');
+  tarjetasViejas.forEach(contenedor => {
+    if (!isAdmin) {
+      contenedor.style.display = 'none'; // Desaparecen por completo para el vendedor
+    } else {
+      contenedor.style.display = ''; // El administrador sí las ve
+    }
+  });
 }
 function setDashboardMenuActiveSafe(){
   document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
