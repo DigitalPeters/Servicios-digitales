@@ -1026,8 +1026,10 @@ function syncAdminVisibilitySafe(){
     
     const btnUsr = document.getElementById('btn-dist-usuarios');
     const btnPre = document.getElementById('btn-dist-precios');
+    const btnGan = document.getElementById('btn-dist-ganancias');
     if (btnUsr) btnUsr.style.display = esDist ? 'block' : 'none';
     if (btnPre) btnPre.style.display = esDist ? 'block' : 'none';
+    if (btnGan) btnGan.style.display = esDist ? 'block' : 'none';
 
   } else {
     if (sidebar) sidebar.style.display = ''; // Muestra barra al admin
@@ -4912,10 +4914,12 @@ setInterval(() => {
   if (esDistribuidor && panelBotones) {
     const btnUsr = document.getElementById('btn-dist-usuarios');
     const btnPre = document.getElementById('btn-dist-precios');
+    const btnGan = document.getElementById('btn-dist-ganancias');
     
     // Si guardaste bien el HTML hace rato, los encendemos
     if (btnUsr) btnUsr.style.display = 'block';
     if (btnPre) btnPre.style.display = 'block';
+    if (btnGan) btnGan.style.display = 'block';
     
     // Si por algún motivo el HTML falló, los fabricamos e inyectamos a la fuerza
     const grid = panelBotones.querySelector('div[style*="grid-template-columns"]');
@@ -4943,3 +4947,13 @@ setInterval(() => {
     }
   }
 }, 1000);
+// Si necesitas inyectarlo a la fuerza porque no está en el HTML:
+    if (grid && !btnGan && !document.getElementById('btn-injected-gan')) {
+      const b3 = document.createElement('button');
+      b3.id = 'btn-injected-gan';
+      b3.innerHTML = '💰 Mis Ganancias';
+      b3.style.cssText = 'padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;';
+      b3.onclick = () => showSection('reports');
+      grid.appendChild(b3);
+    }
+  }
