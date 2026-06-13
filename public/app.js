@@ -1023,6 +1023,7 @@ function syncAdminVisibilitySafe(){
     setHiddenSafe('panel-tarjetas-admin', false); // Muestra las tarjetas viejas al administrador
   }
 }
+}
   // AQUÍ ESCONDEMOS LA BARRA LATERAL A LOS VENDEDORES
   const sidebar = document.getElementById('sidebar');
   if (!isAdmin) {
