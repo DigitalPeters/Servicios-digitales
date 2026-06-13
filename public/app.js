@@ -4862,7 +4862,25 @@ async function cambiarMiPassword() {
     showSection = window.showSection;
   }
 })();
-
+// ==========================================
+// FORZAR BOTONES DE DISTRIBUIDOR (ANTIFALLOS)
+// ==========================================
+setInterval(() => {
+  const btnUsr = document.getElementById('btn-dist-usuarios');
+  const btnPre = document.getElementById('btn-dist-precios');
+  const menuDist = document.getElementById('distributorMenuBtn');
+  const tarjetaDist = document.getElementById('dashDistributorCard');
+  
+  // Si el sistema ya te reconoció y prendió tus accesos de distribuidor en otro lado...
+  const esDistribuidor = (menuDist && !menuDist.classList.contains('hidden')) || 
+                         (tarjetaDist && !tarjetaDist.classList.contains('hidden'));
+  
+  // ...entonces forzamos el encendido de los botones móviles
+  if (btnUsr && btnPre) {
+    btnUsr.style.display = esDistribuidor ? 'block' : 'none';
+    btnPre.style.display = esDistribuidor ? 'block' : 'none';
+  }
+}, 1000);
 
 
 
