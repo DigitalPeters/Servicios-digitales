@@ -5036,7 +5036,7 @@ function mostrarBotonRegresar() {
     btn.innerHTML = '⬅ Volver al Inicio';
     
     // Le damos un diseño flotante profesional para que no estorbe
-    btn.style.cssText = 'position: fixed; top: 15px; left: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
+    btn.style.cssText = 'position: fixed; bottom: 15px; right: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
 
     // ¿Qué hace al darle clic? 
     btn.onclick = () => {
