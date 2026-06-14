@@ -5099,3 +5099,8 @@ window.addEventListener('popstate', function(event) {
 function activarHistorialCelular() {
     history.pushState({ panel: "abierto" }, '', '#opcion');
 }
+
+// FORZAR APARICIÓN DEL BOTÓN A LOS 2 SEGUNDOS DE ENTRAR
+setTimeout(() => {
+    mostrarBotonRegresar();
+}, 2000);
