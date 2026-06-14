@@ -5022,10 +5022,14 @@ setTimeout(checkQuarantineAccounts, 3000);
 setInterval(checkQuarantineAccounts, 300000);
 
 // ==========================================
-// BOTÓN DE EMERGENCIA: REGRESAR AL DASHBOARD
+// BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR (CENTRADO Y PEQUEÑO)
 // ==========================================
 function mostrarBotonRegresar() {
-    // Verificamos si ya existe para no duplicarlo
+    // 1. EL CANDADO: Si eres el Admin Global, no se muestra.
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin' && !currentUser.is_subadmin && !currentUser.is_panel_admin) {
+        return; 
+    }
+
     if (document.getElementById('btn-volver-universal')) {
         document.getElementById('btn-volver-universal').style.display = 'block';
         return;
@@ -5033,38 +5037,10 @@ function mostrarBotonRegresar() {
 
     const btn = document.createElement('button');
     btn.id = 'btn-volver-universal';
-    btn.innerHTML = '⬅ Volver al Inicio';
+    btn.innerHTML = '🏠 Volver al Inicio';
     
-    // Le damos un diseño flotante profesional para que no estorbe
-    btn.style.cssText = 'position: fixed; bottom: 15px; right: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
-
-    // ¿Qué hace al darle clic? 
-    btn.onclick = () => {
-        // Solución rápida y brutal: Recargar la página para volver al estado inicial del panel
-        window.location.reload();
-    };
-
-    document.body.appendChild(btn);
-}
-
-function ocultarBotonRegresar() {
-    const btn = document.getElementById('btn-volver-universal');
-    if (btn) btn.style.display = 'none';
-}
-
-// ==========================================
-// BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR (LIMPIO)
-// ==========================================
-function mostrarBotonRegresar() {
-    if (document.getElementById('btn-volver-universal')) {
-        document.getElementById('btn-volver-universal').style.display = 'block';
-        return;
-    }
-
-    const btn = document.createElement('button');
-    btn.id = 'btn-volver-universal';
-    btn.innerHTML = '⬅ Volver al Inicio';
-    btn.style.cssText = 'position: fixed; top: 15px; left: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
+    // 2. POSICIÓN CENTRADA ABAJO Y TAMAÑO REDUCIDO
+    btn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 99999; background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; cursor: pointer; box-shadow: 0 4px 8px rgba(0,0,0,0.4); transition: 0.3s; white-space: nowrap;';
 
     btn.onclick = () => {
         if (typeof showSection === 'function') {
@@ -5081,7 +5057,6 @@ function ocultarBotonRegresar() {
     const btn = document.getElementById('btn-volver-universal');
     if (btn) btn.style.display = 'none';
 }
-
 // Hack para atrapar el botón físico de retroceso en celulares
 window.addEventListener('popstate', function(event) {
     // Cierra modales si hay alguno abierto
