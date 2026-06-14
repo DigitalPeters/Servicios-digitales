@@ -2795,7 +2795,20 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       );
     }
 
-    const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category);
+    let deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category);
+
+    // --- FIX: FORZAR LA FECHA DE COMPRA ORIGINAL EN EL MENSAJE ---
+    const fechaCompra = new Date(report.order_created_at);
+    const dia = String(fechaCompra.getDate()).padStart(2, '0');
+    const mes = String(fechaCompra.getMonth() + 1).padStart(2, '0');
+    const anio = fechaCompra.getFullYear();
+    
+    // Buscamos donde dice "Fecha de entrega: XX/XX/XXXX" y lo cambiamos por la fecha original
+    deliveredAccountData = deliveredAccountData.replace(
+      /Fecha de entrega:\s*\d{1,2}\/\d{1,2}\/\d{2,4}/i, 
+      `Fecha de entrega: ${dia}/${mes}/${anio}`
+    );
+    // -------------------------------------------------------------
 
     if (report.reported_account_id) {
       await client.query(
