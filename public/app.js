@@ -5040,7 +5040,7 @@ function mostrarBotonRegresar() {
     btn.innerHTML = '🏠 Volver al Inicio';
     
     // 2. POSICIÓN CENTRADA ABAJO Y TAMAÑO REDUCIDO
-    btn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 99999; background: linear-gradient(135deg, #6d5dfc, #f43f5e); color: white; border: none; padding: 8px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; cursor: pointer; box-shadow: 0 4px 15px rgba(109, 93, 252, 0.5); transition: 0.3s; white-space: nowrap;';
+   btn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 99999; background: #ff6b00; color: white; border: none; padding: 8px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; cursor: pointer; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.5); transition: 0.3s; white-space: nowrap;';
 
     btn.onclick = () => {
         if (typeof showSection === 'function') {
