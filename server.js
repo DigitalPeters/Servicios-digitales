@@ -877,8 +877,11 @@ function formatFechaMX(fecha) {
   });
 }
 
-function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "") {
-  const fechaEntrega = new Date();
+// AÑADIMOS EL PARÁMETRO "originalDate = null"
+function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "", originalDate = null) {
+  // Si nos mandan una fecha vieja (reemplazo), usamos esa. Si no (venta nueva), usamos la de hoy.
+  const fechaEntrega = originalDate ? new Date(originalDate) : new Date();
+  
   const fechaVencimiento = new Date(fechaEntrega);
   fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
 
@@ -911,7 +914,6 @@ function buildDeliveredAccountData(assignedAccount, productName = "", productCat
 
   return lines.join("\n");
 }
-
 async function findReportedPurchase(client, userId, accountEmail) {
   const result = await client.query(
     `SELECT
