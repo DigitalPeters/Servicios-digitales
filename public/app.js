@@ -1,7 +1,29 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-function showSection(name){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));const sec=document.getElementById('section-'+name);if(sec)sec.classList.add('active');document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));document.getElementById('sidebar').classList.remove('show'); if(name==='shop')loadProducts(); if(name==='orders')loadMyOrders(); if(name==='admin'&&currentUser?.role==='admin'){loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports()}}
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  const sec=document.getElementById('section-'+name);
+  if(sec)sec.classList.add('active');
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.section===name));
+  document.getElementById('sidebar').classList.remove('show'); 
+  
+  if(name==='shop')loadProducts(); 
+  if(name==='orders')loadMyOrders(); 
+  if(name==='admin'&&currentUser?.role==='admin'){
+    loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports();
+  }
+
+  // --- NUEVO: CONTROL DEL BOTÓN UNIVERSAL Y CELULAR ---
+  if (name !== 'dashboard') {
+      if (typeof mostrarBotonRegresar === 'function') mostrarBotonRegresar();
+      if (typeof activarHistorialCelular === 'function') activarHistorialCelular();
+  } else {
+      if (typeof ocultarBotonRegresar === 'function') ocultarBotonRegresar();
+  }
+  // ----------------------------------------------------
+}
+
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
 function openUsersFromDashboard(){
@@ -30,6 +52,7 @@ async function reloadDashboard() {
 
   showMessage('Panel actualizado');
 }
+
 function openProductsFromDashboard(){
   if(currentUser?.role==='admin'){
     showSection('admin');
@@ -38,6 +61,7 @@ function openProductsFromDashboard(){
     showSection('shop');
   }
 }
+
 function openOrdersFromDashboard(){
   if(currentUser?.role==='admin'){
     showSection('admin');
@@ -46,7 +70,6 @@ function openOrdersFromDashboard(){
     showSection('orders');
   }
 }
-
 function showMessage(text,type='success'){document.getElementById('message').innerHTML=`<p class="${type}">${safeText(text)}</p>`;setTimeout(()=>{document.getElementById('message').innerHTML=''},4500)}
 function safeText(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function parseJsonArray(v){try{if(Array.isArray(v))return v;const p=JSON.parse(v||'[]');return Array.isArray(p)?p:[]}catch{return[]}}
@@ -4997,3 +5020,96 @@ async function liberarCuentaDeCuarentena(id) {
 // Configurar el radar: Se ejecuta 3 segundos después de cargar y luego cada 5 minutos
 setTimeout(checkQuarantineAccounts, 3000);
 setInterval(checkQuarantineAccounts, 300000);
+
+// ==========================================
+// BOTÓN DE EMERGENCIA: REGRESAR AL DASHBOARD
+// ==========================================
+function mostrarBotonRegresar() {
+    // Verificamos si ya existe para no duplicarlo
+    if (document.getElementById('btn-volver-universal')) {
+        document.getElementById('btn-volver-universal').style.display = 'block';
+        return;
+    }
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-volver-universal';
+    btn.innerHTML = '⬅ Volver al Inicio';
+    
+    // Le damos un diseño flotante profesional para que no estorbe
+    btn.style.cssText = 'position: fixed; top: 15px; left: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
+
+    // ¿Qué hace al darle clic? 
+    btn.onclick = () => {
+        // Solución rápida y brutal: Recargar la página para volver al estado inicial del panel
+        window.location.reload();
+    };
+
+    document.body.appendChild(btn);
+}
+
+function ocultarBotonRegresar() {
+    const btn = document.getElementById('btn-volver-universal');
+    if (btn) btn.style.display = 'none';
+}
+
+// ==========================================
+// HACK PARA EL BOTÓN FÍSICO DEL CELULAR
+// ==========================================
+window.addEventListener('popstate', function(event) {
+    // Si el usuario le da atrás en el celular, forzamos la recarga al inicio
+    window.location.reload();
+});
+
+// Esta función "engaña" al celular para crear un punto de guardado
+function activarHistorialCelular() {
+    history.pushState({ panel: "abierto" }, '', '#opcion');
+}
+
+// ==========================================
+// BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR
+// ==========================================
+function mostrarBotonRegresar() {
+    if (document.getElementById('btn-volver-universal')) {
+        document.getElementById('btn-volver-universal').style.display = 'block';
+        return;
+    }
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-volver-universal';
+    btn.innerHTML = '⬅ Volver al Inicio';
+    btn.style.cssText = 'position: fixed; top: 15px; left: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
+
+    btn.onclick = () => {
+        // En lugar de recargar, usamos tu función nativa
+        if (typeof showSection === 'function') {
+            showSection('dashboard');
+        } else {
+            window.location.reload();
+        }
+    };
+
+    document.body.appendChild(btn);
+}
+
+function ocultarBotonRegresar() {
+    const btn = document.getElementById('btn-volver-universal');
+    if (btn) btn.style.display = 'none';
+}
+
+// Hack para atrapar el botón físico de retroceso en celulares
+window.addEventListener('popstate', function(event) {
+    // Cierra modales si hay alguno abierto
+    const modalesAbiertos = document.querySelectorAll('.modal-overlay');
+    modalesAbiertos.forEach(modal => modal.remove());
+    
+    // Regresa al inicio
+    if (typeof showSection === 'function') {
+        showSection('dashboard');
+    } else {
+        window.location.reload();
+    }
+});
+
+function activarHistorialCelular() {
+    history.pushState({ panel: "abierto" }, '', '#opcion');
+}
