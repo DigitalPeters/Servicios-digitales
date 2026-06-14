@@ -5053,20 +5053,7 @@ function ocultarBotonRegresar() {
 }
 
 // ==========================================
-// HACK PARA EL BOTÓN FÍSICO DEL CELULAR
-// ==========================================
-window.addEventListener('popstate', function(event) {
-    // Si el usuario le da atrás en el celular, forzamos la recarga al inicio
-    window.location.reload();
-});
-
-// Esta función "engaña" al celular para crear un punto de guardado
-function activarHistorialCelular() {
-    history.pushState({ panel: "abierto" }, '', '#opcion');
-}
-
-// ==========================================
-// BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR
+// BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR (LIMPIO)
 // ==========================================
 function mostrarBotonRegresar() {
     if (document.getElementById('btn-volver-universal')) {
@@ -5080,7 +5067,6 @@ function mostrarBotonRegresar() {
     btn.style.cssText = 'position: fixed; top: 15px; left: 15px; z-index: 99999; background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.4); transition: 0.3s;';
 
     btn.onclick = () => {
-        // En lugar de recargar, usamos tu función nativa
         if (typeof showSection === 'function') {
             showSection('dashboard');
         } else {
@@ -5102,7 +5088,7 @@ window.addEventListener('popstate', function(event) {
     const modalesAbiertos = document.querySelectorAll('.modal-overlay');
     modalesAbiertos.forEach(modal => modal.remove());
     
-    // Regresa al inicio
+    // Regresa al inicio de forma suave
     if (typeof showSection === 'function') {
         showSection('dashboard');
     } else {
