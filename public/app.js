@@ -4887,3 +4887,113 @@ function irADirectoAGanancias() {
     console.log("ℹ️ La función de ganancias no está cargada, revisa el archivo de reportes.");
   }
 }
+
+// ==========================================
+// SISTEMA DE CUARENTENA Y RECUPERACIÓN
+// ==========================================
+async function checkQuarantineAccounts() {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) return;
+  try {
+    // 1. Forzar al servidor a revisar si hay cuentas que ya vencieron
+    await fetch('/api/admin/system/check-expirations', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+
+    // 2. Traer la lista de cuentas atrapadas en cuarentena
+    const res = await fetch('/api/admin/accounts/quarantine', {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+    const quarantineList = await res.json();
+
+    // 3. Dibujar la campana si hay cuentas pendientes
+    let campana = document.getElementById('btn-cuarentena-alarma');
+    if (quarantineList && quarantineList.length > 0) {
+      if (!campana) {
+        campana = document.createElement('button');
+        campana.id = 'btn-cuarentena-alarma';
+        campana.className = 'menu-btn';
+        campana.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 15px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important; animation: pulseAlarm 1.5s infinite;';
+        campana.innerHTML = `🚨 Recuperar Cuentas (${quarantineList.length})`;
+        campana.onclick = () => showQuarantineModal(quarantineList);
+        
+        const menu = document.querySelector('.menu');
+        if (menu) menu.appendChild(campana);
+        
+        // Agregar animación css
+        if(!document.getElementById('anim-cuarentena')) {
+          const style = document.createElement('style');
+          style.id = 'anim-cuarentena';
+          style.innerHTML = `@keyframes pulseAlarm { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }`;
+          document.head.appendChild(style);
+        }
+      } else {
+        campana.innerHTML = `🚨 Recuperar Cuentas (${quarantineList.length})`;
+      }
+    } else {
+      if (campana) campana.remove();
+    }
+  } catch (err) {
+    console.error("Error en sistema de cuarentena", err);
+  }
+}
+
+function showQuarantineModal(list) {
+  const old = document.getElementById('quarantineModal');
+  if (old) old.remove();
+
+  const html = `
+  <div id="quarantineModal" class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
+    <div class="modal-box" style="background:#1e1e2f; padding:25px; border-radius:12px; width:90%; max-width:600px; color:white; max-height: 85vh; overflow-y: auto;">
+      <h2 style="color:#ef4444; margin-top:0; border-bottom:1px solid #ef4444; padding-bottom:10px;">🚨 Cuentas en Cuarentena</h2>
+      <p style="font-size:14px; color:#cbd5e1; line-height:1.5;">Estas cuentas ya cumplieron sus días de garantía. <b>Pasos:</b><br>1. Entra a la plataforma oficial.<br>2. Cambia la contraseña para sacar al cliente anterior.<br>3. Escribe la nueva clave aquí y presiona Liberar.</p>
+      
+      <div style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
+        ${list.map(c => `
+          <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid #ef4444;">
+            <p style="margin:0 0 5px; font-size:16px;"><b>${c.platform}</b></p>
+            <p style="margin:0 0 5px; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
+            <p style="margin:0 0 15px; font-size:14px;">🔑 Clave vieja: <span style="color:#f87171">${c.account_password}</span></p>
+            <div style="display:flex; gap:10px;">
+              <input id="new-pass-${c.id}" placeholder="Escribe la NUEVA contraseña" style="flex:1; padding:10px; border-radius:6px; border:none; outline:none; font-family:monospace;">
+              <button onclick="liberarCuentaDeCuarentena(${c.id})" style="background:#10b981; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar al stock</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button onclick="document.getElementById('quarantineModal').remove()" style="margin-top:25px; background:#4b5563; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; width:100%; font-weight:bold;">Cerrar Ventana</button>
+    </div>
+  </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function liberarCuentaDeCuarentena(id) {
+  const newPass = document.getElementById('new-pass-' + id).value.trim();
+  if (!newPass) return alert("⚠️ Debes escribir la NUEVA contraseña para poder liberar la cuenta.");
+  if (!confirm("¿Confirma que ya cambiaste esta contraseña en la página oficial?")) return;
+
+  try {
+    const res = await fetch('/api/admin/accounts/' + id + '/release', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + localStorage.getItem('token')
+      },
+      body: JSON.stringify({ new_password: newPass })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    
+    alert("✅ " + data.message);
+    document.getElementById('quarantineModal').remove();
+    checkQuarantineAccounts(); // Volver a revisar y actualizar la lista
+    if(typeof loadPlatformInventory === 'function') loadPlatformInventory(); // Refrescar inventario si está abierto
+  } catch (err) {
+    alert("❌ Error: " + err.message);
+  }
+}
+
+// Configurar el radar: Se ejecuta 3 segundos después de cargar y luego cada 5 minutos
+setTimeout(checkQuarantineAccounts, 3000);
+setInterval(checkQuarantineAccounts, 300000);

@@ -2659,7 +2659,7 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
 });
 
 
-// ADMIN: REEMPLAZAR CUENTA REPORTADA
+// ADMIN: REEMPLAZAR CUENTA REPORTADA (CON CÁLCULO DE DÍAS RESTANTES)
 app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMiddleware, async (req, res) => {
   const client = await pool.connect();
   let transactionStarted = false;
@@ -2710,6 +2710,15 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       return res.status(400).json({ error: "Este reporte no está ligado a un pedido" });
     }
 
+    // --- NUEVA LÓGICA: CALCULAR DÍAS RESTANTES ---
+    const purchaseDate = new Date(report.order_created_at);
+    const now = new Date();
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysUsed = Math.max(0, Math.ceil((now - purchaseDate) / msPerDay));
+    const daysRemaining = Math.max(0, 28 - daysUsed); 
+    const expirationDate = new Date(now.getTime() + (daysRemaining * msPerDay));
+    // ----------------------------------------------
+
     const ownerAdminId = report.resolved_owner_admin_id || null;
     const replacementProductName = report.account_product_name || report.product_name || "";
     const replacementPlatform = report.platform || report.product_category || report.product_name || "";
@@ -2728,8 +2737,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       const insertAccountResult = await client.query(
         `INSERT INTO platform_accounts
          (platform, product_name, account_email, account_password, profile_name, profile_pin,
-          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11)
+          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12)
          RETURNING *`,
         [
           replacementPlatform,
@@ -2742,7 +2751,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
           String(access_url || "").trim(),
           report.order_id,
           report.user_id,
-          ownerAdminId
+          ownerAdminId,
+          expirationDate
         ]
       );
 
@@ -2752,50 +2762,20 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
       if (Number(replacement_account_id || 0) > 0) {
         availableResult = await client.query(
-          `SELECT *
-           FROM platform_accounts
-           WHERE id = $1
-             AND status = 'available'
-             AND (
-               lower(platform) = lower($2)
-               OR lower(product_name) = lower($2)
-               OR lower(platform) LIKE '%' || lower($2) || '%'
-               OR lower($2) LIKE '%' || lower(platform) || '%'
-               OR lower(product_name) LIKE '%' || lower($2) || '%'
-               OR lower($2) LIKE '%' || lower(product_name) || '%'
-             )
-             AND (
-               owner_admin_id = $3
-               OR owner_admin_id IS NULL
-               OR owner_admin_id = 0
-               OR $3::int IS NULL
-             )
-           LIMIT 1
-           FOR UPDATE`,
+          `SELECT * FROM platform_accounts
+           WHERE id = $1 AND status = 'available'
+             AND (lower(platform) = lower($2) OR lower(product_name) = lower($2) OR lower(platform) LIKE '%' || lower($2) || '%' OR lower($2) LIKE '%' || lower(platform) || '%' OR lower(product_name) LIKE '%' || lower($2) || '%' OR lower($2) LIKE '%' || lower(product_name) || '%')
+             AND (owner_admin_id = $3 OR owner_admin_id IS NULL OR owner_admin_id = 0 OR $3::int IS NULL)
+           LIMIT 1 FOR UPDATE`,
           [Number(replacement_account_id), replacementPlatform, ownerAdminId]
         );
       } else {
         availableResult = await client.query(
-          `SELECT *
-           FROM platform_accounts
+          `SELECT * FROM platform_accounts
            WHERE status = 'available'
-             AND (
-               lower(platform) = lower($1)
-               OR lower(product_name) = lower($1)
-               OR lower(platform) LIKE '%' || lower($1) || '%'
-               OR lower($1) LIKE '%' || lower(platform) || '%'
-               OR lower(product_name) LIKE '%' || lower($1) || '%'
-               OR lower($1) LIKE '%' || lower(product_name) || '%'
-             )
-             AND (
-               owner_admin_id = $2
-               OR owner_admin_id IS NULL
-               OR owner_admin_id = 0
-               OR $2::int IS NULL
-             )
-           ORDER BY id ASC
-           LIMIT 1
-           FOR UPDATE SKIP LOCKED`,
+             AND (lower(platform) = lower($1) OR lower(product_name) = lower($1) OR lower(platform) LIKE '%' || lower($1) || '%' OR lower($1) LIKE '%' || lower(platform) || '%' OR lower(product_name) LIKE '%' || lower($1) || '%' OR lower($1) LIKE '%' || lower(product_name) || '%')
+             AND (owner_admin_id = $2 OR owner_admin_id IS NULL OR owner_admin_id = 0 OR $2::int IS NULL)
+           ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
           [replacementPlatform, ownerAdminId]
         );
       }
@@ -2809,9 +2789,9 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
       await client.query(
         `UPDATE platform_accounts
-         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
+         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW(), expires_at = $4
          WHERE id = $3`,
-        [report.order_id, report.user_id, newAccount.id]
+        [report.order_id, report.user_id, newAccount.id, expirationDate]
       );
     }
 
@@ -2819,38 +2799,25 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
     if (report.reported_account_id) {
       await client.query(
-        `UPDATE platform_accounts
-         SET status = 'failed'
-         WHERE id = $1`,
+        `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
         [report.reported_account_id]
       );
     }
 
     await client.query(
       `UPDATE orders
-       SET assigned_platform_account_id = $1,
-           delivered_account_data = $2,
-           admin_response = $2,
-           status = 'exito',
-           owner_admin_id = COALESCE(owner_admin_id, $4)
+       SET assigned_platform_account_id = $1, delivered_account_data = $2, admin_response = $2, status = 'exito', owner_admin_id = COALESCE(owner_admin_id, $4)
        WHERE id = $3`,
       [newAccount.id, deliveredAccountData, report.order_id, ownerAdminId]
     );
 
     await client.query(
       `UPDATE account_reports
-       SET reported_account_id = $1,
-           owner_admin_id = COALESCE(owner_admin_id, $4),
-           status = 'reemplazo',
-           resolution_type = 'reemplazo',
-           admin_response = $2,
-           reviewed_at = NOW()
+       SET reported_account_id = $1, owner_admin_id = COALESCE(owner_admin_id, $4), status = 'reemplazo', resolution_type = 'reemplazo', admin_response = $2, reviewed_at = NOW()
        WHERE id = $3`,
       [
         newAccount.id,
-        `Cuenta reemplazada correctamente.
-
-${deliveredAccountData}`,
+        `Cuenta reemplazada correctamente (Días restantes: ${daysRemaining}).\n\n${deliveredAccountData}`,
         reportId,
         ownerAdminId
       ]
@@ -2860,9 +2827,7 @@ ${deliveredAccountData}`,
     transactionStarted = false;
 
     res.json({
-      message: manual === true || manual === "true"
-        ? "Cuenta manual agregada y reemplazada correctamente"
-        : "Cuenta reemplazada correctamente",
+      message: manual === true || manual === "true" ? "Cuenta manual agregada y reemplazada correctamente" : "Cuenta reemplazada correctamente",
       delivered_account_data: deliveredAccountData,
       platform_account_id: newAccount.id
     });
@@ -2876,7 +2841,6 @@ ${deliveredAccountData}`,
     client.release();
   }
 });
-
 // ADMIN: REEMBOLSO PROPORCIONAL POR DÍAS RESTANTES
 app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddleware, adminMiddleware, async (req, res) => {
   const client = await pool.connect();
@@ -4490,6 +4454,65 @@ app.post("/api/admin/panic-reset", authMiddleware, adminMiddleware, async (req, 
     res.status(500).json({ error: "Error interno al intentar resetear la clave." });
   }
 });
+// ==========================================
+// RUTA DE RECUPERACIÓN DE CUENTAS (CUARENTENA)
+// ==========================================
+app.post("/api/admin/system/check-expirations", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      UPDATE platform_accounts
+      SET status = 'recovery_pending'
+      WHERE status = 'delivered' AND expires_at IS NOT NULL AND expires_at < NOW()
+      RETURNING id, platform, account_email;
+    `);
+    res.json({ message: `Se movieron ${result.rowCount} cuentas a cuarentena.`, cuentas: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: "Error verificando expiraciones." });
+  }
+});
+
+app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, platform, account_email, account_password, profile_name, expires_at
+      FROM platform_accounts
+      WHERE status = 'recovery_pending'
+      ORDER BY expires_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Error listando cuarentena." });
+  }
+});
+
+app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { new_password } = req.body;
+    await pool.query(`
+      UPDATE platform_accounts
+      SET status = 'available', account_password = $1, assigned_order_id = NULL, assigned_user_id = NULL, delivered_at = NULL, expires_at = NULL
+      WHERE id = $2 AND status = 'recovery_pending'
+    `, [new_password, req.params.id]);
+    
+    res.json({ message: "Cuenta liberada y lista para venderse." });
+  } catch (err) {
+    res.status(500).json({ error: "Error liberando la cuenta." });
+  }
+});
+
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT}`);
+    });
+  })
+  .catch(err => {
+  console.error("ERROR COMPLETO");
+  console.error(err);
+  process.exit(1);
+});
+
+
 initDatabase()
   .then(() => {
     app.listen(PORT, () => {
