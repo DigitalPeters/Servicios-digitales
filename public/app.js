@@ -2100,11 +2100,12 @@ function renderAdminReportCompactFinal(r){
   </div>`;
 }
 
-async function loadAccountReports(){
-  console.log("DEBUG: Iniciando función loadAccountReports"); // Verificamos si entra
+   
+async function loadAccountReports() {
+  console.log("DEBUG: Iniciando función loadAccountReports"); 
   
-  if(currentUser?.role !== 'admin') {
-    console.log("DEBUG: Usuario no es admin, rol actual:", currentUser?.role);
+  if (currentUser?.role !== 'admin') {
+    console.log("DEBUG: Usuario no es admin");
     return;
   }
   
@@ -2112,8 +2113,7 @@ async function loadAccountReports(){
     console.log("DEBUG: Intentando llamar a la API...");
     const reports = await api('/api/admin/account-reports');
     console.log("DEBUG: API respondió, datos recibidos:", reports);
-    
-    // ... resto de tu código
+ // ... resto de tu código
   if(!__isAdminUserFinal()) return;
   try{
     const reports=await api('/api/admin/account-reports');
@@ -2122,7 +2122,9 @@ async function loadAccountReports(){
     if(stat)stat.textContent=pending.length;
     const box=document.getElementById('adminAccountReportsList');
     if(box)box.innerHTML=reports.length?reports.map(renderAdminReportCompactFinal).join(''):'Sin reportes de falla.';
-  }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
+ } catch (err) {
+    console.error("Error cargando reportes:", err);
+  }
 }
 
 const __showSectionBeforeFinalFix=typeof showSection==='function'?showSection:null;
