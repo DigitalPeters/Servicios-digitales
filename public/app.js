@@ -2101,8 +2101,19 @@ function renderAdminReportCompactFinal(r){
 }
 
 async function loadAccountReports(){
-  alert("¡ESTOY LEYENDO EL ARCHIVO CORRECTO!"); // <--- AGREGA ESTO
-  if(currentUser?.role!=='admin')return;
+  console.log("DEBUG: Iniciando función loadAccountReports"); // Verificamos si entra
+  
+  if(currentUser?.role !== 'admin') {
+    console.log("DEBUG: Usuario no es admin, rol actual:", currentUser?.role);
+    return;
+  }
+  
+  try {
+    console.log("DEBUG: Intentando llamar a la API...");
+    const reports = await api('/api/admin/account-reports');
+    console.log("DEBUG: API respondió, datos recibidos:", reports);
+    
+    // ... resto de tu código
   if(!__isAdminUserFinal()) return;
   try{
     const reports=await api('/api/admin/account-reports');
