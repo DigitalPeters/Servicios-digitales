@@ -2477,6 +2477,7 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
   }
 }
 
+
 app.post("/api/account-reports", authMiddleware, createAccountReportHandler);
 app.post("/api/user/reporte-cuenta", authMiddleware, createAccountReportHandler);
 
