@@ -2469,8 +2469,8 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
     });
 
 
-    res.json({
-      message: "Reporte enviado. El administrador revisará la falla y dará el veredicto final."
+res.json({
+      message: evidence_image ? "✅ ¡ÉXITO! LA FOTO SÍ LLEGÓ AL SERVIDOR" : "❌ ERROR: LA FOTO NO LLEGÓ"
     });
   } catch (err) {
     console.error("Error enviando reporte de cuenta:", err.message);
