@@ -2101,49 +2101,34 @@ function renderAdminReportCompactFinal(r){
 }
 
    
+
 async function loadAccountReports() {
-  console.log("DEBUG: Iniciando función loadAccountReports"); 
-  
-  if (currentUser?.role !== 'admin') {
-    console.log("DEBUG: Usuario no es admin");
-    return;
-  }
-  
+  if (!__isAdminUserFinal()) return;
+
   try {
-    console.log("DEBUG: Intentando llamar a la API...");
     const reports = await api('/api/admin/account-reports');
-    console.log("DEBUG: API respondió, datos recibidos:", reports);
- // ... resto de tu código
-  if(!__isAdminUserFinal()) return;
-  try{
-    const reports=await api('/api/admin/account-reports');
-    const pending=reports.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
-    const stat=document.getElementById('statReports');
-    if(stat)stat.textContent=pending.length;
-    const box=document.getElementById('adminAccountReportsList');
-    if(box)box.innerHTML=reports.length?reports.map(renderAdminReportCompactFinal).join(''):'Sin reportes de falla.';
- } catch (err) {
-    console.error("Error cargando reportes:", err);
+    const pending = reports.filter(r => String(r.status || '').toLowerCase() === 'pendiente');
+    
+    const stat = document.getElementById('statReports');
+    if (stat) stat.textContent = pending.length;
+    
+    const box = document.getElementById('adminAccountReportsList');
+    if (box) {
+      box.innerHTML = reports.length ? reports.map(renderAdminReportCompactFinal).join('') : 'Sin reportes de falla.';
+    }
+  } catch (e) {
+    console.warn('Error cargando reportes:', e);
   }
 }
 
-const __showSectionBeforeFinalFix=typeof showSection==='function'?showSection:null;
-if(__showSectionBeforeFinalFix){
-  showSection=function(name){
-    __showSectionBeforeFinalFix(name);
-    setTimeout(()=>{
-      ensureGlobalAnnouncementsUIFinal();
-      loadGlobalAnnouncementsFinal();
-      if(name==='admin' && __isAdminUserFinal()) loadAdminAnnouncementsFinal();
-    },120);
+// Inicialización limpia de comunicados
+setTimeout(() => {
+  if (typeof ensureGlobalAnnouncementsUIFinal === 'function') ensureGlobalAnnouncementsUIFinal();
+  if (typeof loadGlobalAnnouncementsFinal === 'function') loadGlobalAnnouncementsFinal();
+  if (typeof __isAdminUserFinal === 'function' && __isAdminUserFinal()) {
+    if (typeof loadAdminAnnouncementsFinal === 'function') loadAdminAnnouncementsFinal();
   }
-}
-
-setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},800);
-// Auto-refresh de comunicados desactivado para no interrumpir formularios.
-// setInterval(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();if(__isAdminUserFinal())loadAdminAnnouncementsFinal();},5000);
-
-
+}, 800);
 
 // ===============================
 // FIX: Comunicados como opción directa del menú lateral
