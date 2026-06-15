@@ -2481,7 +2481,7 @@ app.post("/api/user/reporte-cuenta", authMiddleware, createAccountReportHandler)
 app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at, order_id, reported_account_id, refund_amount, resolution_type
+      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at, order_id, reported_account_id, refund_amount, resolution_type, evidence_image
        FROM account_reports
        WHERE user_id = $1
        ORDER BY id DESC`,
@@ -2513,6 +2513,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.reported_account_id,
         account_reports.refund_amount,
         account_reports.resolution_type,
+        account_reports.evidence_image, /* <--- CÁMBIALO PARA QUE COINCIDA */
         users.name AS customer_name,
         users.email AS customer_email,
         orders.amount AS order_amount,
@@ -2536,7 +2537,6 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
     res.status(500).json({ error: "Error cargando reportes de cuenta" });
   }
 });
-
 
 
 // CUENTAS DEL PEDIDO DE UN REPORTE
