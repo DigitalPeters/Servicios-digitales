@@ -2338,6 +2338,9 @@ async function createAccountReportHandler(req, res) {
     const description = String(req.body.description || req.body.explicacion || "").trim();
 // --- NUEVO: ATRAPAMOS LA FOTO ---
     const evidence_image = req.body.evidence_image || null;
+
+// 👇 PON ESTE DETECTOR AQUÍ 👇
+console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longitud: " + evidence_image.length : "NO LLEGÓ NADA");
     // --------------------------------
 
     if (!description) {
