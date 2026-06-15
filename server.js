@@ -2336,6 +2336,9 @@ async function createAccountReportHandler(req, res) {
     let email = String(req.body.email || req.body.correo || "").trim();
     const issue_type = String(req.body.issue_type || req.body.tipo || "otro").trim();
     const description = String(req.body.description || req.body.explicacion || "").trim();
+// --- NUEVO: ATRAPAMOS LA FOTO ---
+    const evidence_image = req.body.evidence_image || null;
+    // --------------------------------
 
     if (!description) {
       return res.status(400).json({ error: "La explicación de la falla es obligatoria" });
@@ -2428,8 +2431,8 @@ async function createAccountReportHandler(req, res) {
 
     const insertResult = await pool.query(
       `INSERT INTO account_reports
-       (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id, refund_amount, resolution_type, reported_platform, owner_admin_id)
-       VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6, 0, '', $7, $8)
+       (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id, refund_amount, resolution_type, reported_platform, owner_admin_id, evidence_image)
+       VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6, 0, '', $7, $8, $9)
        RETURNING id`,
       [
         userId,
@@ -2439,7 +2442,8 @@ async function createAccountReportHandler(req, res) {
         purchase.order_id,
         purchase.account_id,
         purchase.platform || purchase.account_product_name || purchase.product_name || "",
-        purchase.owner_admin_id || null
+        purchase.owner_admin_id || null,
+        evidence_image // <-- Aquí inyectamos la foto en la base de datos
       ]
     );
 

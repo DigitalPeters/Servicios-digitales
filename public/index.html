@@ -197,16 +197,39 @@ onclick="showSection('distributorEarnings')">
       </section>
 
       <section id="section-reports" class="section">
-        <div class="panel"><h2>Reportar falla</h2><p class="small-text">Reporta una falla para que el administrador revise el caso.</p><label class="field-label">Correo con falla</label><input id="reporteCorreo" placeholder="correo@ejemplo.com" /><label class="field-label">Tipo de falla</label><select id="reporteTipo"><option value="contraseña incorrecta">Contraseña incorrecta</option><option value="codigo de viaje">Código de viaje</option><option value="codigo de acceso disney">Código de acceso Disney</option><option value="codigo de hbo">Código de HBO</option><option value="otro">Otro</option></select><label class="field-label">Explicación</label><textarea id="reporteExplicacion" placeholder="Describe el problema"></textarea><button class="primary-btn" onclick="enviarReporteCuenta()">Enviar reporte</button></div>
-        
-        <div class="panel" style="margin-top: 22px;">
-          <div class="panel-head">
-            <h2>Mis reportes y respuestas</h2>
-            <button class="outline-btn" style="width:auto" onclick="loadMyReports()">Actualizar</button>
-          </div>
-          <div id="myReportsList">Cargando reportes...</div>
-        </div>
-      </section>
+  <div class="panel">
+    <h2>Reportar falla</h2>
+    <p class="small-text">Reporta una falla para que el administrador revise el caso.</p>
+    
+    <label class="field-label">Correo con falla</label>
+    <input id="reporteCorreo" placeholder="correo@ejemplo.com" />
+    
+    <label class="field-label">Tipo de falla</label>
+    <select id="reporteTipo">
+      <option value="contraseña incorrecta">Contraseña incorrecta</option>
+      <option value="codigo de viaje">Código de viaje</option>
+      <option value="codigo de acceso disney">Código de acceso Disney</option>
+      <option value="codigo de hbo">Código de HBO</option>
+      <option value="otro">Otro</option>
+    </select>
+    
+    <label class="field-label">Explicación</label>
+    <textarea id="reporteExplicacion" placeholder="Describe el problema"></textarea>
+
+    <label class="field-label">📷 Evidencia en foto (Opcional)</label>
+    <input type="file" id="reporteEvidencia" accept="image/jpeg, image/png, image/jpg" style="width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; border: 1px dashed #6d5dfc; background: #2a2a40; color: #cbd5e1; box-sizing: border-box; cursor: pointer;">
+    <small style="color: #94a3b8; display: block; margin-top: -10px; margin-bottom: 15px;">Formatos: JPG o PNG.</small>
+    <button class="primary-btn" onclick="enviarReporteCuenta()">Enviar reporte</button>
+  </div>
+  
+  <div class="panel" style="margin-top: 22px;">
+    <div class="panel-head">
+      <h2>Mis reportes y respuestas</h2>
+      <button class="outline-btn" style="width:auto" onclick="loadMyReports()">Actualizar</button>
+    </div>
+    <div id="myReportsList">Cargando reportes...</div>
+  </div>
+</section>
 
       <section id="section-distributor" class="section">
         <h1 class="section-title">Mis vendedores</h1>

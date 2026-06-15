@@ -189,11 +189,48 @@ async function enviarReporteCuenta(){
     const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
     const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
     if(!correo||!explicacion)throw new Error('Correo y explicación son obligatorios');
-    const data=await api('/api/account-reports',{method:'POST',body:JSON.stringify({email:correo,issue_type:tipo,description:explicacion})});
+
+    // --- NUEVA MAGIA: LEER LA FOTO COMO TEXTO ---
+    let fotoBase64 = null;
+    const fotoInput = document.getElementById('reporteEvidencia');
+    if (fotoInput && fotoInput.files.length > 0) {
+        const file = fotoInput.files[0];
+        // Protección vital: Si la foto pesa más de 2MB, la bloqueamos para no tirar tu servidor
+        if (file.size > 2 * 1024 * 1024) {
+            throw new Error('La imagen es muy pesada (Máximo 2MB). Usa una imagen más ligera o recortada.');
+        }
+        fotoBase64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(file);
+        });
+    }
+    // ---------------------------------------------
+
+    const data=await api('/api/account-reports',{
+        method:'POST',
+        body:JSON.stringify({
+            email:correo,
+            issue_type:tipo,
+            description:explicacion,
+            evidence_image: fotoBase64 // Enviamos la foto adjunta al servidor
+        })
+    });
+    
     showMessage(data.message||'Reporte enviado');
-    reporteCorreo.value='';reporteExplicacion.value='';
-    await loadAccountReports();
-  }catch(e){showMessage(e.message,'error')}
+    
+    // Limpiamos los campos para que quede como nuevo
+    if(document.getElementById('reporteCorreo')) document.getElementById('reporteCorreo').value='';
+    if(document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value='';
+    if(fotoInput) fotoInput.value='';
+    
+    // Refrescamos las vistas para que el vendedor vea su reporte al instante
+    if(typeof loadAccountReports === 'function') await loadAccountReports();
+    if(typeof loadMyReports === 'function') loadMyReports();
+    
+  }catch(e){
+    showMessage(e.message,'error')
+  }
 }
 function getBalanceRequestStatusText(status){
   const statuses={
@@ -873,36 +910,45 @@ async function loadAccountReports(){
     const stat=document.getElementById('statReports');
     if(stat)stat.textContent=pending.length;
     const box=document.getElementById('adminAccountReportsList');
-    if(!box)return;
-    box.innerHTML=reports.length?reports.map(r=>{
-      const info=calculateReportRefundInfo(r);
-      const canAct=String(r.status||'').toLowerCase()==='pendiente';
-      return `<div class="item">
-        <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
-        <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
-        <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
-        <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
-        <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
-        <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
-        <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
-        ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
-        <div class="two-row">
-          <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
-          <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+  if(!box)return;
+  box.innerHTML=reports.length?reports.map(r=>{
+    const info=calculateReportRefundInfo(r);
+    const canAct=String(r.status||'').toLowerCase()==='pendiente';
+    return `<div class="item">
+      <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
+      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
+      <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+      <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
+      <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
+      <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
+
+      ${r.evidence_image ? `
+      <details style="margin: 12px 0; cursor: pointer; background: #2a2a40; padding: 10px; border-radius: 5px; border: 1px solid #444;">
+        <summary style="color: #10b981; font-weight: bold; outline: none; user-select: none;">📷 Ver Evidencia Adjunta</summary>
+        <div style="text-align: center; margin-top: 15px;">
+          <img src="${r.evidence_image}" style="max-width: 100%; max-height: 400px; border-radius: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);" alt="Evidencia">
         </div>
-        <div class="two-row" style="margin-top:10px">
-          <select id="reportStatus-${r.id}">
-            <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
-            <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
-            <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
-            <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
-          </select>
-          <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
-        </div>
-        <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
-      </div>`;
-    }).join(''):'Sin reportes de falla.';
-  }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
+      </details>
+      ` : ''}
+      <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
+      ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
+      <div class="two-row">
+        <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
+        <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+      </div>
+      <div class="two-row" style="margin-top:10px">
+        <select id="reportStatus-${r.id}">
+          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
+          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
+          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
+        </select>
+        <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
+      </div>
+      <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
+    </div>`;
+  }).join(''):'Sin reportes de falla.';
+}catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
 }
 
 async function updateAccountReportStatus(reportId){
