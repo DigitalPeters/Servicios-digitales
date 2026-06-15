@@ -903,6 +903,8 @@ function calculateReportRefundInfo(report){
 }
 
 async function loadAccountReports(){
+alert('LOAD ACCOUNT REPORTS NUEVO');
+
   if(currentUser?.role!=='admin')return;
   try{
     const reports = await api('/api/admin/account-reports');
