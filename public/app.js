@@ -905,7 +905,11 @@ function calculateReportRefundInfo(report){
 async function loadAccountReports(){
   if(currentUser?.role!=='admin')return;
   try{
-    const reports=await api('/api/admin/account-reports');
+    const reports = await api('/api/admin/account-reports');
+    
+    // --- PON ESTE DETECTOR AQUÍ ---
+    console.log("👀 REPORTES RECIBIDOS:", reports);
+    // ------------------------------
     const pending=reports.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
     const stat=document.getElementById('statReports');
     if(stat)stat.textContent=pending.length;
@@ -3803,39 +3807,6 @@ setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); e
     const correo=document.getElementById('reporteCorreo');
     if(correo && email) correo.value=email;
   };
-
-  if(typeof enviarReporteCuenta==='function'){
-    window.enviarReporteCuenta=async function(){
-      try {
-        const selectedId=Number(document.getElementById('reporteCuentaSelect')?.value||0);
-        const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
-        const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
-        const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
-
-        if(!selectedId && !correo) throw new Error('Selecciona la cuenta del combo o escribe el correo con falla');
-        if(!explicacion) throw new Error('La explicación es obligatoria');
-
-        const data=await api('/api/account-reports', {
-          method:'POST',
-          body:JSON.stringify({
-            reported_account_id:selectedId || undefined,
-            email:correo,
-            issue_type:tipo,
-            description:explicacion
-          })
-        });
-
-        showMessage(data.message || 'Reporte enviado');
-        if(document.getElementById('reporteCuentaSelect')) document.getElementById('reporteCuentaSelect').value='';
-        if(document.getElementById('reporteCorreo')) document.getElementById('reporteCorreo').value='';
-        if(document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value='';
-        if(typeof loadMyAccountReports==='function') await loadMyAccountReports();
-      } catch(e) {
-        showMessage(e.message || 'Error enviando reporte','error');
-      }
-    };
-    enviarReporteCuenta=window.enviarReporteCuenta;
-  }
 
   async function chooseComboAccount(reportId){
     const data=await api('/api/admin/account-reports/'+reportId+'/order-accounts');
