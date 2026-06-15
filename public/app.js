@@ -2101,6 +2101,8 @@ function renderAdminReportCompactFinal(r){
 }
 
 async function loadAccountReports(){
+  alert("¡ESTOY LEYENDO EL ARCHIVO CORRECTO!"); // <--- AGREGA ESTO
+  if(currentUser?.role!=='admin')return;
   if(!__isAdminUserFinal()) return;
   try{
     const reports=await api('/api/admin/account-reports');
