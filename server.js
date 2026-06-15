@@ -2468,6 +2468,7 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
       description
     });
 
+
     res.json({
       message: "Reporte enviado. El administrador revisará la falla y dará el veredicto final."
     });
