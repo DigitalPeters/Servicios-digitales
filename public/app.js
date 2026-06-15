@@ -2087,7 +2087,23 @@ function renderAdminReportCompactFinal(r){
       <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
       <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
-      <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
+      ${r.evidence_image ? `
+<div style="margin:12px 0;">
+  <details>
+    <summary style="cursor:pointer;font-weight:bold;color:#10b981;">
+      📷 Ver evidencia adjunta
+    </summary>
+    <div style="margin-top:10px;">
+      <img
+        src="${r.evidence_image}"
+        alt="Evidencia"
+        style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid #444;"
+      />
+    </div>
+  </details>
+</div>
+` : ''}
+<p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
         <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
