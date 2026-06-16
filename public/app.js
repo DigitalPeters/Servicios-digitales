@@ -3231,20 +3231,43 @@ if(__applyRentedLayoutBeforeFinal){
   };
 }
 const __loadAppBeforeReportsFinal = typeof loadApp === 'function' ? loadApp : null;
-if(__loadAppBeforeReportsFinal){
-  loadApp = async function(){
+
+if (__loadAppBeforeReportsFinal) {
+
+  loadApp = async function () {
     await __loadAppBeforeReportsFinal();
-    if(isAdminAnyFinal()){
+
+    console.log('ROLE:', currentUser?.role);
+    console.log('IS_PANEL_ADMIN:', currentUser?.is_panel_admin);
+    console.log('IS_RENTED:', isPanelAdminRented());
+    console.log('IS_MAIN_ADMIN:', isMainAdminPrincipal());
+    console.log('CURRENT_USER:', currentUser);
+
+    if (isAdminAnyFinal()) {
       ensurePanelAdminDashboardCardsFinal();
       ensureAdvancedReportsPanelFinal();
-      await Promise.allSettled([loadSalesReport(true), loadHistoryUsersFinal()]);
-      if(typeof applyRentedAdminLayout==='function') applyRentedAdminLayout();
+
+      await Promise.allSettled([
+        loadSalesReport(true),
+        loadHistoryUsersFinal()
+      ]);
+
+      if (typeof applyRentedAdminLayout === 'function')
+        applyRentedAdminLayout();
+
       syncPanelAdminDashboardValuesFinal();
     }
   };
-}
-setTimeout(()=>{ if(isAdminAnyFinal()){ ensurePanelAdminDashboardCardsFinal(); ensureAdvancedReportsPanelFinal(); loadSalesReport(true).catch(()=>{}); } }, 1200);
 
+}
+
+setTimeout(() => {
+  if (isAdminAnyFinal()) {
+    ensurePanelAdminDashboardCardsFinal();
+    ensureAdvancedReportsPanelFinal();
+    loadSalesReport(true).catch(() => {});
+  }
+}, 1200);
 
 // ===============================
 // AJUSTE FINAL: Ventas hoy despliega resumen + Paneles admin en dashboard principal
