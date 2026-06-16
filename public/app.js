@@ -1106,9 +1106,19 @@ function syncAdminVisibilitySafe(){
 
   // CONTROL DE BARRA LATERAL Y BOTONES APP
   const sidebar = document.getElementById('sidebar');
-  if (!isAdmin) {
-    if (sidebar) sidebar.style.display = 'none'; // Esconde barra al vendedor
-    setHiddenSafe('panel-botones-vendedor', false); // Muestra botones app al vendedor
+  const esPanelPropietario =
+  currentUser?.is_panel_admin === true ||
+  currentUser?.is_panel_admin === 1 ||
+  currentUser?.is_panel_admin === 'true' ||
+  currentUser?.account_type === 'panel_propietario';
+
+if (!isAdmin && !esPanelPropietario) {
+  if (sidebar) sidebar.style.display = 'none';
+  setHiddenSafe('panel-botones-vendedor', false);
+} else {
+  if (sidebar) sidebar.style.display = '';
+  setHiddenSafe('panel-botones-vendedor', true);
+}
     
     // DETECTOR UNIVERSAL DE DISTRIBUIDORES A PRUEBA DE BALAS
     const esDist = currentUser && (
@@ -1132,12 +1142,12 @@ function syncAdminVisibilitySafe(){
   // TRUCO A PRUEBA DE BALAS PARA FULMINAR LAS TARJETAS VIEJAS
   const tarjetasViejas = document.querySelectorAll('#section-dashboard .grid-cards');
   tarjetasViejas.forEach(contenedor => {
-    if (!isAdmin) {
-      contenedor.style.display = 'none'; 
-    } else {
-      contenedor.style.display = ''; 
-    }
-  });
+  if (!isAdmin && !esPanelPropietario) {
+    contenedor.style.display = 'none';
+  } else {
+    contenedor.style.display = '';
+  }
+});
 }
 function setDashboardMenuActiveSafe(){
   document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
