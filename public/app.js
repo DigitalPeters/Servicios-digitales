@@ -2931,7 +2931,7 @@ function applyRentedAdminLayout(){
   // Dentro del admin rentado solo mostramos lo que necesita para operar su panel.
   if(panel){
     hideElementHard(document.getElementById('section-admin'), false);
-    hideElementHard(document.getElementById('adminUsersPanel'), true);
+    hideElementHard(document.getElementById('adminUsersPanel'), false);
     hideElementHard(document.getElementById('adminSubadminPricesPanel'), true);
     hideElementHard(document.getElementById('adminBalanceRequestsPanel'), true);
     hideElementHard(document.getElementById('adminAccountReportsPanel'), true);
