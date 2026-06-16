@@ -2921,6 +2921,7 @@ function applyRentedAdminLayout(){
 
   // Tarjetas dashboard para panel rentado.
   const userCard = document.querySelector('.dash-card[onclick="openUsersFromDashboard()"]');
+if(userCard) userCard.classList.remove('hidden');
   hideElementHard(userCard, panel); // se quita Usuarios porque ya existe Mis vendedores.
   hideElementHard(document.getElementById('dashInventoryCard'), !(main || panel));
   hideElementHard(document.getElementById('dashSalesTodayCard'), !main); // ventas propias completas van en fase de reportes.
