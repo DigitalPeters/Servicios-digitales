@@ -1134,11 +1134,7 @@ if (!isAdmin && !esPanelPropietario) {
     if (btnPre) btnPre.style.display = esDist ? 'block' : 'none';
     if (btnGan) btnGan.style.display = esDist ? 'block' : 'none';
 
-  } else {
-    if (sidebar) sidebar.style.display = ''; // Muestra barra al admin
-    setHiddenSafe('panel-botones-vendedor', true); // Oculta botones app al admin
-  }
-
+  
   // TRUCO A PRUEBA DE BALAS PARA FULMINAR LAS TARJETAS VIEJAS
   const tarjetasViejas = document.querySelectorAll('#section-dashboard .grid-cards');
   tarjetasViejas.forEach(contenedor => {
@@ -1150,8 +1146,6 @@ if (!isAdmin && !esPanelPropietario) {
 });
 }
 function setDashboardMenuActiveSafe(){
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
-}function setDashboardMenuActiveSafe(){
   document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
 }
 
