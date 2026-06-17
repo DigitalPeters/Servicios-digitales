@@ -940,7 +940,7 @@ alert('LOAD ACCOUNT REPORTS NUEVO');
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
         <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
-        <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+        <button class="danger-btn" onclick="refundReportedAccount(${r.id}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
       </div>
       <div class="two-row" style="margin-top:10px">
         <select id="reportStatus-${r.id}">
@@ -2111,7 +2111,7 @@ function renderAdminReportCompactFinal(r){
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
         <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
-        <button class="danger-btn" onclick="refundReportedAccount(${r.id})" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+        <button class="danger-btn" onclick="refundReportedAccount(${r.id}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
       </div>
       <div class="two-row" style="margin-top:10px">
         <select id="reportStatus-${r.id}"><option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option><option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option></select>
@@ -5142,3 +5142,5 @@ function activarHistorialCelular() {
 setTimeout(() => {
     mostrarBotonRegresar();
 }, 2000);
+
+
