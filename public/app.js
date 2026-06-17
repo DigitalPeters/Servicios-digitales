@@ -1023,35 +1023,60 @@ async function refundReportedAccount(reportId, fechaCompra) {
   try {
     let amountToSend = null;
 
-    // 1. Preguntamos al administrador
-    const basePriceStr = prompt(
-      "Si es un COMBO: Ingresa el PRECIO BASE de la cuenta fallida (ej. 45.50). El sistema calculará los días restantes.\n\n" +
-      "Si es cuenta normal: Deja esto en blanco y presiona Aceptar."
-    );
+    // 1. PRIMER PASO: Preguntar qué cuenta falló
+    const cuentaFallida = prompt("Si es un COMBO: ¿Qué cuenta específica falló? (Ej. Netflix, Vix)\n\nSi es cuenta normal: Deja esto en blanco y presiona Aceptar.");
+    
+    if (cuentaFallida === null) return; // Si el admin cancela, cerramos.
 
-    if (basePriceStr === null) return; // Si cancela, salir.
+    // 2. SEGUNDO PASO: Si escribió el nombre de la cuenta, pedimos el precio
+    if (cuentaFallida.trim() !== '') {
+        const basePriceStr = prompt(`¿Cuál es el costo base de la cuenta de ${cuentaFallida.toUpperCase()}? (Solo escribe el número, ej. 45.50)`);
+        
+        if (basePriceStr === null) return;
 
-    // 2. Si escribió un precio (COMBO)
-    if (basePriceStr.trim() !== '') {
         const precioBase = parseFloat(basePriceStr);
         if (isNaN(precioBase) || precioBase <= 0) {
             alert("Monto inválido. Operación cancelada.");
             return;
         }
 
-        amountToSend = calcularReembolsoParcial(precioBase, fechaCompra);
+        // 3. TERCER PASO: Hacemos el cálculo matemático AQUÍ MISMO para que no falle nada
+        const hoy = new Date();
+        const compra = new Date(fechaCompra);
+        const diasTotalesServicio = 28; // Tu sistema original usa 28 días, lo igualamos aquí.
+        
+        let diasUsados = 0;
+        // Validamos que la fecha sea correcta
+        if (!isNaN(compra.getTime())) {
+            const diferenciaMilisegundos = hoy.getTime() - compra.getTime();
+            diasUsados = Math.floor(diferenciaMilisegundos / (1000 * 60 * 60 * 24));
+        }
+        
+        // Evitamos números negativos
+        diasUsados = Math.max(0, diasUsados); 
 
-        if (!confirm(`COMBO DETECTADO:\nEl reembolso por los días restantes es de $${amountToSend}.\n\n¿Aplicar este monto al vendedor?`)) {
+        let diasRestantes = 0;
+        if (diasUsados >= diasTotalesServicio) {
+            amountToSend = 0;
+        } else {
+            diasRestantes = diasTotalesServicio - diasUsados;
+            const costoPorDia = precioBase / diasTotalesServicio;
+            amountToSend = parseFloat((costoPorDia * diasRestantes).toFixed(2));
+        }
+
+        // 4. Confirmación final con todos los datos
+        if (!confirm(`COMBO DETECTADO (Falla en ${cuentaFallida.toUpperCase()}):\n\nEsta cuenta se ha usado por ${diasUsados} días.\nEl reembolso por los ${diasRestantes} días restantes es de: $${amountToSend}.\n\n¿Aplicar este monto al vendedor?`)) {
             return;
         }
+        
     } else {
-        // 3. Si lo dejó en blanco (NORMAL)
+        // SI ES CUENTA NORMAL (Lo dejó en blanco)
         if (!confirm('¿Aplicar reembolso proporcional NORMAL al saldo del usuario?')) {
             return;
         }
     }
 
-    // 4. Enviar a la API
+    // 5. Enviamos la instrucción al servidor
     const data = await api('/api/admin/account-reports/' + reportId + '/refund-proportional', {
         method: 'POST',
         body: JSON.stringify({ overrideAmount: amountToSend }) 
@@ -1060,11 +1085,13 @@ async function refundReportedAccount(reportId, fechaCompra) {
     showMessage(data.message || 'Reembolso aplicado');
     await loadAccountReports();
     await loadUsers();
+
   } catch (e) {
-    showMessage(e.message, 'error');
+    // Si algo falla, forzamos que salga un aviso visual en pantalla
+    console.error("Error al procesar reembolso:", e);
+    alert("Ocurrió un error al intentar reembolsar: " + e.message);
   }
 }
-
 // ===============================
 // GRÁFICAS DEL DASHBOARD ADMIN
 // Usa los datos del reporte de ventas existente. No requiere librerías externas.
