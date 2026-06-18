@@ -353,9 +353,21 @@ onclick="showSection('distributorEarnings')">
           </div>
           <div class="row">
             <div>
-              <h3>Agregar cuenta disponible</h3>
+              
+
+
+
+<h3>Agregar cuenta disponible</h3>
               <label class="field-label">Producto / plataforma</label>
               <select id="platformProductSelect"></select>
+
+              <!-- AQUÍ INICIA LO NUEVO: CASILLA REUSABLE EN EL LUGAR CORRECTO -->
+              <label class="checkbox-row" style="margin-top: 15px; margin-bottom: 5px; background: #f0f8ff; padding: 10px; border-radius: 5px; display: block;">
+                <input type="checkbox" id="platformReusable" value="true" /> ¿Es un LINK Reusable (PDF/Curso)?
+              </label>
+              <p class="small-text" style="margin-bottom: 15px; color: #666;">Si marcas esto, el Correo y Contraseña ya NO son obligatorios. Solo pega la URL abajo.</p>
+              <!-- FIN DE LA CASILLA -->
+
               <label class="field-label">Correo</label>
               <input id="platformEmail" placeholder="correo@ejemplo.com" />
               <label class="field-label">Contraseña</label>
@@ -377,6 +389,7 @@ onclick="showSection('distributorEarnings')">
           <h3>Últimas cuentas agregadas</h3>
           <div id="platformAccountsList">Sin cuentas.</div>
         </div>
+
         <div id="adminProductsPanel" class="panel">
   <div class="panel-head">
     <h2>Productos</h2>
@@ -422,13 +435,6 @@ onclick="showSection('distributorEarnings')">
       <option value="on_success">Descontar cuando el admin marque Éxito</option>
     </select>
     
-    <!-- AQUÍ INICIA LO NUEVO: CASILLA REUSABLE -->
-    <label class="checkbox-row" style="margin-top: 15px; margin-bottom: 5px;">
-      <input type="checkbox" id="productReusable" value="true" /> ¿Es producto Reusable/Digital (PDF/Curso)?
-    </label>
-    <p class="small-text" style="margin-bottom: 15px; color: #666;">Si marcas esto, el producto no se descontará del stock al venderse.</p>
-    <!-- AQUÍ TERMINA LO NUEVO -->
-
     <label class="checkbox-row">
       <input type="checkbox" id="productStockEnabled" /> Activar stock
     </label>
