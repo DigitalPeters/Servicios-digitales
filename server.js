@@ -1694,13 +1694,14 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       extra_data,
       terms_conditions,
       access_url,
-      reusable // <-- CAPTURAMOS LA VARIABLE REUSABLE
+      reusable 
     } = req.body;
 
-    // Validación modificada: Correo y contraseña obligatorios SOLO si no es reusable
     if (!platform || !product_name) {
       return res.status(400).json({ error: "Faltan plataforma o nombre del producto" });
     }
+    
+    // Si NO es reusable (es 0 o no existe), obligamos a que traiga correo y contraseña
     if (!reusable && (!account_email || !account_password)) {
       return res.status(400).json({ error: "Faltan datos obligatorios (correo y contraseña)" });
     }
@@ -1721,7 +1722,7 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
         terms_conditions || "", 
         access_url || "", 
         req.isPanelAdmin ? req.user.id : null,
-        reusable || false // <-- GUARDAMOS TRUE O FALSE EN BASE DE DATOS
+        reusable === 1 ? 1 : 0 // <-- SOLUCIÓN: Siempre mandamos número entero (1 o 0)
       ]
     );
 
@@ -1748,7 +1749,7 @@ app.patch("/api/admin/platform-accounts/:id",
         profile_pin,
         access_url,
         status,
-        reusable // <-- TAMBIÉN LO CAPTURAMOS AL EDITAR
+        reusable 
       } = req.body;
 
       const result = await pool.query(
@@ -1774,7 +1775,7 @@ app.patch("/api/admin/platform-accounts/:id",
           profile_pin || "",
           access_url || "",
           status,
-          reusable || false,
+          reusable === 1 ? 1 : 0, // <-- SOLUCIÓN TAMBIÉN AQUÍ AL EDITAR
           id
         ]
       );
@@ -1797,7 +1798,6 @@ app.patch("/api/admin/platform-accounts/:id",
     }
   }
 );
-
 
 // MIS PEDIDOS
 // MIS PEDIDOS
