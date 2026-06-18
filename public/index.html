@@ -377,11 +377,74 @@ onclick="showSection('distributorEarnings')">
           <h3>Últimas cuentas agregadas</h3>
           <div id="platformAccountsList">Sin cuentas.</div>
         </div>
-        <div id="adminProductsPanel" class="panel"><div class="panel-head"><h2>Productos</h2><button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button></div><div id="createProductBox" class="hidden"><label class="field-label">Nombre</label><input id="productName" placeholder="Producto" /><label class="field-label">Descripción</label><textarea id="productDescription"></textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="productPrice" type="number" step="0.01" /></div><div><label class="field-label">Costo de compra</label><input id="productCostPrice" type="number" step="0.01" value="0" /></div><div><label class="field-label">Categoría</label><input id="productCategory" placeholder="plataforma, actas, etc" /></div></div><label class="field-label">Datos requeridos</label><textarea id="productRequiredFields" placeholder="separados por coma"></textarea><label class="field-label">Tipo de producto</label><select id="productType" onchange="toggleComboCreateBox()"><option value="streaming_auto">Automático streaming</option><option value="manual">Manual</option><option value="combo_auto">Combo automático</option></select><div id="createComboBox" class="hidden"><label class="field-label">Descuento por plataforma incluida</label><input id="productComboDiscount" type="number" step="0.01" value="5" /><label class="field-label">Productos incluidos en el combo</label><div id="productComboItemsBox" class="order-data">Primero carga productos.</div><p class="small-text">El precio del combo se calcula automáticamente: suma de productos incluidos menos el descuento por cada plataforma.</p></div><label class="field-label">Cobro</label><select id="productChargeMode"><option value="on_purchase">Descontar al comprar</option><option value="on_success">Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="productStockEnabled" /> Activar stock</label><input id="productStock" type="number" min="0" value="0" /><button onclick="createProduct()" class="primary-btn">Crear producto</button><hr class="divider"></div><div id="adminProductsList"></div></div>
-        <div id="adminOrdersPanel" class="panel"><div class="panel-head"><h2>Pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadAdminOrders()">Actualizar</button></div><div id="adminOrdersList"></div></div>
-      </section>
-    </main>
+        <div id="adminProductsPanel" class="panel">
+  <div class="panel-head">
+    <h2>Productos</h2>
+    <button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button>
   </div>
+  <div id="createProductBox" class="hidden">
+    <label class="field-label">Nombre</label>
+    <input id="productName" placeholder="Producto" />
+    <label class="field-label">Descripción</label>
+    <textarea id="productDescription"></textarea>
+    <div class="three-row">
+      <div>
+        <label class="field-label">Precio de venta</label>
+        <input id="productPrice" type="number" step="0.01" />
+      </div>
+      <div>
+        <label class="field-label">Costo de compra</label>
+        <input id="productCostPrice" type="number" step="0.01" value="0" />
+      </div>
+      <div>
+        <label class="field-label">Categoría</label>
+        <input id="productCategory" placeholder="plataforma, actas, etc" />
+      </div>
+    </div>
+    <label class="field-label">Datos requeridos</label>
+    <textarea id="productRequiredFields" placeholder="separados por coma"></textarea>
+    <label class="field-label">Tipo de producto</label>
+    <select id="productType" onchange="toggleComboCreateBox()">
+      <option value="streaming_auto">Automático streaming</option>
+      <option value="manual">Manual</option>
+      <option value="combo_auto">Combo automático</option>
+    </select>
+    <div id="createComboBox" class="hidden">
+      <label class="field-label">Descuento por plataforma incluida</label>
+      <input id="productComboDiscount" type="number" step="0.01" value="5" />
+      <label class="field-label">Productos incluidos en el combo</label>
+      <div id="productComboItemsBox" class="order-data">Primero carga productos.</div>
+      <p class="small-text">El precio del combo se calcula automáticamente: suma de productos incluidos menos el descuento por cada plataforma.</p>
+    </div>
+    <label class="field-label">Cobro</label>
+    <select id="productChargeMode">
+      <option value="on_purchase">Descontar al comprar</option>
+      <option value="on_success">Descontar cuando el admin marque Éxito</option>
+    </select>
+    
+    <!-- AQUÍ INICIA LO NUEVO: CASILLA REUSABLE -->
+    <label class="checkbox-row" style="margin-top: 15px; margin-bottom: 5px;">
+      <input type="checkbox" id="productReusable" value="true" /> ¿Es producto Reusable/Digital (PDF/Curso)?
+    </label>
+    <p class="small-text" style="margin-bottom: 15px; color: #666;">Si marcas esto, el producto no se descontará del stock al venderse.</p>
+    <!-- AQUÍ TERMINA LO NUEVO -->
+
+    <label class="checkbox-row">
+      <input type="checkbox" id="productStockEnabled" /> Activar stock
+    </label>
+    <input id="productStock" type="number" min="0" value="0" />
+    <button onclick="createProduct()" class="primary-btn">Crear producto</button>
+    <hr class="divider">
+  </div>
+  <div id="adminProductsList"></div>
+</div>
+<div id="adminOrdersPanel" class="panel">
+  <div class="panel-head">
+    <h2>Pedidos</h2>
+    <button class="outline-btn" style="width:auto" onclick="loadAdminOrders()">Actualizar</button>
+  </div>
+  <div id="adminOrdersList"></div>
+</div>
 
 <script src="app.js"></script>
 

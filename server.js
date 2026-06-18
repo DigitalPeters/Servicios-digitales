@@ -1604,14 +1604,23 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const newOrderId = orderInsertResult.rows[0].id;
 
-    if (assignedAccount) {
-      await client.query(
-        `UPDATE platform_accounts
-         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW()
-         WHERE id = $3`,
-        [newOrderId, userId, assignedAccount.id]
-      );
-    }
+  if (assignedAccount) {
+
+  if (!assignedAccount.reusable) {
+
+    await client.query(
+      `UPDATE platform_accounts
+       SET status = 'delivered',
+           assigned_order_id = $1,
+           assigned_user_id = $2,
+           delivered_at = NOW()
+       WHERE id = $3`,
+      [newOrderId, userId, assignedAccount.id]
+    );
+
+  }
+
+}
 
     if (Number(product.stock_enabled || 0) === 1) {
       await client.query(
@@ -1684,19 +1693,36 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       profile_pin,
       extra_data,
       terms_conditions,
-      access_url
+      access_url,
+      reusable // <-- CAPTURAMOS LA VARIABLE REUSABLE
     } = req.body;
 
-    if (!platform || !product_name || !account_email || !account_password) {
-      return res.status(400).json({ error: "Faltan datos obligatorios" });
+    // Validación modificada: Correo y contraseña obligatorios SOLO si no es reusable
+    if (!platform || !product_name) {
+      return res.status(400).json({ error: "Faltan plataforma o nombre del producto" });
+    }
+    if (!reusable && (!account_email || !account_password)) {
+      return res.status(400).json({ error: "Faltan datos obligatorios (correo y contraseña)" });
     }
 
     const result = await pool.query(
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10)
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11)
        RETURNING *`,
-      [platform, product_name, account_email, account_password, profile_name || "", profile_pin || "", extra_data || "", terms_conditions || "", access_url || "", req.isPanelAdmin ? req.user.id : null]
+      [
+        platform, 
+        product_name, 
+        account_email || "", 
+        account_password || "", 
+        profile_name || "", 
+        profile_pin || "", 
+        extra_data || "", 
+        terms_conditions || "", 
+        access_url || "", 
+        req.isPanelAdmin ? req.user.id : null,
+        reusable || false // <-- GUARDAMOS TRUE O FALSE EN BASE DE DATOS
+      ]
     );
 
     res.json(result.rows[0]);
@@ -1721,7 +1747,8 @@ app.patch("/api/admin/platform-accounts/:id",
         profile_name,
         profile_pin,
         access_url,
-        status
+        status,
+        reusable // <-- TAMBIÉN LO CAPTURAMOS AL EDITAR
       } = req.body;
 
       const result = await pool.query(
@@ -1734,18 +1761,20 @@ app.patch("/api/admin/platform-accounts/:id",
            profile_name = $5,
            profile_pin = $6,
            access_url = $7,
-           status = $8
-         WHERE id = $9
+           status = $8,
+           reusable = $9
+         WHERE id = $10
          RETURNING *`,
         [
           platform,
           product_name,
-          account_email,
-          account_password,
-          profile_name,
-          profile_pin,
-          access_url,
+          account_email || "",
+          account_password || "",
+          profile_name || "",
+          profile_pin || "",
+          access_url || "",
           status,
+          reusable || false,
           id
         ]
       );
@@ -1768,6 +1797,7 @@ app.patch("/api/admin/platform-accounts/:id",
     }
   }
 );
+
 
 // MIS PEDIDOS
 // MIS PEDIDOS

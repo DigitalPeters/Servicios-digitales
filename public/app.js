@@ -849,35 +849,62 @@ async function markPlatformAccountSoldOutside(id){
     await loadPlatformInventory();
   }catch(e){showMessage(e.message||'Error marcando vendido por fuera','error')}
 }
+
+
 async function createPlatformAccount(){
   try{
     const productId=document.getElementById('platformProductSelect')?.value;
     const product=(allProducts||[]).find(p=>String(p.id)===String(productId));
     if(!product)throw new Error('Selecciona un producto/plataforma');
+    
+    // 1. CAPTURAMOS LA CASILLA REUSABLE
+    const isReusable = document.getElementById('platformReusable')?.checked || false;
+    
     const email=(document.getElementById('platformEmail')?.value||'').trim();
     const password=(document.getElementById('platformPassword')?.value||'').trim();
-    if(!email||!password)throw new Error('Correo y contraseña son obligatorios');
-    await api('/api/admin/platform-accounts',{method:'POST',body:JSON.stringify({
-      platform:product.name,
-      product_name:product.name,
-      account_email:email,
-      account_password:password,
-      profile_name:(document.getElementById('platformProfile')?.value||'').trim(),
-      profile_pin:(document.getElementById('platformPin')?.value||'').trim(),
-      access_url:(document.getElementById('platformAccessUrl')?.value||'').trim(),
-      extra_data:'',
-      terms_conditions:''
-    })});
-    showMessage('Cuenta agregada como disponible');
-    platformEmail.value='';platformPassword.value='';platformProfile.value='';platformPin.value='';platformAccessUrl.value='';
+    const accessUrl=(document.getElementById('platformAccessUrl')?.value||'').trim();
+    
+    // 2. CORREGIMOS LA VALIDACIÓN: Si NO es reusable, exige correo y contraseña.
+    // Si ES reusable, exige que al menos pongas el Link (access_url)
+    if (!isReusable && (!email || !password)) {
+      throw new Error('Correo y contraseña son obligatorios para cuentas normales');
+    }
+    if (isReusable && !accessUrl) {
+      throw new Error('Para un producto digital/PDF, debes pegar la URL del archivo');
+    }
+
+    // 3. ENVIAMOS LOS DATOS
+    await api('/api/admin/platform-accounts',{
+      method:'POST',
+      body:JSON.stringify({
+        platform:product.name,
+        product_name:product.name,
+        account_email:email,
+        account_password:password,
+        profile_name:(document.getElementById('platformProfile')?.value||'').trim(),
+        profile_pin:(document.getElementById('platformPin')?.value||'').trim(),
+        access_url:accessUrl,
+        extra_data:'',
+        terms_conditions:'',
+        reusable: isReusable // <-- AQUÍ VIAJA TU NUEVA CASILLA AL SERVIDOR
+      })
+    });
+    
+    showMessage('Cuenta o Link agregado correctamente');
+    
+    // 4. LIMPIAMOS EL FORMULARIO
+    if(document.getElementById('platformEmail')) document.getElementById('platformEmail').value='';
+    if(document.getElementById('platformPassword')) document.getElementById('platformPassword').value='';
+    if(document.getElementById('platformProfile')) document.getElementById('platformProfile').value='';
+    if(document.getElementById('platformPin')) document.getElementById('platformPin').value='';
+    if(document.getElementById('platformAccessUrl')) document.getElementById('platformAccessUrl').value='';
+    if(document.getElementById('platformReusable')) document.getElementById('platformReusable').checked=false;
+    
     await loadPlatformInventory();
-  }catch(e){showMessage(e.message||'Error guardando cuenta','error')}
+  }catch(e){
+    showMessage(e.message||'Error guardando cuenta','error')
+  }
 }
-
-
-
-
-
 
 
 function openAccountReportsFromDashboard(){
