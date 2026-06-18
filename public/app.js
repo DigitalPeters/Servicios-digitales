@@ -886,7 +886,7 @@ async function createPlatformAccount(){
         access_url:accessUrl,
         extra_data:'',
         terms_conditions:'',
-        reusable: isReusable // <-- AQUÍ VIAJA TU NUEVA CASILLA AL SERVIDOR
+        reusable: isReusable ? 1 : 0
       })
     });
     
