@@ -1,6 +1,7 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
+
 function showSection(name) {
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
   const sec=document.getElementById('section-'+name);
@@ -14,8 +15,7 @@ function showSection(name) {
     loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports();
   }
   if(name==='alerts') loadExpiringAlerts();
-} 
-
+}
  // NUEVA LÍNEA PARA TUS ALERTAS
   if(name==='alerts') loadExpiringAlerts();
 }
