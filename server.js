@@ -1665,6 +1665,33 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
   }
 });
 
+
+app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
+  try {
+    const userFilter = req.isPanelAdmin ? "" : `AND assigned_user_id = $1`;
+    const params = req.isPanelAdmin ? [] : [req.user.id];
+
+    const result = await pool.query(
+      `SELECT 
+        id, platform, product_name, account_email, profile_name, delivered_at,
+        (delivered_at + INTERVAL '28 days') AS expires_at
+       FROM platform_accounts
+       WHERE status = 'delivered' 
+         AND delivered_at IS NOT NULL
+         AND (delivered_at + INTERVAL '28 days')::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '1 day')::date
+         ${userFilter}
+       ORDER BY expires_at ASC`,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error buscando cuentas por vencer:", err.message);
+    res.status(500).json({ error: "Error obteniendo alertas" });
+  }
+});
+
+
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {

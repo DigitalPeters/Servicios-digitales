@@ -390,7 +390,19 @@ onclick="showSection('distributorEarnings')">
           <div id="platformAccountsList">Sin cuentas.</div>
         </div>
 
-        <div id="adminProductsPanel" class="panel">
+<!-- PANEL DE ALERTAS DE VENCIMIENTO -->
+<div id="alertsPanel" class="panel" style="border-left: 5px solid #ff9800; background-color: #fffdf5;">
+  <div class="panel-head">
+    <div>
+      <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
+      <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+    </div>
+    <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
+  </div>
+  <div id="expiringAlertsList">Cargando alertas...</div>
+</div>        
+
+<div id="adminProductsPanel" class="panel">
   <div class="panel-head">
     <h2>Productos</h2>
     <button class="primary-btn" style="width:auto" onclick="toggleCreateProduct()">+ Agregar producto</button>

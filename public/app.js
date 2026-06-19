@@ -5234,3 +5234,47 @@ setTimeout(() => {
 }, 2000);
 
 
+async function loadExpiringAlerts() {
+  const list = document.getElementById('expiringAlertsList');
+  if (!list) return;
+
+  try {
+    list.innerHTML = '<p class="small-text">Buscando cuentas por vencer...</p>';
+    const accounts = await api('/api/alerts/expiring');
+
+    if (accounts.length === 0) {
+      list.innerHTML = '<p style="color: green; font-weight: bold;">✅ No hay cuentas por vencer pronto. Todo al día.</p>';
+      return;
+    }
+
+    list.innerHTML = accounts.map(acc => {
+      const fechaVence = new Date(acc.expires_at);
+      const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' };
+      const textoVence = fechaVence.toLocaleDateString('es-MX', opcionesFecha);
+
+      return `
+        <div class="item" style="border: 1px solid #ffcc80; background: #fff8e1; margin-bottom: 10px; padding: 12px; border-radius: 6px;">
+          <div style="display:flex; justify-content:space-between; align-items: center;">
+            <div>
+              <b style="color: #d84315; font-size: 16px;">Vence: ${textoVence}</b><br>
+              <span style="font-size: 14px; font-weight: bold;">${acc.platform || acc.product_name}</span>
+            </div>
+            <div style="text-align: right;">
+              <span style="font-size: 13px;"><b>Correo:</b> ${acc.account_email}</span><br>
+              <span style="font-size: 13px;"><b>Perfil:</b> ${acc.profile_name || 'N/A'}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (e) {
+    list.innerHTML = `<p style="color:red;">Error cargando alertas: ${e.message}</p>`;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if(document.getElementById('expiringAlertsList')) {
+    loadExpiringAlerts();
+  }
+});
