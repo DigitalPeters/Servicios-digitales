@@ -147,6 +147,19 @@ onclick="showSection('distributorEarnings')">
   </div>
 </section>
 
+<!-- NUEVO PANEL DE ALERTAS CORREGIDO -->
+<div id="alerts" class="section hidden">
+  <div class="panel-head">
+    <div>
+      <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
+      <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+    </div>
+    <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
+  </div>
+  <div id="expiringAlertsList">Cargando alertas...</div>
+</div>
+<!-- FIN DEL NUEVO PANEL -->
+
       <section id="section-shop" class="section">
         <div class="panel"><div class="panel-head"><div><h2>Tienda</h2><p class="small-text">Da clic en un producto para desplegar detalles y comprar.</p></div></div><div class="tools"><input id="productSearch" placeholder="Buscar producto..." oninput="filterProducts()" /><select id="categoryFilter" onchange="filterProducts()"><option value="">Todas las categorías</option></select></div><div id="productsList" class="products-list"></div></div>
       </section>
@@ -445,22 +458,6 @@ onclick="showSection('distributorEarnings')">
   </div>
   <div id="adminProductsList"></div>
 </div>
-
-<!-- ... existing code ... -->
-        <!-- NUEVO PANEL DE ALERTAS CORREGIDO -->
-        <div id="section-alerts" class="section hidden">
-          <div class="panel-head">
-            <div>
-              <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
-              <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
-            </div>
-            <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
-          </div>
-          <div id="expiringAlertsList">Cargando alertas...</div>
-        </div>
-        <!-- FIN DEL NUEVO PANEL -->
-<!-- ... existing code ... -->
-
 
 <div id="adminOrdersPanel" class="panel">
   <div class="panel-head">
