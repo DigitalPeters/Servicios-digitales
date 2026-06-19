@@ -13,7 +13,9 @@ function showSection(name) {
   if(name==='admin'&&currentUser?.role==='admin'){
     loadUsers();loadAdminProducts();loadAdminOrders();loadSalesReport();loadPlatformInventory();loadAccountReports();
   }
-
+  // NUEVA LÍNEA PARA TUS ALERTAS
+  if(name==='alerts') loadExpiringAlerts();
+}
   // --- NUEVO: CONTROL DEL BOTÓN UNIVERSAL Y CELULAR ---
   if (name !== 'dashboard') {
       if (typeof mostrarBotonRegresar === 'function') mostrarBotonRegresar();
