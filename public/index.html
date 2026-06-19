@@ -80,7 +80,19 @@ onclick="showSection('distributorEarnings')">
   🔑 Entrar a Mi Perfil y Cambiar Contraseña
 </button>    
 <button onclick="showSection('shop')" style="padding: 15px 10px; background: #6d5dfc; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🛒 Ir a Tienda</button>
-    <button onclick="showSection('orders')" style="padding: 15px 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📦 Mis Pedidos</button>
+<section id="section-alerts" class="section hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
+        <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+      </div>
+      <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
+    </div>
+    <div id="expiringAlertsList" style="padding: 16px;">Cargando alertas...</div>
+  </div>
+</section>    
+<button onclick="showSection('orders')" style="padding: 15px 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📦 Mis Pedidos</button>
     <button onclick="showSection('balance')" style="padding: 15px 10px; background: #008c2e; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">💳 Cargar Saldo</button>
     <button onclick="openReportFaultFormFinal()" style="padding: 15px 10px; background: #dc2626; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">⚠ Reportar Falla</button>
     <button onclick="openFailureResponsesFinal()" style="padding: 15px 10px; background: #b45309; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📬 Respuestas</button>
@@ -147,22 +159,35 @@ onclick="showSection('distributorEarnings')">
   </div>
 </section>
 
-<!-- NUEVO PANEL DE ALERTAS CORREGIDO -->
-<div id="alerts" class="section hidden">
-  <div class="panel-head">
-    <div>
-      <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
-      <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+<<section id="section-alerts" class="section hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
+        <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+      </div>
+      <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
     </div>
-    <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
+    <div id="expiringAlertsList" style="padding: 16px;">Cargando alertas...</div>
   </div>
-  <div id="expiringAlertsList">Cargando alertas...</div>
-</div>
-<!-- FIN DEL NUEVO PANEL -->
+</section>
 
       <section id="section-shop" class="section">
         <div class="panel"><div class="panel-head"><div><h2>Tienda</h2><p class="small-text">Da clic en un producto para desplegar detalles y comprar.</p></div></div><div class="tools"><input id="productSearch" placeholder="Buscar producto..." oninput="filterProducts()" /><select id="categoryFilter" onchange="filterProducts()"><option value="">Todas las categorías</option></select></div><div id="productsList" class="products-list"></div></div>
       </section>
+
+<section id="section-alerts" class="section hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
+        <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+      </div>
+      <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
+    </div>
+    <div id="expiringAlertsList" style="padding: 16px;">Cargando alertas...</div>
+  </div>
+</section>
 
       <section id="section-orders" class="section">
         <div class="panel">
