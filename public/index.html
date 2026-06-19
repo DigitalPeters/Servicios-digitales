@@ -343,32 +343,30 @@ onclick="showSection('distributorEarnings')">
           <div class="panel" style="box-shadow:none;border:1px solid var(--border);margin-top:16px"><h2>Detalle de ventas</h2><div id="salesDetailsList">Sin ventas.</div></div>
         </div>
 
-<!-- PANEL DE ALERTAS DE VENCIMIENTO -->
-<div id="alertsPanel" class="panel" style="border-left: 5px solid #ff9800; background-color: #fffdf5;">
+<div id="adminPlatformAccountsPanel" class="panel">
+  
+  <!-- AQUÍ METIMOS EL PANEL DE ALERTAS (AHORA SÍ ES VISIBLE) -->
+  <div id="alertsBox" style="border-left: 5px solid #ff9800; background-color: #fffdf5; padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <div>
+        <h2 style="color: #e65100; margin: 0;">⚠️ Renovaciones Próximas</h2>
+        <p class="small-text" style="margin: 0; color: #666;">Cuentas que vencen hoy o mañana (garantía de 28 días).</p>
+      </div>
+      <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Buscar renovaciones</button>
+    </div>
+    <div id="expiringAlertsList">Cargando alertas...</div>
+  </div>
+  <!-- FIN DEL PANEL DE ALERTAS -->
+
   <div class="panel-head">
     <div>
-      <h2 style="color: #e65100;">⚠️ Renovaciones Próximas</h2>
-      <p class="small-text">Cuentas que vencen hoy o mañana (garantía de 28 días). ¡Contacta a tus clientes!</p>
+      <h2>Inventario de plataformas</h2>
+      <p class="small-text">Agrega cuentas disponibles para entrega automática sin usar pgAdmin. Selecciona el producto/plataforma de la tienda para evitar errores.</p>
     </div>
-    <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
+    <button class="outline-btn" style="width:auto" onclick="loadPlatformInventory()">Actualizar</button>
   </div>
-  <div id="expiringAlertsList">Cargando alertas...</div>
-</div>        
-        
-
-
-<div id="adminPlatformAccountsPanel" class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Inventario de plataformas</h2>
-              <p class="small-text">Agrega cuentas disponibles para entrega automática sin usar pgAdmin. Selecciona el producto/plataforma de la tienda para evitar errores.</p>
-            </div>
-            <button class="outline-btn" style="width:auto" onclick="loadPlatformInventory()">Actualizar</button>
-          </div>
-          <div class="row">
-            <div>
-              
-
+  <div class="row">
+    <div>
 
 
 <h3>Agregar cuenta disponible</h3>
