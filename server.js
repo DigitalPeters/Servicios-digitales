@@ -1669,20 +1669,20 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   try {
 
     const result = await pool.query(`
-      SELECT
-        id,
-        product_name_snapshot AS product_name,
-        created_at,
-        (created_at + INTERVAL '28 days') AS expires_at
-      FROM orders
-      WHERE status = 'exito'
-      AND refunded = 0
-      AND (
-        created_at + INTERVAL '28 days'
-      )::date
-      BETWEEN CURRENT_DATE
-      AND (CURRENT_DATE + INTERVAL '15 days')::date
-      ORDER BY expires_at ASC
+  SELECT
+    id,
+    product_name_snapshot AS product_name,
+    created_at,
+    (created_at + INTERVAL '28 days') AS expires_at
+  FROM orders
+  WHERE status = 'exito'
+  AND refunded = 0
+  AND (
+    created_at + INTERVAL '28 days'
+  )::date
+  BETWEEN CURRENT_DATE
+  AND (CURRENT_DATE + INTERVAL '15 days')::date
+  ORDER BY expires_at ASC
     `);
 
     res.json(result.rows);
