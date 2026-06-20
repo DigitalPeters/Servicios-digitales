@@ -107,12 +107,16 @@ await loadAdminProducts();
 await loadAdminOrders();
 await loadSalesReport();
 await loadPlatformInventory();
+console.log('ANTES DE LOAD EXPIRING');
 await loadExpiringCount();
+console.log('DESPUES DE LOAD EXPIRING');
 await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 
 async function loadExpiringCount(){
+console.log('LOAD EXPIRING COUNT EJECUTADO');
+
   try{
     const data = await api('/api/alerts/count');
 
