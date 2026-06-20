@@ -1672,15 +1672,20 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
     const params = req.isPanelAdmin ? [] : [req.user.id];
 
     const result = await pool.query(
-      `SELECT 
-        id, platform, product_name, account_email, profile_name, delivered_at,
-        (delivered_at + INTERVAL '28 days') AS expires_at
-       FROM platform_accounts
-       WHERE status = 'delivered' 
-         AND delivered_at IS NOT NULL
-         AND (delivered_at + INTERVAL '28 days')::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '1 day')::date
-         ${userFilter}
-       ORDER BY expires_at ASC`,
+      `SELECT
+  id,
+  product_name_snapshot AS product_name,
+  created_at,
+  (created_at + INTERVAL '28 days') AS expires_at
+FROM orders
+WHERE status = 'exito'
+AND refunded = 0
+AND (
+  created_at + INTERVAL '28 days'
+)::date
+BETWEEN CURRENT_DATE
+AND (CURRENT_DATE + INTERVAL '3 days')::date
+ORDER BY expires_at ASC`,
       params
     );
 
@@ -1695,12 +1700,14 @@ app.get('/api/alerts/count', authMiddleware, async (req,res)=>{
   try{
     const result = await pool.query(`
       SELECT COUNT(*) AS total
-      FROM platform_accounts
-      WHERE status='delivered'
-      AND delivered_at IS NOT NULL
-      AND (delivered_at + INTERVAL '28 days')::date
-      BETWEEN CURRENT_DATE
-      AND (CURRENT_DATE + INTERVAL '1 days')::date
+FROM orders
+WHERE status = 'exito'
+AND refunded = 0
+AND (
+  created_at + INTERVAL '28 days'
+)::date
+BETWEEN CURRENT_DATE
+AND (CURRENT_DATE + INTERVAL '3 days')::date
     `);
 
     res.json({

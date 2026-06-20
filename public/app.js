@@ -5298,12 +5298,13 @@ async function loadExpiringAlerts() {
           <div style="display:flex; justify-content:space-between; align-items: center;">
             <div>
               <b style="color: #d84315; font-size: 16px;">Vence: ${textoVence}</b><br>
-              <span style="font-size: 14px; font-weight: bold;">${acc.platform || acc.product_name}</span>
+              <span style="font-size: 14px; font-weight: bold;">${acc.product_name}</span>
             </div>
             <div style="text-align: right;">
-              <span style="font-size: 13px;"><b>Correo:</b> ${acc.account_email}</span><br>
-              <span style="font-size: 13px;"><b>Perfil:</b> ${acc.profile_name || 'N/A'}</span>
-            </div>
+  <span style="font-size: 13px;">
+    <b>Pedido:</b> #${acc.id}
+  </span>
+</div>
           </div>
         </div>
       `;
