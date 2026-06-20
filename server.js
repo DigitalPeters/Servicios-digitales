@@ -1693,6 +1693,31 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/api/alerts/count", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT COUNT(*) AS total
+      FROM orders
+      WHERE status = 'exito'
+      AND refunded = 0
+      AND (
+        created_at + INTERVAL '28 days'
+      )::date
+      BETWEEN CURRENT_DATE
+      AND (CURRENT_DATE + INTERVAL '15 days')::date
+    `);
+
+    res.json({
+      count: Number(result.rows[0].total || 0)
+    });
+
+  } catch (err) {
+    console.error("Error obteniendo contador de renovaciones:", err.message);
+    res.status(500).json({
+      error: "Error obteniendo contador"
+    });
+  }
+});
 
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
