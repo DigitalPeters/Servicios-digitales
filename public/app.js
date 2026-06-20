@@ -4705,6 +4705,7 @@ showSection = function(name){
     }
 
     return result;
+}
 });  
 
 
