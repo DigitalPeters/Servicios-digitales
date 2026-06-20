@@ -4689,31 +4689,25 @@ setTimeout(() => {
     loadAccountReports = window.loadAccountReports;
   }
 
-  const prevShowSectionSaldoNotify = typeof showSection === 'function' ? showSection : null;
-  if (prevShowSectionSaldoNotify) {
-    window.showSection = function(name){
-      const result = prevShowSectionSaldoNotify(name);
-      setTimeout(bindSaldoPendienteCard, 200);
-      if (name === 'admin') setTimeout(addNotifyButtons, 400);
-      return result;
-    };
-    showSection = window.showSection;
-  }
+const prevShowSectionSaldoNotify = showSection;
 
-  const prevLoadAppSaldoNotify = typeof loadApp === 'function' ? loadApp : null;
-  if (prevLoadAppSaldoNotify) {
-    window.loadApp = async function(){
-      const result = await prevLoadAppSaldoNotify();
-      setTimeout(bindSaldoPendienteCard, 600);
-      setTimeout(addNotifyButtons, 1000);
-      return result;
-    };
-    loadApp = window.loadApp;
-  }
+showSection = function(name){
+    const result = prevShowSectionSaldoNotify(name);
 
-  setTimeout(bindSaldoPendienteCard, 800);
-  setTimeout(addNotifyButtons, 1500);
-})();
+    setTimeout(bindSaldoPendienteCard, 200);
+
+    if(name === 'admin')
+        setTimeout(addNotifyButtons, 400);
+
+    // NUEVO
+    if(name === 'dashboard' && currentUser?.role === 'admin'){
+        setTimeout(loadExpiringCount, 300);
+    }
+
+    return result;
+}  
+
+
 // ==========================================
 // ==========================================
 // BOTÓN MORADO DE INGRESO MANUAL SEGURO
