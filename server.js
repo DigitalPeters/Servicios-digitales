@@ -1665,58 +1665,31 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
   }
 });
 
-
 app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   try {
-    const userFilter = req.isPanelAdmin ? "" : `AND assigned_user_id = $1`;
-    const params = req.isPanelAdmin ? [] : [req.user.id];
 
-    const result = await pool.query(
-      `SELECT
-  id,
-  product_name_snapshot AS product_name,
-  created_at,
-  (created_at + INTERVAL '28 days') AS expires_at
-FROM orders
-WHERE status = 'exito'
-AND refunded = 0
-AND (
-  created_at + INTERVAL '28 days'
-)::date
-BETWEEN CURRENT_DATE
-AND (CURRENT_DATE + INTERVAL '15 days')::date
-ORDER BY expires_at ASC`,
-      params
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error buscando cuentas por vencer:", err.message);
-    res.status(500).json({ error: "Error obteniendo alertas" });
-  }
-});
-
-app.get('/api/alerts/count', authMiddleware, async (req,res)=>{
-  try{
     const result = await pool.query(`
-      SELECT COUNT(*) AS total
-FROM orders
-WHERE status = 'exito'
-AND refunded = 0
-AND (
-  created_at + INTERVAL '28 days'
-)::date
-BETWEEN CURRENT_DATE
-AND (CURRENT_DATE + INTERVAL '15 days')::date
+      SELECT
+        id,
+        product_name_snapshot AS product_name,
+        created_at,
+        (created_at + INTERVAL '28 days') AS expires_at
+      FROM orders
+      WHERE status = 'exito'
+      AND refunded = 0
+      AND (
+        created_at + INTERVAL '28 days'
+      )::date
+      BETWEEN CURRENT_DATE
+      AND (CURRENT_DATE + INTERVAL '15 days')::date
+      ORDER BY expires_at ASC
     `);
 
-    res.json({
-      count:Number(result.rows[0].total || 0)
-    });
+    res.json(result.rows);
 
-  }catch(err){
-    console.error(err);
-    res.status(500).json({error:'Error obteniendo alertas'});
+  } catch (err) {
+    console.error("Error buscando cuentas por vencer:", err);
+    res.status(500).json({ error: "Error obteniendo alertas" });
   }
 });
 
