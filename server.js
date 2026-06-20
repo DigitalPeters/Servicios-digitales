@@ -1684,7 +1684,7 @@ AND (
   created_at + INTERVAL '28 days'
 )::date
 BETWEEN CURRENT_DATE
-AND (CURRENT_DATE + INTERVAL '3 days')::date
+AND (CURRENT_DATE + INTERVAL '15 days')::date
 ORDER BY expires_at ASC`,
       params
     );
@@ -1707,7 +1707,7 @@ AND (
   created_at + INTERVAL '28 days'
 )::date
 BETWEEN CURRENT_DATE
-AND (CURRENT_DATE + INTERVAL '3 days')::date
+AND (CURRENT_DATE + INTERVAL '15 days')::date
     `);
 
     res.json({
