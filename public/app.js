@@ -27,6 +27,9 @@ function showSection(name) {
   }
 
   if(name==='alerts') loadExpiringAlerts();
+if(name === 'dashboard' && currentUser?.role === 'admin'){
+   loadExpiringCount();
+}
 
   // CONTROL DEL BOTÓN REGRESAR
   if(name !== 'dashboard'){
@@ -107,9 +110,7 @@ await loadAdminProducts();
 await loadAdminOrders();
 await loadSalesReport();
 await loadPlatformInventory();
-console.log('ANTES DE LOAD EXPIRING');
 await loadExpiringCount();
-console.log('DESPUES DE LOAD EXPIRING');
 await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
 
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
