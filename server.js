@@ -2889,13 +2889,17 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
         [report.order_id, report.user_id, newAccount.id, expirationDate]
       );
     }
-// --- NUEVO: DESCONTAR EL STOCK DE LA TIENDA ---
-      await client.query(
-        `UPDATE products 
-         SET stock = stock - 1 
-         WHERE id = $1 AND stock > 0`,
-        [report.product_id]
-      );
+// Solo descontar stock cuando se toma una cuenta del inventario
+if (!(manual === true || manual === "true")) {
+  await client.query(
+    `UPDATE products
+     SET stock = stock - 1
+     WHERE id = $1 AND stock > 0`,
+    [report.product_id]
+  );
+}
+
+
       // ----------------------------------------------
 
      const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category, report.order_created_at);
