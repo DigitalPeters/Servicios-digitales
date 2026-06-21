@@ -1500,8 +1500,16 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       [productName, productCategory]
     );
 
-    const isIptv = productName.toLowerCase().includes('iptv') || productCategory.toLowerCase().includes('iptv');
-    const isPlatformProduct = !isIptv && Number(platformCountResult.rows[0]?.total || 0) > 0;
+    const isPlatformProduct =
+  String(product.product_type || '').toLowerCase() === 'streaming_auto';
+console.log(
+  'PRODUCTO:',
+  product.name,
+  'TIPO:',
+  product.product_type,
+  'AUTO:',
+  isPlatformProduct
+);
     let assignedAccount = null;
     let deliveredAccountData = "";
     let orderStatus = "accion_en_espera";
