@@ -1689,7 +1689,7 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
     created_at + INTERVAL '28 days'
   )::date
   BETWEEN CURRENT_DATE
-  AND (CURRENT_DATE + INTERVAL '15 days')::date
+  AND (CURRENT_DATE + INTERVAL '3 days')::date
   ORDER BY expires_at ASC
     `);
 
@@ -1712,7 +1712,7 @@ app.get("/api/alerts/count", authMiddleware, async (req, res) => {
         created_at + INTERVAL '28 days'
       )::date
       BETWEEN CURRENT_DATE
-      AND (CURRENT_DATE + INTERVAL '15 days')::date
+      AND (CURRENT_DATE + INTERVAL '3 days')::date
     `);
 
     res.json({
