@@ -2524,7 +2524,23 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
       });
     }
 
-    const insertResult = await pool.query(
+// === INICIO DE NUEVA VALIDACIÓN: Bloquear reportes duplicados ===
+    const checkDuplicate = await pool.query(
+      `SELECT id FROM account_reports 
+       WHERE reported_account_id = $1 
+         AND status = 'pendiente' 
+       LIMIT 1`,
+      [purchase.account_id]
+    );
+
+    if (checkDuplicate.rows.length > 0) {
+      return res.status(400).json({ 
+        error: "Ya existe un reporte en proceso para esta cuenta exacta. Por favor, espera a que sea resuelto antes de enviar otro." 
+      });
+    }
+    // === FIN DE NUEVA VALIDACIÓN ===    
+
+const insertResult = await pool.query(
       `INSERT INTO account_reports
        (user_id, email, issue_type, description, status, admin_response, order_id, reported_account_id, refund_amount, resolution_type, reported_platform, owner_admin_id, evidence_image)
        VALUES ($1, $2, $3, $4, 'pendiente', '', $5, $6, 0, '', $7, $8, $9)
