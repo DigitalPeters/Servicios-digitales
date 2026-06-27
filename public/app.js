@@ -140,19 +140,6 @@ function renderProductRow(product) {
     const stock = Number(product.stock || 0);
     const soldOut = stockEnabled && stock <= 0;
 
-    // === NUEVO: Verificamos si la categoría es para trámites o actas ===
-    // Si tu categoría se llama diferente (ej. "servicios"), agrégala aquí.
-    const categoriaMinuscula = (product.category || '').toLowerCase();
-    const requierePDF = categoriaMinuscula.includes('tramite') || categoriaMinuscula.includes('acta');
-
-    const pdfInputHtml = requierePDF ? `
-        <div style="margin-top: 10px; margin-bottom: 15px; border: 1px dashed #ccc; padding: 10px; border-radius: 6px; background: #fafafa;">
-            <label style="font-size: 13px; font-weight: bold; color: #d84315;">📄 Documento requerido (PDF - Opcional):</label><br>
-            <input type="file" id="file-${product.id}" accept="application/pdf" style="width: 100%; font-size: 13px; margin-top: 5px;" />
-        </div>
-    ` : '';
-    // ====================================================================
-
     return `<div class="product-row" data-product-id="${product.id}">
         <div class="product-header" onclick="toggleProduct(${product.id})">
             <div>
@@ -168,9 +155,8 @@ function renderProductRow(product) {
         <div id="product-details-${product.id}" class="product-details">
             <p class="product-description">${safeText(product.description || '')}</p>
             <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
-            ${renderProductInputs(product)}
             
-            ${pdfInputHtml}
+            ${renderProductInputs(product)}
             
             <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? 'Sin stock' : 'Comprar'}</button>
         </div>
@@ -179,8 +165,30 @@ function renderProductRow(product) {
 
 
 function toggleProduct(id){const row=document.querySelector(`.product-row[data-product-id="${id}"]`);if(!row)return;const open=row.classList.contains('open');document.querySelectorAll('.product-row').forEach(r=>r.classList.remove('open'));if(!open)row.classList.add('open')}
-function renderProductInputs(product){const fields=parseJsonArray(product.required_fields);if(!fields.length)return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;return fields.map(f=>`<label class="field-label">${safeText(fieldLabel(f))}</label><input id="field-${product.id}-${f}" placeholder="Ingresa ${safeText(fieldLabel(f))}" />`).join('')}
 
+function renderProductInputs(product) {
+    const fields = parseJsonArray(product.required_fields);
+    if (!fields.length) return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;
+    
+    return fields.map(f => {
+        const palabra = f.toLowerCase();
+        // Si el dato requerido contiene alguna de estas palabras, pide un archivo
+        if (palabra.includes('pdf') || palabra.includes('foto') || palabra.includes('ine') || palabra.includes('archivo')) {
+            return `
+            <div style="margin-bottom: 10px;">
+                <label class="field-label" style="color: #d84315; font-weight: bold;">${safeText(fieldLabel(f))} (Subir Archivo)</label>
+                <input type="file" id="field-${product.id}-${f}" accept=".pdf, image/*" style="width: 100%; font-size: 13px;" />
+            </div>`;
+        } else {
+            // Si no, muestra tu campo de texto normal
+            return `
+            <div style="margin-bottom: 10px;">
+                <label class="field-label">${safeText(fieldLabel(f))}</label>
+                <input id="field-${product.id}-${f}" placeholder="Ingresa ${safeText(fieldLabel(f))}" style="width: 100%;" />
+            </div>`;
+        }
+    }).join('');
+}
 // Función para convertir el PDF a texto (Base64)
 function convertFileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -1900,14 +1908,63 @@ function renderAdminOrdersManualPendingOnly(){
   notice.className = 'bank-box';
   notice.innerHTML = `<b>Mostrando pedidos pendientes manuales.</b> <button class="outline-btn" style="width:auto;margin-left:10px" onclick="loadAdminOrders()">Ver todos los pedidos</button>`;
   box.parentNode.insertBefore(notice, box);
+  
   if(!rows.length){ box.innerHTML='No hay pedidos manuales pendientes.'; return; }
+  
   box.innerHTML = rows.map(o=>{
     const od=parseJsonObject(o.order_data);
+    
+    // === NUEVO: SEPARAMOS LOS ARCHIVOS DEL TEXTO NORMAL ===
+    const normalData = {};
+    let fileDataHtml = '';
+
+    for (let key in od) {
+      // Detectamos si el dato es un archivo en Base64
+      if (typeof od[key] === 'string' && od[key].startsWith('data:')) {
+        const isPdf = od[key].startsWith('data:application/pdf');
+        const label = isPdf ? '📄 Descargar PDF' : '🖼️ Descargar Imagen';
+        const ext = isPdf ? '.pdf' : '.jpg';
+        
+        fileDataHtml += `<div style="margin: 8px 0; padding: 8px; border: 1px solid #e0e0e0; border-radius: 5px; background: #fafafa;">
+          <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Archivo de ${safeText(key)}:</b></p>
+          <a href="${od[key]}" download="${key}_pedido_${o.id}${ext}" style="display: inline-block; padding: 6px 12px; background-color: #0288d1; color: white; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold;">${label}</a>
+        </div>`;
+      } else {
+        // Si no es un archivo, lo guardamos para que se dibuje normal
+        normalData[key] = od[key];
+      }
+    }
+    // ======================================================
+
     const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Cliente:</b> ${safeText(o.customer_name)}</p><p><b>Correo:</b> ${safeText(o.customer_email)}</p><p><b>Producto:</b> ${safeText(o.product_name)} <span class="chip">Manual</span></p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p><p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>${renderOrderData(od)}<label class="field-label">Estado</label><select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select><label class="field-label">Respuesta para el cliente</label><textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>${copyButton}<label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label><button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button></div>`;
+    
+    return `<div class="item">
+      <p><b>Pedido:</b> #${o.id}</p>
+      <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
+      <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
+      <p><b>Producto:</b> ${safeText(o.product_name)} <span class="chip">Manual</span></p>
+      <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
+      <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
+      <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
+      
+      ${renderOrderData(normalData)}
+      ${fileDataHtml}
+      
+      <label class="field-label">Estado</label>
+      <select id="status-${o.id}">
+        <option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option>
+        <option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option>
+        <option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option>
+        <option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option>
+      </select>
+      <label class="field-label">Respuesta para el cliente</label>
+      <textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>
+      ${copyButton}
+      <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
+      <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
+    </div>`;
   }).join('');
 }
-
 function ensureAnnouncementsUI(){
   const topbar = document.querySelector('.topbar');
   if(topbar && !document.getElementById('announcementTicker')){
@@ -4050,31 +4107,37 @@ window.buyProduct = async function(productId){
       await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
     if(!product) throw new Error('Producto no encontrado');
 
-    if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
+    if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\n¿Confirmas la compra?`)) return;
 
     const fields = parseJsonArray(product.required_fields);
     const order_data = {};
-    fields.forEach(f => {
-      const input=document.getElementById(`field-${productId}-${f}`);
-      order_data[f]=input?input.value.trim():'';
-    });
-
-    // === NUEVO: CAPTURAMOS EL PDF ===
-    let attached_document = null;
-    const fileInput = document.getElementById(`file-${productId}`);
-    if (fileInput && fileInput.files.length > 0) {
-      const file = fileInput.files[0];
-      if (file.size > 5 * 1024 * 1024) {
-        throw new Error("El PDF es muy pesado. Máximo 5 MB.");
-      }
-      attached_document = await convertFileToBase64(file);
+    
+    // Procesamos todos los campos uno por uno
+    for (let i = 0; i < fields.length; i++) {
+        const f = fields[i];
+        const input = document.getElementById(`field-${productId}-${f}`);
+        
+        if (input) {
+            // Si el input es un botón de archivo...
+            if (input.type === 'file') {
+                if (input.files.length > 0) {
+                    const file = input.files[0];
+                    if (file.size > 5 * 1024 * 1024) throw new Error(`El archivo para "${f}" es muy pesado. Máximo 5 MB.`);
+                    // Convertimos la foto/pdf a texto y lo metemos en los datos de la orden
+                    order_data[f] = await convertFileToBase64(file);
+                } else {
+                    order_data[f] = '';
+                }
+            } else {
+                // Si es un texto normal...
+                order_data[f] = input.value.trim();
+            }
+        }
     }
-    // ================================
 
     const data = await api('/api/buy/'+productId, {
       method:'POST',
-      // Mandamos order_data, quantity y nuestro nuevo attached_document
-      body:JSON.stringify({order_data, quantity:1, attached_document})
+      body:JSON.stringify({ order_data, quantity: 1 })
     });
 
     showMessage(data.message || 'Compra realizada');
@@ -4083,8 +4146,7 @@ window.buyProduct = async function(productId){
   } catch(e) {
     showMessage(e.message || 'Error comprando producto','error');
   }
-};  
-
+};
 
   async function loadReportableAccounts(){
     try {
