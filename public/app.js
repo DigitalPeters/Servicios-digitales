@@ -5276,7 +5276,6 @@ setTimeout(() => {
     mostrarBotonRegresar();
 }, 2000);
 
-
 async function loadExpiringAlerts() {
   const list = document.getElementById('expiringAlertsList');
   if (!list) return;
@@ -5285,13 +5284,10 @@ async function loadExpiringAlerts() {
     list.innerHTML = '<p class="small-text">Buscando cuentas por vencer...</p>';
     const accounts = await api('/api/alerts/expiring');
 
-    // === CÓDIGO CORREGIDO PARA EL CONTADOR DEL DASHBOARD ===
-    // Usamos exactamente el ID que tienes en tu HTML: statExpiring
     const badgeContador = document.getElementById('statExpiring'); 
     if (badgeContador) {
         badgeContador.innerText = accounts.length;
     }
-    // ========================================================
 
     if (accounts.length === 0) {
       list.innerHTML = '<p style="color: green; font-weight: bold;">✅ No hay cuentas por vencer pronto. Todo al día.</p>';
@@ -5325,7 +5321,7 @@ async function loadExpiringAlerts() {
   }
 }
 
-sync function loadMotherAccountsAlerts() {
+async function loadMotherAccountsAlerts() {
   const list = document.getElementById('motherAccountsList');
   if (!list) return;
 
@@ -5364,6 +5360,13 @@ sync function loadMotherAccountsAlerts() {
     list.innerHTML = `<p style="color:red;">Error cargando alertas: ${e.message}</p>`;
   }
 }
+
+// Mantenemos tu EventListener seguro al final
+document.addEventListener('DOMContentLoaded', () => {
+  if(document.getElementById('expiringAlertsList')) {
+    loadExpiringAlerts();
+  }
+});
 
 
 // ESTA ES LA PARTE QUE MANTIENE TU PANEL SEGURO AL CARGAR
