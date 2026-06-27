@@ -1756,7 +1756,8 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       extra_data,
       terms_conditions,
       access_url,
-      reusable 
+      reusable,
+      official_purchase_date // <-- NUEVO: Recibimos la fecha
     } = req.body;
 
     if (!platform || !product_name) {
@@ -1769,9 +1770,10 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
     }
 
     const result = await pool.query(
+      // <-- NUEVO: Agregamos la columna official_purchase_date y el valor $12
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11)
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)
        RETURNING *`,
       [
         platform, 
@@ -1784,7 +1786,8 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
         terms_conditions || "", 
         access_url || "", 
         req.isPanelAdmin ? req.user.id : null,
-        reusable === 1 ? 1 : 0 // <-- SOLUCIÓN: Siempre mandamos número entero (1 o 0)
+        reusable === 1 ? 1 : 0,
+        official_purchase_date || null // <-- NUEVO: Mandamos la fecha o null si está vacía
       ]
     );
 
@@ -1795,10 +1798,7 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
   }
 });
 
-app.patch("/api/admin/platform-accounts/:id",
-  authMiddleware,
-  adminMiddleware,
-  async (req, res) => {
+app.patch("/api/admin/platform-accounts/:id", authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const id = req.params.id;
 
@@ -1811,10 +1811,12 @@ app.patch("/api/admin/platform-accounts/:id",
         profile_pin,
         access_url,
         status,
-        reusable 
+        reusable,
+        official_purchase_date // <-- NUEVO AL EDITAR
       } = req.body;
 
       const result = await pool.query(
+        // <-- NUEVO: Agregamos official_purchase_date = $10 y recorremos el id a $11
         `UPDATE platform_accounts
          SET
            platform = $1,
@@ -1825,8 +1827,9 @@ app.patch("/api/admin/platform-accounts/:id",
            profile_pin = $6,
            access_url = $7,
            status = $8,
-           reusable = $9
-         WHERE id = $10
+           reusable = $9,
+           official_purchase_date = $10
+         WHERE id = $11
          RETURNING *`,
         [
           platform,
@@ -1837,26 +1840,22 @@ app.patch("/api/admin/platform-accounts/:id",
           profile_pin || "",
           access_url || "",
           status,
-          reusable === 1 ? 1 : 0, // <-- SOLUCIÓN TAMBIÉN AQUÍ AL EDITAR
+          reusable === 1 ? 1 : 0,
+          official_purchase_date || null, // <-- NUEVO
           id
         ]
       );
 
       if (result.rowCount === 0) {
-        return res.status(404).json({
-          error: "Cuenta no encontrada"
-        });
+        return res.status(404).json({ error: "Cuenta no encontrada" });
       }
 
-      res.json({
-        message: "Cuenta actualizada correctamente"
-      });
+      res.json({ message: "Cuenta actualizada correctamente" });
 
     } catch (err) {
       console.error(err);
-      res.status(500).json({
-        error: "Error actualizando cuenta"
-      });
+      res.status(500).json({ error: "Error actualizando cuenta" 
+});
     }
   }
 );

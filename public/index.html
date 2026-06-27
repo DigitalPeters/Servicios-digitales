@@ -396,8 +396,15 @@ onclick="showSection('distributorEarnings')">
                 <div><label class="field-label">Perfil</label><input id="platformProfile" placeholder="P1, Perfil 1, etc." /></div>
                 <div><label class="field-label">PIN</label><input id="platformPin" placeholder="PIN" /></div>
               </div>
+
+              <!-- === NUEVO CAMPO DE FECHA === -->
+              <label class="field-label">Fecha de compra (Cuenta Madre)</label>
+              <input type="date" id="officialPurchaseDate" />
+              <!-- ============================ -->
+
               <label class="field-label">URL para código/soporte (opcional)</label>
               <input id="platformAccessUrl" placeholder="https://..." />
+              
               <button class="green-btn" onclick="createPlatformAccount()">Guardar cuenta disponible</button>
             </div>
             <div>

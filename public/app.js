@@ -903,8 +903,9 @@ async function createPlatformAccount(){
     const product=(allProducts||[]).find(p=>String(p.id)===String(productId));
     if(!product)throw new Error('Selecciona un producto/plataforma');
     
-    // 1. CAPTURAMOS LA CASILLA REUSABLE
+    // 1. CAPTURAMOS LA CASILLA REUSABLE Y LA NUEVA FECHA
     const isReusable = document.getElementById('platformReusable')?.checked || false;
+    const officialPurchaseDate = (document.getElementById('officialPurchaseDate')?.value || '').trim();
     
     const email=(document.getElementById('platformEmail')?.value||'').trim();
     const password=(document.getElementById('platformPassword')?.value||'').trim();
@@ -932,7 +933,8 @@ async function createPlatformAccount(){
         access_url:accessUrl,
         extra_data:'',
         terms_conditions:'',
-        reusable: isReusable ? 1 : 0
+        reusable: isReusable ? 1 : 0,
+        official_purchase_date: officialPurchaseDate || null // <-- NUEVO DATO ENVIADO AL SERVIDOR
       })
     });
     
@@ -943,6 +945,7 @@ async function createPlatformAccount(){
     if(document.getElementById('platformPassword')) document.getElementById('platformPassword').value='';
     if(document.getElementById('platformProfile')) document.getElementById('platformProfile').value='';
     if(document.getElementById('platformPin')) document.getElementById('platformPin').value='';
+    if(document.getElementById('officialPurchaseDate')) document.getElementById('officialPurchaseDate').value=''; // <-- LIMPIA LA FECHA
     if(document.getElementById('platformAccessUrl')) document.getElementById('platformAccessUrl').value='';
     if(document.getElementById('platformReusable')) document.getElementById('platformReusable').checked=false;
     
@@ -951,7 +954,6 @@ async function createPlatformAccount(){
     showMessage(e.message||'Error guardando cuenta','error')
   }
 }
-
 
 function openAccountReportsFromDashboard(){
   if(currentUser?.role==='admin'){
