@@ -1727,6 +1727,26 @@ app.get("/api/alerts/count", authMiddleware, async (req, res) => {
   }
 });
 
+// === AQUÍ PEGAS LA NUEVA RUTA DE ALERTAS ===
+app.get("/api/admin/alerts/mother-accounts", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const query = `
+      SELECT id, platform, account_email, profile_name, official_purchase_date,
+             (official_purchase_date + INTERVAL '30 days') as mother_expiration
+      FROM platform_accounts
+      WHERE official_purchase_date IS NOT NULL
+        AND (official_purchase_date + INTERVAL '30 days') <= (CURRENT_DATE + INTERVAL '5 days')
+      ORDER BY mother_expiration ASC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando alertas de cuentas madre" });
+  }
+});
+
+
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {

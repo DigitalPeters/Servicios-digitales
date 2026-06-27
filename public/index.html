@@ -164,6 +164,16 @@ onclick="showSection('distributorEarnings')">
       <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
     </div>
     <div id="expiringAlertsList" style="padding: 16px;">Cargando alertas...</div>
+<div class="panel" style="margin-top: 20px; border-left: 4px solid #d32f2f;">
+  <div class="panel-head">
+    <div>
+      <h2 style="color: #d32f2f;">🚨 Vencimiento Cuentas Madre</h2>
+      <p class="small-text">Correos originales que vencen ante el proveedor en 5 días o menos (basado en 30 días).</p>
+    </div>
+    <button class="outline-btn" style="width:auto; border-color: #d32f2f; color: #d32f2f;" onclick="loadMotherAccountsAlerts()">🔄 Revisar</button>
+  </div>
+  <div id="motherAccountsList" style="padding: 16px;">Presiona revisar para buscar cuentas...</div>
+</div>
   </div>
 </section>
 

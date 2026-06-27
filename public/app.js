@@ -5325,6 +5325,47 @@ async function loadExpiringAlerts() {
   }
 }
 
+sync function loadMotherAccountsAlerts() {
+  const list = document.getElementById('motherAccountsList');
+  if (!list) return;
+
+  try {
+    list.innerHTML = '<p class="small-text">Calculando fechas de proveedor...</p>';
+    const accounts = await api('/api/admin/alerts/mother-accounts');
+
+    if (accounts.length === 0) {
+      list.innerHTML = '<p style="color: green; font-weight: bold;">✅ Tienes margen. Ninguna cuenta madre vence en los próximos 5 días.</p>';
+      return;
+    }
+
+    list.innerHTML = accounts.map(acc => {
+      const fechaCompra = new Date(acc.official_purchase_date);
+      const fechaVence = new Date(acc.mother_expiration);
+      const opcionesFecha = { year: 'numeric', month: 'short', day: 'numeric' };
+      
+      return `
+        <div class="item" style="border: 1px solid #ef9a9a; background: #ffebee; margin-bottom: 10px; padding: 12px; border-radius: 6px;">
+          <div style="display:flex; justify-content:space-between; align-items: center;">
+            <div>
+              <b style="color: #c62828; font-size: 16px;">Vence Proveedor: ${fechaVence.toLocaleDateString('es-MX', opcionesFecha)}</b><br>
+              <span style="font-size: 14px;"><b>Correo:</b> ${acc.account_email}</span><br>
+              <span style="font-size: 13px; color: #555;">Plataforma: ${acc.platform} | Comprada el: ${fechaCompra.toLocaleDateString('es-MX', opcionesFecha)}</span>
+            </div>
+            <div style="text-align: right;">
+              <span style="font-size: 13px;"><b>ID:</b> #${acc.id}</span><br>
+              <span style="font-size: 13px; font-weight:bold;">Perfil: ${acc.profile_name || 'N/A'}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (e) {
+    list.innerHTML = `<p style="color:red;">Error cargando alertas: ${e.message}</p>`;
+  }
+}
+
+
 // ESTA ES LA PARTE QUE MANTIENE TU PANEL SEGURO AL CARGAR
 document.addEventListener('DOMContentLoaded', () => {
   if(document.getElementById('expiringAlertsList')) {
