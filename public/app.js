@@ -134,10 +134,114 @@ console.log('LOAD EXPIRING COUNT EJECUTADO');
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
 function renderProducts(products){let html='';const cats={};products.forEach(p=>{const c=p.category||'Otros';(cats[c]=cats[c]||[]).push(p)});Object.keys(cats).forEach(c=>{html+=`<div class="category-title">${safeText(c)}</div>`+cats[c].map(renderProductRow).join('')});productsList.innerHTML=html||'No hay productos.'}
-function renderProductRow(product){const stockEnabled=Number(product.stock_enabled||0)===1;const stock=Number(product.stock||0);const soldOut=stockEnabled&&stock<=0;return `<div class="product-row" data-product-id="${product.id}"><div class="product-header" onclick="toggleProduct(${product.id})"><div><div class="product-name">${safeText(product.name)}</div><span class="chip">${safeText(product.category||'Otros')}</span></div><div><div class="price">$${formatMoney(product.price)}</div>${stockEnabled?`<div class="stock ${soldOut?'out':''}">${soldOut?'Sin stock':'Stock: '+stock}</div>`:''}</div><div>⌄</div></div><div id="product-details-${product.id}" class="product-details"><p class="product-description">${safeText(product.description||'')}</p><p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>${renderProductInputs(product)}<button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut?'disabled':''}>${soldOut?'Sin stock':'Comprar'}</button></div></div>`}
+
+function renderProductRow(product) {
+    const stockEnabled = Number(product.stock_enabled || 0) === 1;
+    const stock = Number(product.stock || 0);
+    const soldOut = stockEnabled && stock <= 0;
+
+    // === NUEVO: Verificamos si la categoría es para trámites o actas ===
+    // Si tu categoría se llama diferente (ej. "servicios"), agrégala aquí.
+    const categoriaMinuscula = (product.category || '').toLowerCase();
+    const requierePDF = categoriaMinuscula.includes('tramite') || categoriaMinuscula.includes('acta');
+
+    const pdfInputHtml = requierePDF ? `
+        <div style="margin-top: 10px; margin-bottom: 15px; border: 1px dashed #ccc; padding: 10px; border-radius: 6px; background: #fafafa;">
+            <label style="font-size: 13px; font-weight: bold; color: #d84315;">📄 Documento requerido (PDF - Opcional):</label><br>
+            <input type="file" id="file-${product.id}" accept="application/pdf" style="width: 100%; font-size: 13px; margin-top: 5px;" />
+        </div>
+    ` : '';
+    // ====================================================================
+
+    return `<div class="product-row" data-product-id="${product.id}">
+        <div class="product-header" onclick="toggleProduct(${product.id})">
+            <div>
+                <div class="product-name">${safeText(product.name)}</div>
+                <span class="chip">${safeText(product.category || 'Otros')}</span>
+            </div>
+            <div>
+                <div class="price">$${formatMoney(product.price)}</div>
+                ${stockEnabled ? `<div class="stock ${soldOut ? 'out' : ''}">${soldOut ? 'Sin stock' : 'Stock: ' + stock}</div>` : ''}
+            </div>
+            <div>⌄</div>
+        </div>
+        <div id="product-details-${product.id}" class="product-details">
+            <p class="product-description">${safeText(product.description || '')}</p>
+            <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
+            ${renderProductInputs(product)}
+            
+            ${pdfInputHtml}
+            
+            <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? 'Sin stock' : 'Comprar'}</button>
+        </div>
+    </div>`;
+}
+
+
 function toggleProduct(id){const row=document.querySelector(`.product-row[data-product-id="${id}"]`);if(!row)return;const open=row.classList.contains('open');document.querySelectorAll('.product-row').forEach(r=>r.classList.remove('open'));if(!open)row.classList.add('open')}
 function renderProductInputs(product){const fields=parseJsonArray(product.required_fields);if(!fields.length)return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;return fields.map(f=>`<label class="field-label">${safeText(fieldLabel(f))}</label><input id="field-${product.id}-${f}" placeholder="Ingresa ${safeText(fieldLabel(f))}" />`).join('')}
-async function buyProduct(productId){try{const product=allProducts.find(p=>Number(p.id)===Number(productId))||await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));if(!product)throw new Error('Producto no encontrado');if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`))return;const fields=parseJsonArray(product.required_fields);const order_data={};fields.forEach(f=>{const input=document.getElementById(`field-${productId}-${f}`);order_data[f]=input?input.value.trim():''});const data=await api('/api/buy/'+productId,{method:'POST',body:JSON.stringify({order_data})});showMessage(data.message||'Compra realizada');await loadApp();showSection('orders');}catch(e){showMessage(e.message,'error');}}
+
+// Función para convertir el PDF a texto (Base64)
+function convertFileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+}
+
+// Tu función de compra actualizada
+async function buyProduct(productId) {
+  try {
+    const product = allProducts.find(p => Number(p.id) === Number(productId)) || 
+                    await api('/api/products').then(ps => ps.find(p => Number(p.id) === Number(productId)));
+    
+    if (!product) throw new Error('Producto no encontrado');
+    
+    if (!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`)) return;
+    
+    const fields = parseJsonArray(product.required_fields);
+    const order_data = {};
+    
+    fields.forEach(f => {
+      const input = document.getElementById(`field-${productId}-${f}`);
+      order_data[f] = input ? input.value.trim() : '';
+    });
+
+    // === NUEVO: CAPTURAMOS EL PDF ===
+    let attached_document = null;
+    // Buscamos la cajita del PDF usando el ID del producto
+    const fileInput = document.getElementById(`file-${productId}`);
+    
+    if (fileInput && fileInput.files.length > 0) {
+      const file = fileInput.files[0];
+      // Validamos que sea menor a 5MB para no saturar tu base de datos
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error("El PDF es muy pesado. Máximo 5 MB.");
+      }
+      attached_document = await convertFileToBase64(file);
+    }
+    // ================================
+
+    const data = await api('/api/buy/' + productId, {
+      method: 'POST',
+      body: JSON.stringify({ 
+        order_data,
+        attached_document // <-- Inyectamos el PDF al servidor
+      })
+    });
+    
+    showMessage(data.message || 'Compra realizada');
+    await loadApp();
+    showSection('orders');
+    
+  } catch (e) {
+    showMessage(e.message, 'error');
+  }
+}
+
+
 async function loadMyOrders(){
   myOrders=await api('/api/my-orders');
   statOrders.textContent=myOrders.length;
@@ -3929,34 +4033,58 @@ setTimeout(() => {
     });
   }
 
-  // Compra individual; no cambia el abrir/cerrar del producto.
-  window.buyProduct = async function(productId){
-    try {
-      const product = (window.allProducts || []).find(p=>Number(p.id)===Number(productId)) ||
-        await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
-      if(!product) throw new Error('Producto no encontrado');
+// Función para convertir el PDF a texto (Base64)
+function convertFileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+}
 
-      if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
+// Compra individual; no cambia el abrir/cerrar del producto.
+window.buyProduct = async function(productId){
+  try {
+    const product = (window.allProducts || []).find(p=>Number(p.id)===Number(productId)) ||
+      await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
+    if(!product) throw new Error('Producto no encontrado');
 
-      const fields = parseJsonArray(product.required_fields);
-      const order_data = {};
-      fields.forEach(f => {
-        const input=document.getElementById(`field-${productId}-${f}`);
-        order_data[f]=input?input.value.trim():'';
-      });
+    if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\nSi necesitas varios perfiles, realiza una compra por cada perfil.\n\n¿Confirmas la compra?`)) return;
 
-      const data = await api('/api/buy/'+productId, {
-        method:'POST',
-        body:JSON.stringify({order_data, quantity:1})
-      });
+    const fields = parseJsonArray(product.required_fields);
+    const order_data = {};
+    fields.forEach(f => {
+      const input=document.getElementById(`field-${productId}-${f}`);
+      order_data[f]=input?input.value.trim():'';
+    });
 
-      showMessage(data.message || 'Compra realizada');
-      await loadApp();
-      showSection('orders');
-    } catch(e) {
-      showMessage(e.message || 'Error comprando producto','error');
+    // === NUEVO: CAPTURAMOS EL PDF ===
+    let attached_document = null;
+    const fileInput = document.getElementById(`file-${productId}`);
+    if (fileInput && fileInput.files.length > 0) {
+      const file = fileInput.files[0];
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error("El PDF es muy pesado. Máximo 5 MB.");
+      }
+      attached_document = await convertFileToBase64(file);
     }
-  };
+    // ================================
+
+    const data = await api('/api/buy/'+productId, {
+      method:'POST',
+      // Mandamos order_data, quantity y nuestro nuevo attached_document
+      body:JSON.stringify({order_data, quantity:1, attached_document})
+    });
+
+    showMessage(data.message || 'Compra realizada');
+    await loadApp();
+    showSection('orders');
+  } catch(e) {
+    showMessage(e.message || 'Error comprando producto','error');
+  }
+};  
+
 
   async function loadReportableAccounts(){
     try {
