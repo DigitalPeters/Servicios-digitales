@@ -1748,7 +1748,7 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
 
     const search = `%${q}%`;
 
-    // 1. Busca la fecha de compra de la Cuenta Madre
+    // 1. Buscar Cuenta Madre y su fecha original de compra
     const accountsResult = await pool.query(
       `SELECT id, platform, account_email, status, official_purchase_date
        FROM platform_accounts 
@@ -1756,13 +1756,15 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
       [search]
     );
 
-    // 2. Busca adentro de los pedidos para ver qué vendedor entregó los perfiles de este correo
+    // 2. Buscar en pedidos, uniendo con usuarios para obtener el nombre del vendedor
+    // CAST(order_data AS TEXT) permite buscar el correo dentro del JSON de datos del pedido
     const ordersResult = await pool.query(
       `SELECT o.id, u.name as vendedor_name, p.name as product_name, o.status, o.created_at 
        FROM orders o
        LEFT JOIN users u ON o.user_id = u.id
        LEFT JOIN products p ON o.product_id = p.id
-       WHERE CAST(o.order_data AS TEXT) ILIKE $1`,
+       WHERE CAST(o.order_data AS TEXT) ILIKE $1
+       ORDER BY o.created_at DESC`,
       [search]
     );
 
@@ -1771,11 +1773,10 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
       orders: ordersResult.rows
     });
   } catch (err) {
-    console.error("Error exacto en SQL:", err.message); 
-    res.status(500).json({ error: "Error en la búsqueda global de correos" });
+    console.error("Error SQL:", err.message);
+    res.status(500).json({ error: "Error en la búsqueda global" });
   }
 });
-
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {

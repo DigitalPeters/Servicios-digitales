@@ -5620,63 +5620,46 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-
 async function searchGlobalEmail() {
   const input = document.getElementById('globalEmailSearch').value.trim();
   const resultsDiv = document.getElementById('globalSearchResults');
   
-  if (!input) {
-    resultsDiv.innerHTML = '<p class="small-text" style="color: #d32f2f;">Escribe un correo para buscar.</p>';
-    return;
-  }
-
-  resultsDiv.innerHTML = '<p class="small-text">Buscando en toda la base de datos...</p>';
+  if (!input) return;
+  resultsDiv.innerHTML = '<p class="small-text">Buscando auditoría de cuenta...</p>';
 
   try {
     const data = await api(`/api/admin/search-email?q=${encodeURIComponent(input)}`);
     let html = '';
 
-    if (data.accounts.length === 0 && data.orders.length === 0) {
-      html = '<p style="color: #2e7d32; font-weight: bold;">✅ Este correo no se encuentra en el inventario ni ha sido entregado en ningún perfil.</p>';
-    } else {
-      
-      // Información de la Cuenta Madre
-      if (data.accounts.length > 0) {
-        html += `<h4 style="color: #d32f2f; margin-top: 15px; margin-bottom: 5px;">Información de la Cuenta Madre:</h4>`;
-        data.accounts.forEach(acc => {
-          const fechaMadre = acc.official_purchase_date 
-            ? new Date(acc.official_purchase_date).toLocaleDateString() 
-            : 'Sin fecha registrada';
-
-          html += `<div style="padding: 10px; border: 1px solid #ef9a9a; background: #ffebee; margin-bottom: 5px; border-radius: 4px;">
-            <span style="font-size: 13px;"><b>ID:</b> #${acc.id} | <b>Plataforma:</b> ${acc.platform} | <b>Estado:</b> ${acc.status}</span><br>
-            <b>Correo Madre:</b> ${acc.account_email}<br>
-            <span style="font-size: 14px; color: #c62828;"><b>📅 Fecha de compra de la cuenta:</b> ${fechaMadre}</span>
-          </div>`;
-        });
-      }
-
-      // Información de los Perfiles Vendidos
-      if (data.orders.length > 0) {
-        html += `<h4 style="color: #1976d2; margin-top: 15px; margin-bottom: 5px;">Perfiles vendidos de este correo:</h4>`;
-        data.orders.forEach(ord => {
-          // Extraemos y formateamos la fecha en la que se vendió el perfil
-          const fechaPedido = ord.created_at 
-            ? new Date(ord.created_at).toLocaleDateString() 
-            : 'Sin fecha registrada';
-
-          html += `<div style="padding: 10px; border: 1px solid #90caf9; background: #e3f2fd; margin-bottom: 5px; border-radius: 4px;">
-            <span style="font-size: 13px;"><b>Pedido:</b> #${ord.id} | <b>Producto:</b> ${ord.product_name} | <b>Estado:</b> ${ord.status}</span><br>
-            <span style="font-size: 14px; font-weight: bold; color: #333;">👤 Vendedor del perfil: ${ord.vendedor_name || 'Desconocido'}</span><br>
-            <span style="font-size: 13px; color: #1565c0;"><b>🛒 Fecha de venta del perfil:</b> ${fechaPedido}</span>
-          </div>`;
-        });
-      }
+    // Sección Cuentas Madre
+    if (data.accounts.length > 0) {
+      data.accounts.forEach(acc => {
+        const fechaMadre = acc.official_purchase_date ? new Date(acc.official_purchase_date).toLocaleDateString() : 'No registrada';
+        html += `<div style="padding: 10px; border: 1px solid #e57373; background: #ffebee; margin-bottom: 10px; border-radius: 5px;">
+          <h4 style="margin:0; color:#c62828;">Cuenta Madre #${acc.id} (${acc.platform})</h4>
+          <b>Correo:</b> ${acc.account_email} | <b>Estado:</b> ${acc.status}<br>
+          <span style="color:#d32f2f;">📅 <b>Tu fecha de compra (Proveedor):</b> ${fechaMadre}</span>
+        </div>`;
+      });
     }
 
-    resultsDiv.innerHTML = html;
+    // Sección Ventas de Perfiles
+    if (data.orders.length > 0) {
+      html += `<h4 style="color: #1976d2; margin-top: 15px;">Historial de Ventas (Perfiles):</h4>`;
+      data.orders.forEach(ord => {
+        const fechaVenta = new Date(ord.created_at).toLocaleDateString();
+        html += `<div style="padding: 10px; border: 1px solid #90caf9; background: #e3f2fd; margin-bottom: 8px; border-radius: 5px;">
+          <b>Pedido:</b> #${ord.id} | <b>Producto:</b> ${ord.product_name}<br>
+          <b>👤 Vendedor:</b> ${ord.vendedor_name}<br>
+          <span style="color:#1565c0;">🛒 <b>Fecha de venta al cliente:</b> ${fechaVenta}</span>
+        </div>`;
+      });
+    } else if (data.accounts.length > 0) {
+      html += `<p style="color: #555;"><i>Esta cuenta madre aún no ha sido utilizada en ningún pedido.</i></p>`;
+    }
 
+    resultsDiv.innerHTML = html || '<p>No se encontraron coincidencias.</p>';
   } catch (e) {
-    resultsDiv.innerHTML = `<p style="color: red;">Error en la búsqueda: ${e.message}</p>`;
+    resultsDiv.innerHTML = `<p style="color: red;">Error: ${e.message}</p>`;
   }
 }
