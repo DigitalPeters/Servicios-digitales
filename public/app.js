@@ -966,7 +966,7 @@ async function loadPlatformInventory(){
     }
     const listBox=document.getElementById('platformAccountsList');
     if(listBox){
-      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.slice(0,120).map(a=>renderPlatformAccountRow(a)).join('')}</tbody></table></div>`:'Sin cuentas.';
+      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a=>renderPlatformAccountRow(a)).join('')}</tbody></table></div>`:'Sin cuentas.';
     }
   }catch(e){showMessage(e.message||'Error cargando inventario','error')}
 }
