@@ -5633,33 +5633,42 @@ async function searchGlobalEmail() {
   resultsDiv.innerHTML = '<p class="small-text">Buscando en toda la base de datos...</p>';
 
   try {
-    // encodeURIComponent protege el texto por si tiene símbolos especiales
     const data = await api(`/api/admin/search-email?q=${encodeURIComponent(input)}`);
-    
     let html = '';
 
     if (data.accounts.length === 0 && data.orders.length === 0) {
-      html = '<p style="color: #2e7d32; font-weight: bold;">✅ Libre. Este correo no se ha usado en ningún lado.</p>';
+      html = '<p style="color: #2e7d32; font-weight: bold;">✅ Este correo no se encuentra en el inventario ni ha sido entregado en ningún perfil.</p>';
     } else {
       
-      // Si se encuentra en el inventario
+      // Información de la Cuenta Madre
       if (data.accounts.length > 0) {
-        html += `<h4 style="color: #d32f2f; margin-top: 15px; margin-bottom: 5px;">Encontrado en Cuentas Madre:</h4>`;
+        html += `<h4 style="color: #d32f2f; margin-top: 15px; margin-bottom: 5px;">Información de la Cuenta Madre:</h4>`;
         data.accounts.forEach(acc => {
+          const fechaMadre = acc.official_purchase_date 
+            ? new Date(acc.official_purchase_date).toLocaleDateString() 
+            : 'Sin fecha registrada';
+
           html += `<div style="padding: 10px; border: 1px solid #ef9a9a; background: #ffebee; margin-bottom: 5px; border-radius: 4px;">
             <span style="font-size: 13px;"><b>ID:</b> #${acc.id} | <b>Plataforma:</b> ${acc.platform} | <b>Estado:</b> ${acc.status}</span><br>
-            <b>Correo:</b> ${acc.account_email}
+            <b>Correo Madre:</b> ${acc.account_email}<br>
+            <span style="font-size: 14px; color: #c62828;"><b>📅 Fecha de compra de la cuenta:</b> ${fechaMadre}</span>
           </div>`;
         });
       }
 
-      // Si se encuentra en los pedidos de clientes
+      // Información de los Perfiles Vendidos
       if (data.orders.length > 0) {
-        html += `<h4 style="color: #1976d2; margin-top: 15px; margin-bottom: 5px;">Encontrado en Pedidos:</h4>`;
+        html += `<h4 style="color: #1976d2; margin-top: 15px; margin-bottom: 5px;">Perfiles vendidos de este correo:</h4>`;
         data.orders.forEach(ord => {
+          // Extraemos y formateamos la fecha en la que se vendió el perfil
+          const fechaPedido = ord.created_at 
+            ? new Date(ord.created_at).toLocaleDateString() 
+            : 'Sin fecha registrada';
+
           html += `<div style="padding: 10px; border: 1px solid #90caf9; background: #e3f2fd; margin-bottom: 5px; border-radius: 4px;">
             <span style="font-size: 13px;"><b>Pedido:</b> #${ord.id} | <b>Producto:</b> ${ord.product_name} | <b>Estado:</b> ${ord.status}</span><br>
-            <b>Cliente:</b> ${ord.customer_name} (${ord.customer_email})
+            <span style="font-size: 14px; font-weight: bold; color: #333;">👤 Vendedor del perfil: ${ord.vendedor_name || 'Desconocido'}</span><br>
+            <span style="font-size: 13px; color: #1565c0;"><b>🛒 Fecha de venta del perfil:</b> ${fechaPedido}</span>
           </div>`;
         });
       }
