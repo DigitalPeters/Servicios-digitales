@@ -1781,14 +1781,42 @@ const accountsResult = await pool.query(
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    // 1. Recibimos qué página quiere ver el usuario (por defecto la 1) y de a cuántos (50)
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+
     const owner = req.isPanelAdmin
       ? { clause: "owner_admin_id = $1", params: [req.user.id] }
       : { clause: "(owner_admin_id IS NULL OR owner_admin_id = 0)", params: [] };
-    const result = await pool.query(
-      `SELECT * FROM platform_accounts WHERE ${owner.clause} ORDER BY id DESC`,
+
+    // 2. Contamos cuántos registros existen en total en la base de datos
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM platform_accounts WHERE ${owner.clause}`,
       owner.params
     );
-    res.json(result.rows);
+    const totalItems = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    // 3. Traemos solo el pedacito de la página solicitada
+    const queryParams = [...owner.params, limit, offset];
+    const limitIndex = owner.params.length + 1;
+    const offsetIndex = owner.params.length + 2;
+
+    const result = await pool.query(
+      `SELECT * FROM platform_accounts WHERE ${owner.clause} ORDER BY id DESC LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+      queryParams
+    );
+
+    // 4. Enviamos los datos y la información de las páginas empaquetados
+    res.json({
+      accounts: result.rows,
+      pagination: {
+        totalItems,
+        totalPages,
+        currentPage: page
+      }
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error obteniendo cuentas de plataformas" });

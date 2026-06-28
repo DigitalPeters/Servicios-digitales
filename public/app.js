@@ -940,36 +940,82 @@ function populatePlatformProductSelect(){
   sel.innerHTML='<option value="">Selecciona producto/plataforma</option>'+products.map(p=>`<option value="${p.id}">${safeText(p.name)}${p.category?` · ${safeText(p.category)}`:''}</option>`).join('');
   if(current)sel.value=current;
 }
-async function loadPlatformInventory(){
-  if(currentUser?.role!=='admin')return;
-  try{
-    if(!allProducts.length)allProducts=await api('/api/products');
-    populatePlatformProductSelect();
-    const accounts=await api('/api/admin/platform-accounts');
-    const countEl=document.getElementById('adminPlatformAccountsCount');
-    if(countEl)countEl.textContent=accounts.filter(a=>a.status==='available').length;
 
-    const summary={};
-    accounts.forEach(a=>{
-      const key=a.product_name||a.platform||'Sin plataforma';
-      if(!summary[key])summary[key]={available:0,delivered:0,sold_outside:0,failed:0,total:0};
+// Variable global para recordar en qué página estamos y no perdernos al guardar
+let currentInventoryPage = 1;
+
+async function loadPlatformInventory(page = 1) {
+  if(currentUser?.role !== 'admin') return;
+  try {
+    currentInventoryPage = page;
+    if(!allProducts.length) allProducts = await api('/api/products');
+    populatePlatformProductSelect();
+    
+    const countEl = document.getElementById('adminPlatformAccountsCount');
+    const summaryBox = document.getElementById('platformStockSummary');
+    const listBox = document.getElementById('platformAccountsList');
+
+    if(listBox) listBox.innerHTML = '<p class="small-text">Cargando página...</p>';
+
+    // Pedimos al servidor la página específica
+    const response = await api(`/api/admin/platform-accounts?page=${currentInventoryPage}&limit=50`);
+    
+    // Adaptamos los datos para recibir tu nuevo formato de servidor con paginación
+    const accounts = response.accounts || response;
+    const pagination = response.pagination || { totalPages: 1, currentPage: 1 };
+
+    // --- 1. CONTEO Y RESUMEN ---
+    if(countEl) countEl.textContent = accounts.filter(a => a.status === 'available').length;
+
+    const summary = {};
+    accounts.forEach(a => {
+      const key = a.product_name || a.platform || 'Sin plataforma';
+      if(!summary[key]) summary[key] = { available:0, delivered:0, sold_outside:0, failed:0, total:0 };
       summary[key].total++;
-      if(a.status==='available')summary[key].available++;
-      if(a.status==='delivered')summary[key].delivered++;
-      if(a.status==='sold_outside')summary[key].sold_outside++;
-      if(a.status==='failed')summary[key].failed++;
+      if(a.status === 'available') summary[key].available++;
+      if(a.status === 'delivered') summary[key].delivered++;
+      if(a.status === 'sold_outside') summary[key].sold_outside++;
+      if(a.status === 'failed') summary[key].failed++;
     });
-    const summaryBox=document.getElementById('platformStockSummary');
-    if(summaryBox){
-      const rows=Object.entries(summary).sort((a,b)=>a[0].localeCompare(b[0]));
-      summaryBox.innerHTML=rows.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Vendidas fuera</th><th>Fallidas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><td><b>${safeText(name)}</b>${v.available<=2?`<br><span class="error">Stock bajo</span>`:''}</td><td class="${v.available<=0?'error':(v.available<=2?'status':'success')}">${v.available}</td><td>${v.delivered}</td><td>${v.sold_outside}</td><td>${v.failed}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>`:'Sin cuentas agregadas.';
+
+    if(summaryBox) {
+      const rows = Object.entries(summary).sort((a,b) => a[0].localeCompare(b[0]));
+      summaryBox.innerHTML = rows.length 
+        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Vendidas fuera</th><th>Fallidas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v]) => `<tr><td><b>${safeText(name)}</b>${v.available<=2?`<br><span class="error">Stock bajo</span>`:''}</td><td class="${v.available<=0?'error':(v.available<=2?'status':'success')}">${v.available}</td><td>${v.delivered}</td><td>${v.sold_outside}</td><td>${v.failed}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>` 
+        : 'Sin cuentas en esta página.';
     }
-    const listBox=document.getElementById('platformAccountsList');
-    if(listBox){
-      listBox.innerHTML=accounts.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a=>renderPlatformAccountRow(a)).join('')}</tbody></table></div>`:'Sin cuentas.';
+
+    // --- 2. LISTA Y BOTONES DE PAGINACIÓN ---
+    if(listBox) {
+      let html = accounts.length 
+        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>` 
+        : 'Sin cuentas en esta página.';
+
+      // Dibujamos los controles de paginación si hay más de 1 página
+      if (pagination.totalPages > 1 || pagination.currentPage > 1) {
+        html += `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 10px; border-top: 1px solid #ccc;">
+            <button class="outline-btn" style="width: auto; padding: 5px 15px; cursor: pointer;" 
+                    onclick="loadPlatformInventory(${pagination.currentPage - 1})" 
+                    ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
+                    
+            <span style="font-size: 14px; font-weight: bold; color: #555;">
+              Página ${pagination.currentPage} de ${pagination.totalPages}
+            </span>
+            
+            <button class="outline-btn" style="width: auto; padding: 5px 15px; cursor: pointer;" 
+                    onclick="loadPlatformInventory(${pagination.currentPage + 1})" 
+                    ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
+          </div>
+        `;
+      }
+      listBox.innerHTML = html;
     }
-  }catch(e){showMessage(e.message||'Error cargando inventario','error')}
+  } catch(e) {
+    showMessage(e.message || 'Error cargando inventario', 'error');
+  }
 }
+
 function renderPlatformAccountRow(a){
   const statuses=['available','delivered','failed','sold_outside','reserved'];
   return `<tr>
@@ -982,23 +1028,31 @@ function renderPlatformAccountRow(a){
     <td><button class="primary-btn" style="width:auto;margin-bottom:6px" onclick="updatePlatformAccount(${a.id}, '${safeText(a.product_name||a.platform||'')}')">Guardar</button><br><button class="muted-btn" style="width:auto" onclick="markPlatformAccountSoldOutside(${a.id})">Vendido por fuera</button></td>
   </tr>`;
 }
+
+// Nota: Esta función la dejamos casi intacta, solo le inyectamos la variable "currentInventoryPage" 
+// al final para que cuando guardes un cambio, NO te regrese a la página 1 a la fuerza.
 async function updatePlatformAccount(id, productName){
   try{
-    const payload={
+    const payload = {
       platform: productName,
       product_name: productName,
-      account_email:(document.getElementById('pa-email-'+id)?.value||'').trim(),
-      account_password:(document.getElementById('pa-pass-'+id)?.value||'').trim(),
-      profile_name:(document.getElementById('pa-profile-'+id)?.value||'').trim(),
-      profile_pin:(document.getElementById('pa-pin-'+id)?.value||'').trim(),
-      access_url:(document.getElementById('pa-url-'+id)?.value||'').trim(),
-      status:document.getElementById('pa-status-'+id)?.value||'available'
+      account_email: (document.getElementById('pa-email-'+id)?.value || '').trim(),
+      account_password: (document.getElementById('pa-pass-'+id)?.value || '').trim(),
+      profile_name: (document.getElementById('pa-profile-'+id)?.value || '').trim(),
+      profile_pin: (document.getElementById('pa-pin-'+id)?.value || '').trim(),
+      access_url: (document.getElementById('pa-url-'+id)?.value || '').trim(),
+      status: document.getElementById('pa-status-'+id)?.value || 'available'
     };
-    const data=await api('/api/admin/platform-accounts/'+id,{method:'PATCH',body:JSON.stringify(payload)});
-    showMessage(data.message||'Cuenta actualizada');
-    await loadPlatformInventory();
-  }catch(e){showMessage(e.message||'Error actualizando cuenta','error')}
+    const data = await api('/api/admin/platform-accounts/'+id, {method:'PATCH', body:JSON.stringify(payload)});
+    showMessage(data.message || 'Cuenta actualizada');
+    
+    // Aquí es donde recarga, pero manteniéndote en tu página actual
+    await loadPlatformInventory(currentInventoryPage);
+  } catch(e) {
+    showMessage(e.message || 'Error actualizando cuenta', 'error');
+  }
 }
+
 async function markPlatformAccountSoldOutside(id){
   if(!confirm('¿Marcar esta cuenta/perfil como vendido por fuera? Ya no se entregará automáticamente.'))return;
   try{
