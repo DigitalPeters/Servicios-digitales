@@ -1741,42 +1741,42 @@ app.get("/api/admin/alerts/mother-accounts", authMiddleware, adminMiddleware, as
   }
 });
 
-
 app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { q } = req.query;
     if (!q) return res.json({ accounts: [], orders: [] });
 
-    // Los signos % permiten buscar fragmentos. Ej. si buscas "juan", encontrará "juan@gmail.com"
     const search = `%${q}%`;
 
-    // 1. Buscar en tu inventario de cuentas madre (platform_accounts)
-    // ILIKE hace que la búsqueda no distinga entre mayúsculas y minúsculas
+    // 1. Buscar en Cuentas Madre
     const accountsResult = await pool.query(
-      `SELECT id, platform, account_email, status 
+      `SELECT id, platform, account_email
        FROM platform_accounts 
        WHERE account_email ILIKE $1`,
       [search]
     );
 
-    // 2. Buscar en el historial de pedidos de clientes (orders)
+    // 2. Buscar en Pedidos (Uniendo la tabla users y products para obtener los nombres reales)
     const ordersResult = await pool.query(
-      `SELECT id, customer_name, customer_email, product_name, status 
-       FROM orders 
-       WHERE customer_email ILIKE $1`,
+      `SELECT o.id, u.name as customer_name, u.email as customer_email, p.name as product_name, o.status 
+       FROM orders o
+       LEFT JOIN users u ON o.user_id = u.id
+       LEFT JOIN products p ON o.product_id = p.id
+       WHERE u.email ILIKE $1`,
       [search]
     );
 
-    // Devolvemos ambos resultados empaquetados
     res.json({
       accounts: accountsResult.rows,
       orders: ordersResult.rows
     });
   } catch (err) {
-    console.error(err.message);
+    // Esto imprimirá el error exacto en tu consola de Railway/Render si algo vuelve a fallar
+    console.error("Error exacto en SQL:", err.message); 
     res.status(500).json({ error: "Error en la búsqueda global de correos" });
   }
 });
+
 
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
