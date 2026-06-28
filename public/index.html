@@ -155,6 +155,23 @@ onclick="showSection('distributorEarnings')">
 </section>
 
 <section id="section-alerts" class="section">
+
+  <div class="panel" style="margin-bottom: 20px; border-left: 4px solid #1976d2;">
+    <div class="panel-head">
+      <div>
+        <h2 style="color: #1976d2; margin: 0;">🔍 Buscador Global de Correos</h2>
+        <p class="small-text">Revisa si un correo ya fue registrado como cuenta madre o si un cliente ya lo usó.</p>
+      </div>
+    </div>
+    <div style="padding: 16px;">
+      <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+        <input type="text" id="globalEmailSearch" placeholder="Escribe un correo o fragmento..." class="form-control" style="flex: 1; padding: 8px;">
+        <button class="primary-btn" onclick="searchGlobalEmail()" style="width: auto; padding: 8px 16px;">Buscar</button>
+      </div>
+      <div id="globalSearchResults"></div>
+    </div>
+  </div>
+
   <div class="panel">
     <div class="panel-head">
       <div>
@@ -164,18 +181,21 @@ onclick="showSection('distributorEarnings')">
       <button class="outline-btn" style="width:auto; border-color: #ff9800; color: #ff9800;" onclick="loadExpiringAlerts()">🔄 Actualizar</button>
     </div>
     <div id="expiringAlertsList" style="padding: 16px;">Cargando alertas...</div>
-<div class="panel" style="margin-top: 20px; border-left: 4px solid #d32f2f;">
-  <div class="panel-head">
-    <div>
-      <h2 style="color: #d32f2f;">🚨 Vencimiento Cuentas Madre</h2>
-      <p class="small-text">Correos originales que vencen ante el proveedor en 5 días o menos (basado en 30 días).</p>
+  </div>
+
+  <div class="panel" style="margin-top: 20px; border-left: 4px solid #d32f2f;">
+    <div class="panel-head">
+      <div>
+        <h2 style="color: #d32f2f;">🚨 Vencimiento Cuentas Madre</h2>
+        <p class="small-text">Correos originales que vencen ante el proveedor en 5 días o menos (basado en 30 días).</p>
+      </div>
+      <button class="outline-btn" style="width:auto; border-color: #d32f2f; color: #d32f2f;" onclick="loadMotherAccountsAlerts()">🔄 Revisar</button>
     </div>
-    <button class="outline-btn" style="width:auto; border-color: #d32f2f; color: #d32f2f;" onclick="loadMotherAccountsAlerts()">🔄 Revisar</button>
+    <div id="motherAccountsList" style="padding: 16px;">Presiona revisar para buscar cuentas...</div>
   </div>
-  <div id="motherAccountsList" style="padding: 16px;">Presiona revisar para buscar cuentas...</div>
-</div>
-  </div>
+
 </section>
+
 
       <section id="section-shop" class="section">
         <div class="panel"><div class="panel-head"><div><h2>Tienda</h2><p class="small-text">Da clic en un producto para desplegar detalles y comprar.</p></div></div><div class="tools"><input id="productSearch" placeholder="Buscar producto..." oninput="filterProducts()" /><select id="categoryFilter" onchange="filterProducts()"><option value="">Todas las categorías</option></select></div><div id="productsList" class="products-list"></div></div>

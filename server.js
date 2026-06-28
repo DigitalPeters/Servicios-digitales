@@ -1742,6 +1742,42 @@ app.get("/api/admin/alerts/mother-accounts", authMiddleware, adminMiddleware, as
 });
 
 
+app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.json({ accounts: [], orders: [] });
+
+    // Los signos % permiten buscar fragmentos. Ej. si buscas "juan", encontrará "juan@gmail.com"
+    const search = `%${q}%`;
+
+    // 1. Buscar en tu inventario de cuentas madre (platform_accounts)
+    // ILIKE hace que la búsqueda no distinga entre mayúsculas y minúsculas
+    const accountsResult = await pool.query(
+      `SELECT id, platform, account_email, status 
+       FROM platform_accounts 
+       WHERE account_email ILIKE $1`,
+      [search]
+    );
+
+    // 2. Buscar en el historial de pedidos de clientes (orders)
+    const ordersResult = await pool.query(
+      `SELECT id, customer_name, customer_email, product_name, status 
+       FROM orders 
+       WHERE customer_email ILIKE $1`,
+      [search]
+    );
+
+    // Devolvemos ambos resultados empaquetados
+    res.json({
+      accounts: accountsResult.rows,
+      orders: ordersResult.rows
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error en la búsqueda global de correos" });
+  }
+});
+
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {

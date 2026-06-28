@@ -5565,3 +5565,55 @@ document.addEventListener('DOMContentLoaded', () => {
     loadExpiringAlerts();
   }
 });
+
+
+async function searchGlobalEmail() {
+  const input = document.getElementById('globalEmailSearch').value.trim();
+  const resultsDiv = document.getElementById('globalSearchResults');
+  
+  if (!input) {
+    resultsDiv.innerHTML = '<p class="small-text" style="color: #d32f2f;">Escribe un correo para buscar.</p>';
+    return;
+  }
+
+  resultsDiv.innerHTML = '<p class="small-text">Buscando en toda la base de datos...</p>';
+
+  try {
+    // encodeURIComponent protege el texto por si tiene símbolos especiales
+    const data = await api(`/api/admin/search-email?q=${encodeURIComponent(input)}`);
+    
+    let html = '';
+
+    if (data.accounts.length === 0 && data.orders.length === 0) {
+      html = '<p style="color: #2e7d32; font-weight: bold;">✅ Libre. Este correo no se ha usado en ningún lado.</p>';
+    } else {
+      
+      // Si se encuentra en el inventario
+      if (data.accounts.length > 0) {
+        html += `<h4 style="color: #d32f2f; margin-top: 15px; margin-bottom: 5px;">Encontrado en Cuentas Madre:</h4>`;
+        data.accounts.forEach(acc => {
+          html += `<div style="padding: 10px; border: 1px solid #ef9a9a; background: #ffebee; margin-bottom: 5px; border-radius: 4px;">
+            <span style="font-size: 13px;"><b>ID:</b> #${acc.id} | <b>Plataforma:</b> ${acc.platform} | <b>Estado:</b> ${acc.status}</span><br>
+            <b>Correo:</b> ${acc.account_email}
+          </div>`;
+        });
+      }
+
+      // Si se encuentra en los pedidos de clientes
+      if (data.orders.length > 0) {
+        html += `<h4 style="color: #1976d2; margin-top: 15px; margin-bottom: 5px;">Encontrado en Pedidos:</h4>`;
+        data.orders.forEach(ord => {
+          html += `<div style="padding: 10px; border: 1px solid #90caf9; background: #e3f2fd; margin-bottom: 5px; border-radius: 4px;">
+            <span style="font-size: 13px;"><b>Pedido:</b> #${ord.id} | <b>Producto:</b> ${ord.product_name} | <b>Estado:</b> ${ord.status}</span><br>
+            <b>Cliente:</b> ${ord.customer_name} (${ord.customer_email})
+          </div>`;
+        });
+      }
+    }
+
+    resultsDiv.innerHTML = html;
+
+  } catch (e) {
+    resultsDiv.innerHTML = `<p style="color: red;">Error en la búsqueda: ${e.message}</p>`;
+  }
+}
