@@ -1748,13 +1748,13 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
 
     const search = `%${q}%`;
 
-    // 1. Buscar en Cuentas Madre
-    const accountsResult = await pool.query(
-      `SELECT id, platform, account_email
-       FROM platform_accounts 
-       WHERE account_email ILIKE $1`,
-      [search]
-    );
+   // 1. Buscar en Cuentas Madre
+const accountsResult = await pool.query(
+  `SELECT id, platform, account_email, status 
+   FROM platform_accounts 
+   WHERE account_email ILIKE $1`,
+  [search]
+);
 
     // 2. Buscar en Pedidos (Uniendo la tabla users y products para obtener los nombres reales)
     const ordersResult = await pool.query(
