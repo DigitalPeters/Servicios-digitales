@@ -5405,16 +5405,23 @@ function showQuarantineModal(list) {
       
       <div style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
         ${list.map(c => `
-          <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid #ef4444;">
-            <p style="margin:0 0 5px; font-size:16px;"><b>${c.platform}</b></p>
-            <p style="margin:0 0 5px; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
-            <p style="margin:0 0 15px; font-size:14px;">🔑 Clave vieja: <span style="color:#f87171">${c.account_password}</span></p>
-            <div style="display:flex; gap:10px;">
-              <input id="new-pass-${c.id}" placeholder="Escribe la NUEVA contraseña" style="flex:1; padding:10px; border-radius:6px; border:none; outline:none; font-family:monospace;">
-              <button onclick="liberarCuentaDeCuarentena(${c.id})" style="background:#10b981; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar al stock</button>
-            </div>
-          </div>
-        `).join('')}
+  <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid #ef4444; margin-bottom: 10px;">
+    <p style="margin:0 0 5px; font-size:16px;"><b>${c.platform}</b></p>
+    <p style="margin:0 0 5px; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
+    <p style="margin:0 0 10px; font-size:14px;">🔑 Clave vieja: <span style="color:#f87171">${c.account_password}</span></p>
+    
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <input id="new-pass-${c.id}" 
+             placeholder="Escribe la NUEVA contraseña aquí..." 
+             style="width: 100%; padding: 12px; border-radius:6px; border:1px solid #4b5563; background:#1e1e2f; color:white; font-family:monospace; box-sizing: border-box;">
+      
+      <button onclick="liberarCuentaDeCuarentena(${c.id})" 
+              style="align-self: flex-end; background:#10b981; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">
+        Liberar al stock
+      </button>
+    </div>
+  </div>
+`).join('')}
       </div>
       <button onclick="document.getElementById('quarantineModal').remove()" style="margin-top:25px; background:#4b5563; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; width:100%; font-weight:bold;">Cerrar Ventana</button>
     </div>
