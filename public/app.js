@@ -5344,33 +5344,50 @@ async function checkQuarantineAccounts() {
     });
     const quarantineList = await res.json();
 
-    // 3. Dibujar la campana si hay cuentas pendientes
-    let campana = document.getElementById('btn-cuarentena-alarma');
-    if (quarantineList && quarantineList.length > 0) {
-      if (!campana) {
-        campana = document.createElement('button');
-        campana.id = 'btn-cuarentena-alarma';
-        campana.className = 'menu-btn';
-        campana.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 15px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important; animation: pulseAlarm 1.5s infinite;';
-        campana.innerHTML = `🚨 Recuperar Cuentas (${quarantineList.length})`;
-        campana.onclick = () => showQuarantineModal(quarantineList);
-        
-        const menu = document.querySelector('.menu');
-        if (menu) menu.appendChild(campana);
-        
-        // Agregar animación css
-        if(!document.getElementById('anim-cuarentena')) {
-          const style = document.createElement('style');
-          style.id = 'anim-cuarentena';
-          style.innerHTML = `@keyframes pulseAlarm { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }`;
-          document.head.appendChild(style);
-        }
-      } else {
-        campana.innerHTML = `🚨 Recuperar Cuentas (${quarantineList.length})`;
-      }
-    } else {
-      if (campana) campana.remove();
+    // --- DENTRO DE checkQuarantineAccounts() ---
+// 3. Dibujar la campana si hay cuentas pendientes
+let campana = document.getElementById('btn-cuarentena-alarma');
+if (quarantineList && quarantineList.length > 0) {
+  if (!campana) {
+    campana = document.createElement('button');
+    campana.id = 'btn-cuarentena-alarma';
+    
+    // ESTILO FLOTANTE FIJO (Siempre visible en la esquina inferior derecha)
+    campana.style.cssText = `
+      position: fixed; 
+      bottom: 20px; 
+      right: 20px; 
+      z-index: 99999; 
+      background: #dc2626 !important; 
+      color: white !important; 
+      padding: 15px 25px; 
+      border-radius: 50px; 
+      font-weight: bold; 
+      border: 2px solid white; 
+      cursor: pointer; 
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      animation: pulseAlarm 1.5s infinite;
+    `;
+    
+    campana.innerHTML = `🚨 Recuperar (${quarantineList.length})`;
+    campana.onclick = () => showQuarantineModal(quarantineList);
+    
+    // Lo añadimos al body directamente para que nada lo oculte
+    document.body.appendChild(campana);
+    
+    // Agregar animación css
+    if(!document.getElementById('anim-cuarentena')) {
+      const style = document.createElement('style');
+      style.id = 'anim-cuarentena';
+      style.innerHTML = `@keyframes pulseAlarm { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }`;
+      document.head.appendChild(style);
     }
+  } else {
+    campana.innerHTML = `🚨 Recuperar (${quarantineList.length})`;
+  }
+} else {
+  if (campana) campana.remove();
+}
   } catch (err) {
     console.error("Error en sistema de cuarentena", err);
   }
