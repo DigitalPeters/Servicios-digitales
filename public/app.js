@@ -992,24 +992,33 @@ window.loadPlatformInventory = async function(page = 1) {
         : 'Sin cuentas en esta página.';
 
       // Dibujamos UNA SOLA vez los controles de paginación
+      // --- 2. LISTA Y BOTONES DE PAGINACIÓN ---
       if (pagination.totalPages > 1 || pagination.currentPage > 1) {
         html += `
-          <div style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding: 15px; border-top: 1px solid #eee;">
-            <button class="outline-btn" style="padding: 5px 15px;" 
-                    onclick="window.loadPlatformInventory(${pagination.currentPage - 1})" 
-                    ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
+          <div id="pagination-container" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding: 15px; border-top: 1px solid #eee;">
+            <button id="btn-prev-page" class="outline-btn" style="padding: 5px 15px;" ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
             
             <span style="font-size: 14px; font-weight: bold;">
               Página ${pagination.currentPage} de ${pagination.totalPages}
             </span>
             
-            <button class="outline-btn" style="padding: 5px 15px;" 
-                    onclick="window.loadPlatformInventory(${pagination.currentPage + 1})" 
-                    ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
+            <button id="btn-next-page" class="outline-btn" style="padding: 5px 15px;" ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
           </div>
         `;
       }
+      
       listBox.innerHTML = html;
+
+      // Agregamos los eventos de forma segura después de inyectar el HTML
+      const prevBtn = document.getElementById('btn-prev-page');
+      const nextBtn = document.getElementById('btn-next-page');
+
+      if (prevBtn) {
+        prevBtn.addEventListener('click', () => window.loadPlatformInventory(pagination.currentPage - 1));
+      }
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => window.loadPlatformInventory(pagination.currentPage + 1));
+      }
     }
   } catch(e) {
     showMessage(e.message || 'Error cargando inventario', 'error');
