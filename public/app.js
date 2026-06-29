@@ -991,6 +991,15 @@ window.loadPlatformInventory = async function() {
   }
 }
 
+
+async function verHistorialRecuperacion() {
+  const res = await fetch('/api/admin/recovery-history', { 
+    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } 
+  });
+  const data = await res.json();
+  // Aquí puedes dibujar una tabla con 'data' usando el mismo estilo de modal que ya tienes
+}
+
 function renderPlatformAccountRow(a){
   const statuses=['available','delivered','failed','sold_outside','reserved'];
   return `<tr>

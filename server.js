@@ -4740,6 +4740,16 @@ initDatabase()
   process.exit(1);
 });
 
+app.get("/api/admin/recovery-history", authMiddleware, adminMiddleware, async (req, res) => {
+  const result = await pool.query(`
+    SELECT l.*, pa.platform, pa.account_email 
+    FROM account_recovery_log l
+    JOIN platform_accounts pa ON l.account_id = pa.id
+    ORDER BY l.recovered_at DESC LIMIT 50
+  `);
+  res.json(result.rows);
+});
+
 
 // ==========================================
 // RUTA PARA DESECHAR CUENTAS (Eliminar de cuarentena)
