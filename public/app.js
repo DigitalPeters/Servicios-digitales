@@ -5404,24 +5404,22 @@ function showQuarantineModal(list) {
       <p style="font-size:14px; color:#cbd5e1; line-height:1.5;">Estas cuentas ya cumplieron sus días de garantía. <b>Pasos:</b><br>1. Entra a la plataforma oficial.<br>2. Cambia la contraseña para sacar al cliente anterior.<br>3. Escribe la nueva clave aquí y presiona Liberar.</p>
       
       <div style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
-        ${list.map(c => `
-  <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid #ef4444; margin-bottom: 10px;">
-    <p style="margin:0 0 5px; font-size:16px;"><b>${c.platform}</b></p>
-    <p style="margin:0 0 5px; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
-    <p style="margin:0 0 10px; font-size:14px;">🔑 Clave vieja: <span style="color:#f87171">${c.account_password}</span></p>
-    
-    <div style="display:flex; flex-direction:column; gap:8px;">
-      <input id="new-pass-${c.id}" 
-             placeholder="Escribe la NUEVA contraseña aquí..." 
-             style="width: 100%; padding: 12px; border-radius:6px; border:1px solid #4b5563; background:#1e1e2f; color:white; font-family:monospace; box-sizing: border-box;">
-      
-      <button onclick="liberarCuentaDeCuarentena(${c.id})" 
-              style="align-self: flex-end; background:#10b981; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">
-        Liberar al stock
-      </button>
-    </div>
-  </div>
-`).join('')}
+        ${list.map(c => {
+  // Calculamos los días de forma sencilla desde el resultado de la DB
+  // Si dias_restantes viene como un string, extraemos los días
+  const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
+  const color = dias < 5 ? "#ef4444" : "#10b981"; // Rojo si le quedan menos de 5 días
+  
+  return `
+    <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid ${color}; margin-bottom: 10px;">
+      <p style="margin:0; font-size:16px;"><b>${c.platform}</b></p>
+      <p style="margin:5px 0; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
+      <p style="margin:5px 0; font-size:14px; color: ${color};">
+        <b>⏳ Vida restante cuenta madre: ${dias > 0 ? dias + ' días' : '¡Vencida!'}</b>
+      </p>
+      </div>
+  `;
+}).join('')}
       </div>
       <button onclick="document.getElementById('quarantineModal').remove()" style="margin-top:25px; background:#4b5563; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; width:100%; font-weight:bold;">Cerrar Ventana</button>
     </div>

@@ -4668,7 +4668,11 @@ app.post("/api/admin/system/check-expirations", authMiddleware, adminMiddleware,
 app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, platform, account_email, account_password, profile_name, expires_at
+      SELECT 
+        id, platform, account_email, account_password, profile_name, expires_at,
+        -- Calculamos cuántos días le quedan a la cuenta madre (asumiendo 30 días totales de vida)
+        -- Ajusta '30' por el número real de días de vida de tus cuentas
+        (official_purchase_date + INTERVAL '30 days' - NOW()) AS dias_restantes
       FROM platform_accounts
       WHERE status = 'recovery_pending'
       ORDER BY expires_at DESC
