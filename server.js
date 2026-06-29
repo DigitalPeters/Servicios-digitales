@@ -4682,15 +4682,46 @@ app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async
 app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { new_password } = req.body;
+    const accountId = req.params.id;
+
+    // 1. OBTENEMOS LOS DATOS ACTUALES ANTES DE LIMPIAR
+    // Esto es lo que permite que no se pierda la historia
+    const currentData = await pool.query(
+      `SELECT assigned_order_id, assigned_user_id, delivered_at 
+       FROM platform_accounts WHERE id = $1`,
+      [accountId]
+    );
+
+    if (currentData.rows.length > 0) {
+      const { assigned_order_id, assigned_user_id, delivered_at } = currentData.rows[0];
+      
+      // 2. REGISTRAMOS EN LA BITÁCORA (Historial)
+      // Si la cuenta tuvo una asignación, guardamos el rastro
+      if (assigned_order_id) {
+        await pool.query(
+          `INSERT INTO account_recovery_log (account_id, order_id, user_id, delivered_at, recovered_at) 
+           VALUES ($1, $2, $3, $4, NOW())`,
+          [accountId, assigned_order_id, assigned_user_id, delivered_at]
+        );
+      }
+    }
+
+    // 3. AHORA SÍ: Liberamos la cuenta para el siguiente ciclo
     await pool.query(`
       UPDATE platform_accounts
-      SET status = 'available', account_password = $1, assigned_order_id = NULL, assigned_user_id = NULL, delivered_at = NULL, expires_at = NULL
+      SET status = 'available', 
+          account_password = $1, 
+          assigned_order_id = NULL, 
+          assigned_user_id = NULL, 
+          delivered_at = NULL, 
+          expires_at = NULL
       WHERE id = $2 AND status = 'recovery_pending'
-    `, [new_password, req.params.id]);
+    `, [new_password, accountId]);
     
-    res.json({ message: "Cuenta liberada y lista para venderse." });
+    res.json({ message: "Cuenta liberada. Historial archivado correctamente." });
   } catch (err) {
-    res.status(500).json({ error: "Error liberando la cuenta." });
+    console.error("Error al liberar cuenta:", err);
+    res.status(500).json({ error: "Error al archivar y liberar la cuenta." });
   }
 });
 
@@ -4706,18 +4737,6 @@ initDatabase()
   process.exit(1);
 });
 
-
-initDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Servidor corriendo en puerto ${PORT}`);
-    });
-  })
-  .catch(err => {
-  console.error("ERROR COMPLETO");
-  console.error(err);
-  process.exit(1);
-});
 
 // FIX GARANTIZADO VENTAS HOY Y PANELES ADMIN - 2026-06-08 03:14:33
 

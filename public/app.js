@@ -5638,3 +5638,39 @@ async function searchGlobalEmail() {
     resultsDiv.innerHTML = `<p style="color: red;">Error: ${e.message}</p>`;
   }
 }
+
+
+async function verHistorialCuenta(id) {
+  try {
+    const res = await fetch(`/api/admin/accounts/${id}/history`, {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+    const logs = await res.json();
+
+    if (logs.length === 0) {
+      alert("No hay historial registrado para esta cuenta.");
+      return;
+    }
+
+    // Creamos un modal sencillo para mostrar el historial
+    let html = `
+      <div class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:#1e1e2f; padding:20px; border-radius:8px; width:400px; color:white;">
+          <h3>Historial de la cuenta #${id}</h3>
+          <ul style="list-style:none; padding:0;">
+            ${logs.map(l => `
+              <li style="border-bottom:1px solid #444; padding:8px 0; font-size:12px;">
+                <b>Pedido:</b> ${l.order_id || 'N/A'} | <b>Vendedor:</b> ${l.user_id || 'N/A'}<br>
+                <b>Recuperado:</b> ${new Date(l.recovered_at).toLocaleDateString()}
+              </li>
+            `).join('')}
+          </ul>
+          <button onclick="this.parentElement.parentElement.remove()" style="width:100%; padding:10px; background:#4b5563; border:none; color:white; border-radius:4px; cursor:pointer;">Cerrar</button>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch (err) {
+    alert("Error al cargar el historial.");
+  }
+}
