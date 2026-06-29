@@ -1748,7 +1748,6 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
 
     const search = `%${q}%`;
 
-    // 1. Buscamos la Cuenta Madre
     const accountsResult = await pool.query(
       `SELECT id, platform, account_email, status, official_purchase_date
        FROM platform_accounts 
@@ -1756,13 +1755,10 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
       [search]
     );
 
-    // 2. BUSQUEDA CORREGIDA: Buscamos en la columna real 'assigned_platform_account_id'
     let orders = [];
     if (accountsResult.rows.length > 0) {
       const accountId = accountsResult.rows[0].id;
       
-      / Buscamos pedidos que tengan el ID asignado en la columna de relación
-      // O que hayan sido actualizados/reemplazados en el historial de la cuenta
       const ordersResult = await pool.query(
         `SELECT o.id, u.name as vendedor_name, p.name as product_name, o.status, o.created_at 
          FROM orders o
@@ -1789,7 +1785,6 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
     res.status(500).json({ error: "Error en la búsqueda global" });
   }
 });
-
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
