@@ -1748,6 +1748,7 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
 
     const search = `%${q}%`;
 
+    // 1. Buscamos TODAS las cuentas madre que coincidan con el correo
     const accountsResult = await pool.query(
       `SELECT id, platform, account_email, status, official_purchase_date
        FROM platform_accounts 
@@ -1755,23 +1756,24 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
       [search]
     );
 
+    // 2. Buscamos TODOS los pedidos vinculados a ese correo 
+    // Usamos el ID de esas cuentas encontradas para ser precisos
+    const accountIds = accountsResult.rows.map(a => a.id);
+    
     let orders = [];
-    if (accountsResult.rows.length > 0) {
-      const accountId = accountsResult.rows[0].id;
-      
+    if (accountIds.length > 0) {
+      // Buscamos cualquier pedido que tenga asignado CUALQUIERA de los IDs encontrados
       const ordersResult = await pool.query(
         `SELECT o.id, u.name as vendedor_name, p.name as product_name, o.status, o.created_at 
          FROM orders o
          LEFT JOIN users u ON o.user_id = u.id
          LEFT JOIN products p ON o.product_id = p.id
-         WHERE o.assigned_platform_account_id = $1 
+         WHERE o.assigned_platform_account_id = ANY($1) 
          OR o.id IN (
-            SELECT assigned_order_id 
-            FROM platform_accounts 
-            WHERE id = $1 AND assigned_order_id IS NOT NULL
+            SELECT assigned_order_id FROM platform_accounts WHERE id = ANY($1) AND assigned_order_id IS NOT NULL
          )
          ORDER BY o.created_at DESC`,
-        [accountId]
+        [accountIds]
       );
       orders = ordersResult.rows;
     }
@@ -1785,6 +1787,7 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
     res.status(500).json({ error: "Error en la búsqueda global" });
   }
 });
+
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
