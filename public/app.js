@@ -5418,6 +5418,15 @@ function showQuarantineModal(list) {
   // Si dias_restantes viene como un string, extraemos los días
   const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
   const color = dias < 5 ? "#ef4444" : "#10b981"; // Rojo si le quedan menos de 5 días
+// Agrega este botón a tu barra lateral o menú
+const btnHistorial = document.createElement('button');
+btnHistorial.innerText = "📜 Historial de Recuperación";
+btnHistorial.style.cssText = "margin-top: 10px; background: #4b5563; color: white; padding: 10px; border: none; cursor: pointer; border-radius: 6px; width: 100%;";
+btnHistorial.onclick = abrirModalHistorial;
+
+// Agrégalo al contenedor de tu menú
+document.querySelector('.menu').appendChild(btnHistorial);
+
   
   return `
     <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid ${color}; margin-bottom: 10px;">
@@ -5503,6 +5512,41 @@ async function desecharCuenta(id) {
     console.error(err);
   }
 }
+
+async function abrirModalHistorial() {
+  try {
+    const res = await fetch('/api/admin/recovery-history', {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+    const lista = await res.json();
+
+    const html = `
+      <div id="historialModal" class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:#1e1e2f; padding:25px; border-radius:12px; width:90%; max-width:700px; color:white; max-height: 80vh; overflow-y: auto;">
+          <h2 style="color:#10b981; border-bottom:1px solid #10b981;">📜 Historial de Recuperaciones</h2>
+          <table style="width:100%; border-collapse: collapse; margin-top:15px; text-align:left;">
+            <thead><tr style="color:#60a5fa;"><th>Fecha</th><th>Plataforma</th><th>Correo</th><th>Orden ID</th></tr></thead>
+            <tbody>
+              ${lista.map(item => `
+                <tr style="border-bottom:1px solid #374151;">
+                  <td style="padding:10px;">${new Date(item.recovered_at).toLocaleDateString()}</td>
+                  <td style="padding:10px;">${item.platform}</td>
+                  <td style="padding:10px;">${item.account_email}</td>
+                  <td style="padding:10px;">${item.order_id}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <button onclick="document.getElementById('historialModal').remove()" style="margin-top:20px; width:100%; padding:10px; background:#4b5563; border:none; color:white; border-radius:6px; cursor:pointer;">Cerrar</button>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch (err) {
+    alert("Error al cargar historial");
+  }
+}
+
 
 // Configurar el radar: Se ejecuta 3 segundos después de cargar y luego cada 5 minutos
 setTimeout(checkQuarantineAccounts, 3000);

@@ -4741,15 +4741,18 @@ initDatabase()
 });
 
 app.get("/api/admin/recovery-history", authMiddleware, adminMiddleware, async (req, res) => {
-  const result = await pool.query(`
-    SELECT l.*, pa.platform, pa.account_email 
-    FROM account_recovery_log l
-    JOIN platform_accounts pa ON l.account_id = pa.id
-    ORDER BY l.recovered_at DESC LIMIT 50
-  `);
-  res.json(result.rows);
+  try {
+    const result = await pool.query(`
+      SELECT l.recovered_at, pa.platform, pa.account_email, l.order_id 
+      FROM account_recovery_log l
+      JOIN platform_accounts pa ON l.account_id = pa.id
+      ORDER BY l.recovered_at DESC LIMIT 50
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Error al obtener historial" });
+  }
 });
-
 
 // ==========================================
 // RUTA PARA DESECHAR CUENTAS (Eliminar de cuarentena)
