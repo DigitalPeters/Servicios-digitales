@@ -316,7 +316,14 @@ function renderMyOrders(){
     const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
     return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
   }).join('')||'No hay pedidos con esos filtros.'
+setTimeout(() => {
+    const seccion = document.getElementById('myOrdersList'); // Asegúrate que este sea el ID de tu contenedor
+    if (seccion) {
+      seccion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, 500);
 }
+
 function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
 async function enviarSolicitudSaldo(){
   try{
@@ -5372,7 +5379,7 @@ if (quarantineList && quarantineList.length > 0) {
       position: fixed; 
       bottom: 20px; 
       right: 20px; 
-      z-index: 99999; 
+      z-index: 99; 
       background: #dc2626 !important; 
       color: white !important; 
       padding: 15px 25px; 
@@ -5577,7 +5584,7 @@ function mostrarBotonRegresar() {
     btn.innerHTML = '🏠 Volver al Inicio';
     
     // 2. POSICIÓN CENTRADA ABAJO Y TAMAÑO REDUCIDO
-   btn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 99999; background: #ff6b00; color: white; border: none; padding: 8px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; cursor: pointer; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.5); transition: 0.3s; white-space: nowrap;';
+   btn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 99; background: #ff6b00; color: white; border: none; padding: 8px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; cursor: pointer; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.5); transition: 0.3s; white-space: nowrap;';
 
     btn.onclick = () => {
         if (typeof showSection === 'function') {
