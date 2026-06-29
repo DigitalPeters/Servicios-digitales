@@ -960,7 +960,7 @@ window.loadPlatformInventory = async function(page = 1) {
     // Pedimos al servidor la página específica
     const response = await api(`/api/admin/platform-accounts?page=${currentInventoryPage}&limit=50`);
     
-    // Adaptamos los datos para recibir tu nuevo formato de servidor con paginación
+    // Adaptamos los datos
     const accounts = response.accounts || response;
     const pagination = response.pagination || { totalPages: 1, currentPage: 1 };
 
@@ -991,23 +991,20 @@ window.loadPlatformInventory = async function(page = 1) {
         ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>` 
         : 'Sin cuentas en esta página.';
 
-      // Dibujamos los controles de paginación si hay más de 1 página
+      // Dibujamos UNA SOLA vez los controles de paginación
       if (pagination.totalPages > 1 || pagination.currentPage > 1) {
         html += `
-          <div style="margin-top: 20px;">
-    <button class="outline-btn" onclick="window.loadPlatformInventory(${pagination.currentPage - 1})" ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
-    
-    <span style="margin: 0 15px;">Página ${pagination.currentPage} de ${pagination.totalPages}</span>
-    
-    <button class="outline-btn" onclick="window.loadPlatformInventory(${pagination.currentPage + 1})" ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
-  </div>
-                    
-            <span style="font-size: 14px; font-weight: bold; color: #555;">
+          <div style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding: 15px; border-top: 1px solid #eee;">
+            <button class="outline-btn" style="padding: 5px 15px;" 
+                    onclick="window.loadPlatformInventory(${pagination.currentPage - 1})" 
+                    ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
+            
+            <span style="font-size: 14px; font-weight: bold;">
               Página ${pagination.currentPage} de ${pagination.totalPages}
             </span>
             
-            <button class="outline-btn" style="width: auto; padding: 5px 15px; cursor: pointer;" 
-                    onclick="loadPlatformInventory(${pagination.currentPage + 1})" 
+            <button class="outline-btn" style="padding: 5px 15px;" 
+                    onclick="window.loadPlatformInventory(${pagination.currentPage + 1})" 
                     ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
           </div>
         `;
@@ -1018,6 +1015,7 @@ window.loadPlatformInventory = async function(page = 1) {
     showMessage(e.message || 'Error cargando inventario', 'error');
   }
 }
+
 
 function renderPlatformAccountRow(a){
   const statuses=['available','delivered','failed','sold_outside','reserved'];
