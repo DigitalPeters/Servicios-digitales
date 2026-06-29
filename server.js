@@ -4669,12 +4669,11 @@ app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async
   try {
     const result = await pool.query(`
       SELECT 
-        id, platform, account_email, account_password, profile_name, expires_at,
-        -- Calculamos cuántos días le quedan a la cuenta madre (asumiendo 30 días totales de vida)
-        -- Ajusta '30' por el número real de días de vida de tus cuentas
-        (official_purchase_date + INTERVAL '30 days' - NOW()) AS dias_restantes
-      FROM platform_accounts
-      WHERE status = 'recovery_pending'
+        id, platform, account_email, account_password, profile_name, profile_pin,
+  -- Calculamos días restantes dinámicamente según la fecha de compra original
+  (official_purchase_date + INTERVAL '35 days' - CURRENT_TIMESTAMP) as dias_restantes
+FROM platform_accounts
+WHERE status = 'recovery_pending'
       ORDER BY expires_at DESC
     `);
     res.json(result.rows);
@@ -4739,6 +4738,27 @@ initDatabase()
   console.error("ERROR COMPLETO");
   console.error(err);
   process.exit(1);
+});
+
+
+// ==========================================
+// RUTA PARA DESECHAR CUENTAS (Eliminar de cuarentena)
+// ==========================================
+app.post("/api/admin/accounts/:id/discard", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const accountId = req.params.id;
+    
+    // Cambiamos el estado a 'discarded' para que ya no aparezca en el sistema de cuarentena
+    await pool.query(
+      "UPDATE platform_accounts SET status = 'discarded' WHERE id = $1", 
+      [accountId]
+    );
+    
+    res.json({ message: "Cuenta desechada correctamente." });
+  } catch (err) {
+    console.error("Error al desechar cuenta:", err);
+    res.status(500).json({ error: "Error al desechar la cuenta." });
+  }
 });
 
 

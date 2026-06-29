@@ -5412,12 +5412,24 @@ function showQuarantineModal(list) {
   
   return `
     <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid ${color}; margin-bottom: 10px;">
+<p style="margin:5px 0;">👤 Perfil a cerrar: <b>${c.profile_name || 'Principal'}</b></p>
+<p style="margin:5px 0;">🔢 PIN actual: <b>${c.profile_pin || 'No tiene'}</b></p>
       <p style="margin:0; font-size:16px;"><b>${c.platform}</b></p>
       <p style="margin:5px 0; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
       <p style="margin:5px 0; font-size:14px; color: ${color};">
         <b>⏳ Vida restante cuenta madre: ${dias > 0 ? dias + ' días' : '¡Vencida!'}</b>
       </p>
+
+<div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+      <input id="new-pass-${c.id}" placeholder="Nueva contraseña" style="padding:10px; border-radius:6px; border:none; background:#1e1e2f; color:white;">
+      <input id="new-pin-${c.id}" placeholder="Nuevo PIN" style="padding:10px; border-radius:6px; border:none; background:#1e1e2f; color:white;">
+      
+      <div style="display:flex; gap:10px;">
+        <button onclick="liberarCuentaDeCuarentena(${c.id})" style="flex:1; background:#10b981; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar</button>
+        <button onclick="desecharCuenta(${c.id})" style="flex:1; background:#4b5563; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Desechar</button>
       </div>
+    </div>
+  </div>
   `;
 }).join('')}
       </div>
@@ -5451,6 +5463,35 @@ async function liberarCuentaDeCuarentena(id) {
     if(typeof loadPlatformInventory === 'function') loadPlatformInventory(); // Refrescar inventario si está abierto
   } catch (err) {
     alert("❌ Error: " + err.message);
+  }
+}
+
+async function desecharCuenta(id) {
+  if (!confirm("¿Deseas enviar esta cuenta a desecho permanente?")) return;
+
+  try {
+    const res = await fetch(`/api/admin/accounts/${id}/discard`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': 'Bearer ' + localStorage.getItem('token'),
+        'Content-Type': 'application/json' 
+      }
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Error al desechar");
+
+    alert("✅ " + data.message);
+    
+    // Recargar la lista para que la cuenta desaparezca del modal
+    checkQuarantineAccounts(); 
+    
+    // Refrescar inventario si está abierto
+    if(typeof loadPlatformInventory === 'function') loadPlatformInventory();
+    
+  } catch (err) {
+    alert("❌ Error: " + err.message);
+    console.error(err);
   }
 }
 
