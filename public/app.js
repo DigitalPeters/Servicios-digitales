@@ -613,7 +613,13 @@ async function loadSalesReport(){
   }
 }
 
-
+// Después de que el código termine de pintar las tablas (innerHTML = ...), agrega esto:
+setTimeout(() => {
+  const target = document.getElementById('salesDetailsList'); // o el ID de tu sección de pedidos
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}, 300); // Espera 300ms a que las tablas terminen de renderizarse antes de saltar
 
 // ===============================
 // FIX REPORTE VENTAS HOY ADMIN
