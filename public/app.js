@@ -944,10 +944,9 @@ function populatePlatformProductSelect(){
 // Variable global para recordar en qué página estamos y no perdernos al guardar
 let currentInventoryPage = 1;
 
-window.loadPlatformInventory = async function(page = 1) {
+window.loadPlatformInventory = async function() {
   if(currentUser?.role !== 'admin') return;
   try {
-    currentInventoryPage = page;
     if(!allProducts.length) allProducts = await api('/api/products');
     populatePlatformProductSelect();
     
@@ -955,16 +954,12 @@ window.loadPlatformInventory = async function(page = 1) {
     const summaryBox = document.getElementById('platformStockSummary');
     const listBox = document.getElementById('platformAccountsList');
 
-    if(listBox) listBox.innerHTML = '<p class="small-text">Cargando página...</p>';
+    if(listBox) listBox.innerHTML = '<p class="small-text">Cargando todo el inventario...</p>';
 
-    // Pedimos al servidor la página específica
-    const response = await api(`/api/admin/platform-accounts?page=${currentInventoryPage}&limit=50`);
-    
-    // Adaptamos los datos
-    const accounts = response.accounts || response;
-    const pagination = response.pagination || { totalPages: 1, currentPage: 1 };
+    // Pedimos todos los datos al servidor (sin parámetros de página)
+    const accounts = await api('/api/admin/platform-accounts');
 
-    // --- 1. CONTEO Y RESUMEN ---
+    // --- CONTEO Y RESUMEN ---
     if(countEl) countEl.textContent = accounts.filter(a => a.status === 'available').length;
 
     const summary = {};
@@ -982,49 +977,19 @@ window.loadPlatformInventory = async function(page = 1) {
       const rows = Object.entries(summary).sort((a,b) => a[0].localeCompare(b[0]));
       summaryBox.innerHTML = rows.length 
         ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Vendidas fuera</th><th>Fallidas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v]) => `<tr><td><b>${safeText(name)}</b>${v.available<=2?`<br><span class="error">Stock bajo</span>`:''}</td><td class="${v.available<=0?'error':(v.available<=2?'status':'success')}">${v.available}</td><td>${v.delivered}</td><td>${v.sold_outside}</td><td>${v.failed}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>` 
-        : 'Sin cuentas en esta página.';
+        : 'Sin cuentas.';
     }
 
-    // --- 2. LISTA Y BOTONES DE PAGINACIÓN ---
+    // --- LISTA COMPLETA ---
     if(listBox) {
-      let html = accounts.length 
+      listBox.innerHTML = accounts.length 
         ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>` 
-        : 'Sin cuentas en esta página.';
-
-      // Dibujamos UNA SOLA vez los controles de paginación
-      // --- 2. LISTA Y BOTONES DE PAGINACIÓN ---
-      if (pagination.totalPages > 1 || pagination.currentPage > 1) {
-        html += `
-          <div id="pagination-container" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding: 15px; border-top: 1px solid #eee;">
-            <button id="btn-prev-page" class="outline-btn" style="padding: 5px 15px;" ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
-            
-            <span style="font-size: 14px; font-weight: bold;">
-              Página ${pagination.currentPage} de ${pagination.totalPages}
-            </span>
-            
-            <button id="btn-next-page" class="outline-btn" style="padding: 5px 15px;" ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
-          </div>
-        `;
-      }
-      
-      listBox.innerHTML = html;
-
-      // Agregamos los eventos de forma segura después de inyectar el HTML
-      const prevBtn = document.getElementById('btn-prev-page');
-      const nextBtn = document.getElementById('btn-next-page');
-
-      if (prevBtn) {
-        prevBtn.addEventListener('click', () => window.loadPlatformInventory(pagination.currentPage - 1));
-      }
-      if (nextBtn) {
-        nextBtn.addEventListener('click', () => window.loadPlatformInventory(pagination.currentPage + 1));
-      }
+        : 'Sin cuentas.';
     }
   } catch(e) {
     showMessage(e.message || 'Error cargando inventario', 'error');
   }
 }
-
 
 function renderPlatformAccountRow(a){
   const statuses=['available','delivered','failed','sold_outside','reserved'];
