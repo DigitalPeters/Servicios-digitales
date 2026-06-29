@@ -1761,12 +1761,19 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
     if (accountsResult.rows.length > 0) {
       const accountId = accountsResult.rows[0].id;
       
+      / Buscamos pedidos que tengan el ID asignado en la columna de relación
+      // O que hayan sido actualizados/reemplazados en el historial de la cuenta
       const ordersResult = await pool.query(
         `SELECT o.id, u.name as vendedor_name, p.name as product_name, o.status, o.created_at 
          FROM orders o
          LEFT JOIN users u ON o.user_id = u.id
          LEFT JOIN products p ON o.product_id = p.id
-         WHERE o.assigned_platform_account_id = $1
+         WHERE o.assigned_platform_account_id = $1 
+         OR o.id IN (
+            SELECT assigned_order_id 
+            FROM platform_accounts 
+            WHERE id = $1 AND assigned_order_id IS NOT NULL
+         )
          ORDER BY o.created_at DESC`,
         [accountId]
       );
