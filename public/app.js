@@ -944,7 +944,7 @@ function populatePlatformProductSelect(){
 // Variable global para recordar en qué página estamos y no perdernos al guardar
 let currentInventoryPage = 1;
 
-async function loadPlatformInventory(page = 1) {
+window.loadPlatformInventory = async function(page = 1) {
   if(currentUser?.role !== 'admin') return;
   try {
     currentInventoryPage = page;
@@ -994,10 +994,13 @@ async function loadPlatformInventory(page = 1) {
       // Dibujamos los controles de paginación si hay más de 1 página
       if (pagination.totalPages > 1 || pagination.currentPage > 1) {
         html += `
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 10px; border-top: 1px solid #ccc;">
-            <button class="outline-btn" style="width: auto; padding: 5px 15px; cursor: pointer;" 
-                    onclick="loadPlatformInventory(${pagination.currentPage - 1})" 
-                    ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
+          <div style="margin-top: 20px;">
+    <button class="outline-btn" onclick="window.loadPlatformInventory(${pagination.currentPage - 1})" ${pagination.currentPage <= 1 ? 'disabled' : ''}>⬅️ Anterior</button>
+    
+    <span style="margin: 0 15px;">Página ${pagination.currentPage} de ${pagination.totalPages}</span>
+    
+    <button class="outline-btn" onclick="window.loadPlatformInventory(${pagination.currentPage + 1})" ${pagination.currentPage >= pagination.totalPages ? 'disabled' : ''}>Siguiente ➡️</button>
+  </div>
                     
             <span style="font-size: 14px; font-weight: bold; color: #555;">
               Página ${pagination.currentPage} de ${pagination.totalPages}
