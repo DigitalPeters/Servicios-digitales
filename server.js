@@ -1748,7 +1748,7 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
 
     const search = `%${q}%`;
 
-    // 1. Buscamos la Cuenta Madre primero
+    // 1. Buscamos la Cuenta Madre
     const accountsResult = await pool.query(
       `SELECT id, platform, account_email, status, official_purchase_date
        FROM platform_accounts 
@@ -1756,25 +1756,23 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
       [search]
     );
 
-    // 2. Lógica para buscar el pedido usando el ID de la cuenta madre
+    // 2. BUSQUEDA CORREGIDA: Buscamos en la columna real 'assigned_platform_account_id'
     let orders = [];
     if (accountsResult.rows.length > 0) {
       const accountId = accountsResult.rows[0].id;
       
-      // Buscamos pedidos que contengan este ID de cuenta en su JSON de datos
       const ordersResult = await pool.query(
         `SELECT o.id, u.name as vendedor_name, p.name as product_name, o.status, o.created_at 
          FROM orders o
          LEFT JOIN users u ON o.user_id = u.id
          LEFT JOIN products p ON o.product_id = p.id
-         WHERE o.order_data::text LIKE $1
+         WHERE o.assigned_platform_account_id = $1
          ORDER BY o.created_at DESC`,
-        [`%"account_id":${accountId}%`] 
+        [accountId]
       );
       orders = ordersResult.rows;
     }
 
-    // 3. Enviamos ambos resultados
     res.json({
       accounts: accountsResult.rows,
       orders: orders
