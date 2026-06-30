@@ -5529,10 +5529,16 @@ async function desecharCuenta(id) {
 async function abrirModalHistorial() {
   try {
     const res = await fetch('/api/admin/recovery-history', {
-      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      method: 'GET', // Asegúrate de especificar el método
+      headers: { 
+        'Authorization': 'Bearer ' + localStorage.getItem('token'), // <--- ESTO ES LO QUE FALTA
+        'Content-Type': 'application/json'
+      }
     });
+    
+    if (res.status === 401) throw new Error("Sesión expirada o no autorizado.");
+    
     const lista = await res.json();
-
     const html = `
       <div id="historialModal" class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; display:flex; justify-content:center; align-items:center;">
         <div style="background:#1e1e2f; padding:25px; border-radius:12px; width:90%; max-width:700px; color:white; max-height: 80vh; overflow-y: auto;">
