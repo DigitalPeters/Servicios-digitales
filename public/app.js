@@ -100,32 +100,41 @@ async function register(){try{const data=await api('/api/register',{method:'POST
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
 
-async function loadApp(){
-  if(!token) return;
+async function loadApp() {
+  if (!token) return;
   try {
     currentUser = await api('/api/me');
-    authSection.classList.add('hidden');
+    authSection.classList.remove('hidden'); // Ajusta esto según tu lógica
     appSection.classList.remove('hidden');
-    
-    // ... (todo tu código actual de asignación de texto) ...
-    userName.textContent = currentUser.name;
-    // ... (etc) ...
 
-    // --- AQUÍ INSERTAMOS LA CREACIÓN DEL BOTÓN UNA SOLA VEZ ---
-    const btnHistorial = document.createElement('button');
-btnHistorial.id = 'btnHistorialId';
-btnHistorial.innerText = "📜 Historial de Recuperación";
-btnHistorial.style.cssText = "position: fixed; bottom: 20px; right: 20px; background: #4b5563; color: white; padding: 15px; border: none; cursor: pointer; border-radius: 50px; z-index: 999999;";
-btnHistorial.onclick = window.abrirModalHistorial;
-document.body.appendChild(btnHistorial);
+    userName.textContent = currentUser.name;
+    userEmail.textContent = currentUser.email;
+    userRole.textContent = currentUser.role;
+    userBalance.textContent = formatMoney(currentUser.balance);
+    sideEmail.textContent = currentUser.email;
+    topUserName.textContent = currentUser.name;
+    statBalance.textContent = formatMoney(currentUser.balance);
+    statUsers.textContent = '0';
+    
+    // Creación segura del botón (solo si no existe ya)
+    if (!document.getElementById('btnHistorialId')) {
+      const btnHistorial = document.createElement('button');
+      btnHistorial.id = 'btnHistorialId';
+      btnHistorial.innerText = "📜 Historial";
+      btnHistorial.style.cssText = "position: fixed; bottom: 20px; right: 20px; background: #4b5563; color: white; padding: 15px; border: none; cursor: pointer; border-radius: 50px; z-index: 999999;";
+      btnHistorial.onclick = function() {
+        if (typeof window.abrirModalHistorial === 'function') {
+          window.abrirModalHistorial();
+        }
+      };
+      document.body.appendChild(btnHistorial);
     }
-    // ---------------------------------------------------------
 
     await loadProducts();
     await loadMyOrders();
     await loadBalanceRequests();
 
-    if(currentUser.role === 'admin'){
+    if (currentUser.role === 'admin') {
       setTodaySalesDate();
       await loadUsers();
       await loadAdminProducts();
@@ -136,11 +145,13 @@ document.body.appendChild(btnHistorial);
       await loadAccountReports();
     }
     showSection('dashboard');
-  } catch(e) {
-    console.error(e);
+    
+  } catch (e) {
+    console.error("Error en loadApp:", e);
     logout();
   }
 }
+
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 
 async function loadExpiringCount(){
