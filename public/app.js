@@ -4,20 +4,32 @@ function showAuth(type){document.getElementById('loginForm').classList.toggle('h
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
 
 function showSection(name) {
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
 
-  const sec=document.getElementById('section-'+name);
-  if(sec) sec.classList.add('active');
+  const sec = document.getElementById('section-' + name);
+  if (sec) sec.classList.add('active');
 
   document.querySelectorAll('.menu-btn')
-    .forEach(b=>b.classList.toggle('active',b.dataset.section===name));
+    .forEach(b => b.classList.toggle('active', b.dataset.section === name));
 
   document.getElementById('sidebar')?.classList.remove('show');
 
-  if(name==='shop') loadProducts();
-  if(name==='orders') loadMyOrders();
+  if (name === 'shop') loadProducts();
+  if (name === 'orders') loadMyOrders();
 
-if(name === 'dashboard' && currentUser?.role === 'admin'){
+  if (name === 'admin' && currentUser?.role === 'admin') {
+    loadUsers();
+    loadAdminProducts();
+    loadAdminOrders();
+    loadSalesReport();
+    loadPlatformInventory();
+    loadAccountReports();
+  }
+
+  if (name === 'alerts') loadExpiringAlerts();
+
+  // --- SECCIÓN DASHBOARD Y BOTÓN HISTORIAL ---
+  if (name === 'dashboard' && currentUser?.role === 'admin') {
     loadExpiringCount();
 
     const dash = document.getElementById('section-dashboard'); 
@@ -28,20 +40,18 @@ if(name === 'dashboard' && currentUser?.role === 'admin'){
       btn.style.cssText = "margin: 20px 0; padding: 15px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold;";
       
       btn.onclick = window.abrirModalHistorial;
-      
       dash.prepend(btn);
     }
-  } // <--- Cierra el IF del dashboard
-}
-
-  // CONTROL DEL BOTÓN REGRESAR
-  if(name !== 'dashboard'){
-    if(typeof mostrarBotonRegresar === 'function') mostrarBotonRegresar();
-    if(typeof activarHistorialCelular === 'function') activarHistorialCelular();
-  }else{
-    if(typeof ocultarBotonRegresar === 'function') ocultarBotonRegresar();
   }
-}
+
+  // --- CONTROL DEL BOTÓN REGRESAR ---
+  if (name !== 'dashboard') {
+    if (typeof mostrarBotonRegresar === 'function') mostrarBotonRegresar();
+    if (typeof activarHistorialCelular === 'function') activarHistorialCelular();
+  } else {
+    if (typeof ocultarBotonRegresar === 'function') ocultarBotonRegresar();
+  }
+} // <--- Esta es la ÚNICA llave que cierra toda la función
 
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
