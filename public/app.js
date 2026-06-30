@@ -100,19 +100,49 @@ async function register(){try{const data=await api('/api/register',{method:'POST
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
 
-async function loadApp(){if(!token)return;try{currentUser=await api('/api/me');authSection.classList.add('hidden');appSection.classList.remove('hidden');userName.textContent=currentUser.name;userEmail.textContent=currentUser.email;userRole.textContent=currentUser.role;userBalance.textContent=formatMoney(currentUser.balance);sideEmail.textContent=currentUser.email;topUserName.textContent=currentUser.name;statBalance.textContent=formatMoney(currentUser.balance);statUsers.textContent='0';document.getElementById('adminMenuBtn').classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('adminSalesMenuBtn')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashSalesTodayCard')?.classList.toggle('hidden',currentUser.role!=='admin');document.getElementById('dashboardChartsPanel')?.classList.toggle('hidden',currentUser.role!=='admin');
-await loadProducts();
-await loadMyOrders();
-await loadBalanceRequests();
-if(currentUser.role==='admin'){setTodaySalesDate();
-await loadUsers();
-await loadAdminProducts();
-await loadAdminOrders();
-await loadSalesReport();
-await loadPlatformInventory();
-await loadExpiringCount();
-await loadAccountReports()}showSection('dashboard')}catch(e){console.error(e);logout()}}
+async function loadApp(){
+  if(!token) return;
+  try {
+    currentUser = await api('/api/me');
+    authSection.classList.add('hidden');
+    appSection.classList.remove('hidden');
+    
+    // ... (todo tu código actual de asignación de texto) ...
+    userName.textContent = currentUser.name;
+    // ... (etc) ...
 
+    // --- AQUÍ INSERTAMOS LA CREACIÓN DEL BOTÓN UNA SOLA VEZ ---
+    const menu = document.querySelector('.menu'); // Asegúrate que este sea el selector de tu menú
+    if (menu && !document.getElementById('btnHistorialId')) {
+      const btnHistorial = document.createElement('button');
+      btnHistorial.id = 'btnHistorialId';
+      btnHistorial.innerText = "📜 Historial de Recuperación";
+      btnHistorial.style.cssText = "margin-top: 10px; background: #4b5563; color: white; padding: 10px; border: none; cursor: pointer; border-radius: 6px; width: 100%;";
+      btnHistorial.onclick = window.abrirModalHistorial;
+      menu.appendChild(btnHistorial);
+    }
+    // ---------------------------------------------------------
+
+    await loadProducts();
+    await loadMyOrders();
+    await loadBalanceRequests();
+
+    if(currentUser.role === 'admin'){
+      setTodaySalesDate();
+      await loadUsers();
+      await loadAdminProducts();
+      await loadAdminOrders();
+      await loadSalesReport();
+      await loadPlatformInventory();
+      await loadExpiringCount();
+      await loadAccountReports();
+    }
+    showSection('dashboard');
+  } catch(e) {
+    console.error(e);
+    logout();
+  }
+}
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 
 async function loadExpiringCount(){
@@ -5431,14 +5461,6 @@ function showQuarantineModal(list) {
   // Si dias_restantes viene como un string, extraemos los días
   const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
   const color = dias < 5 ? "#ef4444" : "#10b981"; // Rojo si le quedan menos de 5 días
-// Agrega este botón a tu barra lateral o menú
-const btnHistorial = document.createElement('button');
-btnHistorial.innerText = "📜 Historial de Recuperación";
-btnHistorial.style.cssText = "margin-top: 10px; background: #4b5563; color: white; padding: 10px; border: none; cursor: pointer; border-radius: 6px; width: 100%;";
-btnHistorial.onclick = abrirModalHistorial;
-
-// Agrégalo al contenedor de tu menú
-document.querySelector('.menu').appendChild(btnHistorial);
 
   
   return `
@@ -5568,6 +5590,9 @@ async function abrirModalHistorial() {
     alert("Hubo un error al cargar el historial.");
   }
 }
+
+// Haz la función global explícitamente
+window.abrirModalHistorial = abrirModalHistorial;
 
 // Configurar el radar: Se ejecuta 3 segundos después de cargar y luego cada 5 minutos
 setTimeout(checkQuarantineAccounts, 3000);
