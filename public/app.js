@@ -112,14 +112,12 @@ async function loadApp(){
     // ... (etc) ...
 
     // --- AQUÍ INSERTAMOS LA CREACIÓN DEL BOTÓN UNA SOLA VEZ ---
-    const menu = document.querySelector('.menu'); // Asegúrate que este sea el selector de tu menú
-    if (menu && !document.getElementById('btnHistorialId')) {
-      const btnHistorial = document.createElement('button');
-      btnHistorial.id = 'btnHistorialId';
-      btnHistorial.innerText = "📜 Historial de Recuperación";
-      btnHistorial.style.cssText = "margin-top: 10px; background: #4b5563; color: white; padding: 10px; border: none; cursor: pointer; border-radius: 6px; width: 100%;";
-      btnHistorial.onclick = window.abrirModalHistorial;
-      menu.appendChild(btnHistorial);
+    const btnHistorial = document.createElement('button');
+btnHistorial.id = 'btnHistorialId';
+btnHistorial.innerText = "📜 Historial de Recuperación";
+btnHistorial.style.cssText = "position: fixed; bottom: 20px; right: 20px; background: #4b5563; color: white; padding: 15px; border: none; cursor: pointer; border-radius: 50px; z-index: 999999;";
+btnHistorial.onclick = window.abrirModalHistorial;
+document.body.appendChild(btnHistorial);
     }
     // ---------------------------------------------------------
 
