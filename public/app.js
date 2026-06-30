@@ -5529,29 +5529,27 @@ async function desecharCuenta(id) {
 async function abrirModalHistorial() {
   try {
     const res = await fetch('/api/admin/recovery-history', {
-      method: 'GET', // Asegúrate de especificar el método
-      headers: { 
-        'Authorization': 'Bearer ' + localStorage.getItem('token'), // <--- ESTO ES LO QUE FALTA
-        'Content-Type': 'application/json'
-      }
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     });
-    
-    if (res.status === 401) throw new Error("Sesión expirada o no autorizado.");
-    
     const lista = await res.json();
-    const html = `
+    
+    console.log("Historial recibido:", lista);
+
+    // Creamos el HTML dinámicamente
+    const modalHTML = `
       <div id="historialModal" class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; display:flex; justify-content:center; align-items:center;">
         <div style="background:#1e1e2f; padding:25px; border-radius:12px; width:90%; max-width:700px; color:white; max-height: 80vh; overflow-y: auto;">
           <h2 style="color:#10b981; border-bottom:1px solid #10b981;">📜 Historial de Recuperaciones</h2>
           <table style="width:100%; border-collapse: collapse; margin-top:15px; text-align:left;">
-            <thead><tr style="color:#60a5fa;"><th>Fecha</th><th>Plataforma</th><th>Correo</th><th>Orden ID</th></tr></thead>
+            <thead>
+              <tr style="color:#60a5fa;"><th>Fecha</th><th>Plataforma</th><th>Correo</th></tr>
+            </thead>
             <tbody>
               ${lista.map(item => `
                 <tr style="border-bottom:1px solid #374151;">
                   <td style="padding:10px;">${new Date(item.recovered_at).toLocaleDateString()}</td>
                   <td style="padding:10px;">${item.platform}</td>
                   <td style="padding:10px;">${item.account_email}</td>
-                  <td style="padding:10px;">${item.order_id}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -5560,12 +5558,16 @@ async function abrirModalHistorial() {
         </div>
       </div>
     `;
-    document.body.insertAdjacentHTML('beforeend', html);
+
+    // Lo inyectamos en el body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    console.log("Modal inyectado en el DOM");
+
   } catch (err) {
-    alert("Error al cargar historial");
+    console.error("Error al abrir historial:", err);
+    alert("Hubo un error al cargar el historial.");
   }
 }
-
 
 // Configurar el radar: Se ejecuta 3 segundos después de cargar y luego cada 5 minutos
 setTimeout(checkQuarantineAccounts, 3000);
