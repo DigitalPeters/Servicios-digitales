@@ -17,18 +17,21 @@ function showSection(name) {
   if(name==='shop') loadProducts();
   if(name==='orders') loadMyOrders();
 
-  if(name==='admin' && currentUser?.role==='admin'){
-    loadUsers();
-    loadAdminProducts();
-    loadAdminOrders();
-    loadSalesReport();
-    loadPlatformInventory();
-    loadAccountReports();
-  }
-
-  if(name==='alerts') loadExpiringAlerts();
 if(name === 'dashboard' && currentUser?.role === 'admin'){
-   loadExpiringCount();
+    loadExpiringCount();
+
+    const dash = document.getElementById('section-dashboard'); 
+    if (dash && !document.getElementById('btnHistorialId')) {
+      const btn = document.createElement('button');
+      btn.id = 'btnHistorialId';
+      btn.innerText = "📜 Ver Historial de Recuperaciones";
+      btn.style.cssText = "margin: 20px 0; padding: 15px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold;";
+      
+      btn.onclick = window.abrirModalHistorial;
+      
+      dash.prepend(btn);
+    }
+  } // <--- Cierra el IF del dashboard
 }
 
   // CONTROL DEL BOTÓN REGRESAR
