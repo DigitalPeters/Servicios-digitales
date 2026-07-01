@@ -640,6 +640,8 @@ function setTodaySalesDate(){
     input.value=`${yyyy}-${mm}-${dd}`;
   }
 }
+
+/*
 async function loadSalesReport(){
   if(currentUser?.role!=='admin')return;
   try{
@@ -687,6 +689,7 @@ setTimeout(() => {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }, 300); // Espera 300ms a que las tablas terminen de renderizarse antes de saltar
+*/
 
 // ===============================
 // FIX REPORTE VENTAS HOY ADMIN
@@ -1187,7 +1190,7 @@ function openAccountReportsFromDashboard(){
     showSection('reports');
   }
 }
-
+/*
 function calculateReportRefundInfo(report){
   const amount=Number(report.order_amount||0);
   if(!report.order_created_at||!amount)return {daysUsed:0,daysRemaining:0,refund:0};
@@ -1199,6 +1202,7 @@ function calculateReportRefundInfo(report){
   const refund=Math.round(((amount/28)*daysRemaining)*100)/100;
   return {daysUsed,daysRemaining,refund};
 }
+*/
 
 async function loadAccountReports(){
 alert('LOAD ACCOUNT REPORTS NUEVO');
@@ -1265,7 +1269,7 @@ async function updateAccountReportStatus(reportId){
   }catch(e){showMessage(e.message,'error')}
 }
 
-
+/*
 async function replaceReportedAccount(reportId){
   try{
     const useManual = confirm(
@@ -1315,7 +1319,7 @@ async function replaceReportedAccount(reportId){
     showMessage(e.message || 'Error reemplazando cuenta','error');
   }
 }
-
+*/
 
 async function refundReportedAccount(reportId, fechaCompra) {
   try {
@@ -2455,7 +2459,7 @@ function renderAdminOrderCompactFinal(o){
     </div>
   </div>`;
 }
-
+/*
 async function loadAdminOrders(){
   try{
     adminOrders=await api('/api/admin/orders');
@@ -2464,13 +2468,14 @@ async function loadAdminOrders(){
     const stat=document.getElementById('statOrders');
     if(stat)stat.textContent=currentUser?.role==='admin'?adminOrders.length:(myOrders||[]).length;
     const list=document.getElementById('adminOrdersList');
-    const oldNotice=document.getElementById('manualPendingNotice');
+    const oldNfunction renderOrders(orders)otice=document.getElementById('manualPendingNotice');
     if(oldNotice)oldNotice.remove();
     if(list)list.innerHTML=adminOrders.length?adminOrders.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos.';
     if(typeof updateManualPendingCount==='function') updateManualPendingCount();
   }catch(e){showMessage(e.message||'Error cargando pedidos','error')}
 }
-
+*/
+/*
 function renderAdminOrdersManualPendingOnly(){
   const box=document.getElementById('adminOrdersList');
   if(!box || !Array.isArray(adminOrders)) return;
@@ -2484,7 +2489,8 @@ function renderAdminOrdersManualPendingOnly(){
   box.parentNode.insertBefore(notice,box);
   box.innerHTML=rows.length?rows.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos manuales pendientes.';
 }
-
+*/
+/*
 function renderAdminReportCompactFinal(r){
   const info=calculateReportRefundInfo(r);
   const canAct=String(r.status||'').toLowerCase()==='pendiente';
@@ -2531,7 +2537,7 @@ function renderAdminReportCompactFinal(r){
     </div>
   </div>`;
 }
-
+*/
    
 
 async function loadAccountReports() {
