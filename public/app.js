@@ -110,10 +110,9 @@ function getStatusText(s){return({accion_en_espera:'Acción en espera',en_proces
 function formatMoney(v){return Number(v||0).toFixed(2)}
 async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.Authorization='Bearer '+token;if(!(opt.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');return d}
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
-/* Movida a auth.js
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-*/
+
 async function loadApp() {
   if (!token) return;
   try {
@@ -166,9 +165,7 @@ async function loadApp() {
   }
 }
 
-/*
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
-*/
 
 async function loadExpiringCount(){
 console.log('LOAD EXPIRING COUNT EJECUTADO');
@@ -188,12 +185,8 @@ console.log('LOAD EXPIRING COUNT EJECUTADO');
 
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
-
-/*
 function renderProducts(products){let html='';const cats={};products.forEach(p=>{const c=p.category||'Otros';(cats[c]=cats[c]||[]).push(p)});Object.keys(cats).forEach(c=>{html+=`<div class="category-title">${safeText(c)}</div>`+cats[c].map(renderProductRow).join('')});productsList.innerHTML=html||'No hay productos.'}
-*/
 
-/*
 function renderProductRow(product) {
     const stockEnabled = Number(product.stock_enabled || 0) === 1;
     const stock = Number(product.stock || 0);
@@ -221,7 +214,7 @@ function renderProductRow(product) {
         </div>
     </div>`;
 }
-*/
+
 
 function toggleProduct(id){const row=document.querySelector(`.product-row[data-product-id="${id}"]`);if(!row)return;const open=row.classList.contains('open');document.querySelectorAll('.product-row').forEach(r=>r.classList.remove('open'));if(!open)row.classList.add('open')}
 
@@ -259,7 +252,6 @@ function convertFileToBase64(file) {
 }
 
 // Tu función de compra actualizada
-/*
 async function buyProduct(productId) {
   try {
     const product = allProducts.find(p => Number(p.id) === Number(productId)) || 
@@ -308,7 +300,7 @@ async function buyProduct(productId) {
     showMessage(e.message, 'error');
   }
 }
-*/
+
 
 async function loadMyOrders(){
   myOrders=await api('/api/my-orders');
@@ -640,8 +632,6 @@ function setTodaySalesDate(){
     input.value=`${yyyy}-${mm}-${dd}`;
   }
 }
-
-/*
 async function loadSalesReport(){
   if(currentUser?.role!=='admin')return;
   try{
@@ -689,7 +679,6 @@ setTimeout(() => {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }, 300); // Espera 300ms a que las tablas terminen de renderizarse antes de saltar
-*/
 
 // ===============================
 // FIX REPORTE VENTAS HOY ADMIN
@@ -1190,7 +1179,7 @@ function openAccountReportsFromDashboard(){
     showSection('reports');
   }
 }
-/*
+
 function calculateReportRefundInfo(report){
   const amount=Number(report.order_amount||0);
   if(!report.order_created_at||!amount)return {daysUsed:0,daysRemaining:0,refund:0};
@@ -1202,7 +1191,6 @@ function calculateReportRefundInfo(report){
   const refund=Math.round(((amount/28)*daysRemaining)*100)/100;
   return {daysUsed,daysRemaining,refund};
 }
-*/
 
 async function loadAccountReports(){
 alert('LOAD ACCOUNT REPORTS NUEVO');
@@ -1259,7 +1247,6 @@ alert('LOAD ACCOUNT REPORTS NUEVO');
 }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
 }
 
-/*
 async function updateAccountReportStatus(reportId){
   try{
     const status=document.getElementById(`reportStatus-${reportId}`)?.value||'pendiente';
@@ -1270,7 +1257,7 @@ async function updateAccountReportStatus(reportId){
   }catch(e){showMessage(e.message,'error')}
 }
 
-/*
+
 async function replaceReportedAccount(reportId){
   try{
     const useManual = confirm(
@@ -1320,8 +1307,8 @@ async function replaceReportedAccount(reportId){
     showMessage(e.message || 'Error reemplazando cuenta','error');
   }
 }
-*/
-/*
+
+
 async function refundReportedAccount(reportId, fechaCompra) {
   try {
     let amountToSend = null;
@@ -1395,8 +1382,6 @@ async function refundReportedAccount(reportId, fechaCompra) {
     alert("Ocurrió un error al intentar reembolsar: " + e.message);
   }
 }
-*/
-
 // ===============================
 // GRÁFICAS DEL DASHBOARD ADMIN
 // Usa los datos del reporte de ventas existente. No requiere librerías externas.
@@ -2429,7 +2414,6 @@ async function deleteAnnouncementFinal(id){
   }catch(e){showMessage(e.message||'Error eliminando comunicado','error')}
 }
 
-/*
 function toggleCompactItemFinal(id){
   document.getElementById(id)?.classList.toggle('open');
 }
@@ -2463,7 +2447,7 @@ function renderAdminOrderCompactFinal(o){
     </div>
   </div>`;
 }
-/*
+
 async function loadAdminOrders(){
   try{
     adminOrders=await api('/api/admin/orders');
@@ -2472,14 +2456,13 @@ async function loadAdminOrders(){
     const stat=document.getElementById('statOrders');
     if(stat)stat.textContent=currentUser?.role==='admin'?adminOrders.length:(myOrders||[]).length;
     const list=document.getElementById('adminOrdersList');
-    const oldNfunction renderOrders(orders)otice=document.getElementById('manualPendingNotice');
+    const oldNotice=document.getElementById('manualPendingNotice');
     if(oldNotice)oldNotice.remove();
     if(list)list.innerHTML=adminOrders.length?adminOrders.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos.';
     if(typeof updateManualPendingCount==='function') updateManualPendingCount();
   }catch(e){showMessage(e.message||'Error cargando pedidos','error')}
 }
-*/
-/*
+
 function renderAdminOrdersManualPendingOnly(){
   const box=document.getElementById('adminOrdersList');
   if(!box || !Array.isArray(adminOrders)) return;
@@ -2493,8 +2476,7 @@ function renderAdminOrdersManualPendingOnly(){
   box.parentNode.insertBefore(notice,box);
   box.innerHTML=rows.length?rows.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos manuales pendientes.';
 }
-*/
-/*
+
 function renderAdminReportCompactFinal(r){
   const info=calculateReportRefundInfo(r);
   const canAct=String(r.status||'').toLowerCase()==='pendiente';
@@ -2541,9 +2523,9 @@ function renderAdminReportCompactFinal(r){
     </div>
   </div>`;
 }
-*/
+
    
-/*
+
 async function loadAccountReports() {
   if (!__isAdminUserFinal()) return;
 
@@ -2562,7 +2544,7 @@ async function loadAccountReports() {
     console.warn('Error cargando reportes:', e);
   }
 }
-*/
+
 // Inicialización limpia de comunicados
 setTimeout(() => {
   if (typeof ensureGlobalAnnouncementsUIFinal === 'function') ensureGlobalAnnouncementsUIFinal();
