@@ -110,9 +110,10 @@ function getStatusText(s){return({accion_en_espera:'Acción en espera',en_proces
 function formatMoney(v){return Number(v||0).toFixed(2)}
 async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.Authorization='Bearer '+token;if(!(opt.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');return d}
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
+/* Movida a auth.js
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-
+*/
 async function loadApp() {
   if (!token) return;
   try {
