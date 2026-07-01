@@ -1,5 +1,6 @@
 function renderAdminReportCompactFinal(r){
-  const info=calculateReportRefundInfo(r);
+  console.log("Qué trae el reporte:", r); // Esto te dirá exactamente cómo se llama la fecha
+const info=calculateReportRefundInfo(r);
   const canAct=String(r.status||'').toLowerCase()==='pendiente';
   const itemId=`admin-report-compact-${r.id}`;
   return `<div class="item compact-item" id="${itemId}">
