@@ -1259,6 +1259,7 @@ alert('LOAD ACCOUNT REPORTS NUEVO');
 }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
 }
 
+/*
 async function updateAccountReportStatus(reportId){
   try{
     const status=document.getElementById(`reportStatus-${reportId}`)?.value||'pendiente';
@@ -1320,7 +1321,7 @@ async function replaceReportedAccount(reportId){
   }
 }
 */
-
+/*
 async function refundReportedAccount(reportId, fechaCompra) {
   try {
     let amountToSend = null;
@@ -1394,6 +1395,8 @@ async function refundReportedAccount(reportId, fechaCompra) {
     alert("Ocurrió un error al intentar reembolsar: " + e.message);
   }
 }
+*/
+
 // ===============================
 // GRÁFICAS DEL DASHBOARD ADMIN
 // Usa los datos del reporte de ventas existente. No requiere librerías externas.
@@ -2426,6 +2429,7 @@ async function deleteAnnouncementFinal(id){
   }catch(e){showMessage(e.message||'Error eliminando comunicado','error')}
 }
 
+/*
 function toggleCompactItemFinal(id){
   document.getElementById(id)?.classList.toggle('open');
 }
@@ -2539,7 +2543,7 @@ function renderAdminReportCompactFinal(r){
 }
 */
    
-
+/*
 async function loadAccountReports() {
   if (!__isAdminUserFinal()) return;
 
@@ -2558,7 +2562,7 @@ async function loadAccountReports() {
     console.warn('Error cargando reportes:', e);
   }
 }
-
+*/
 // Inicialización limpia de comunicados
 setTimeout(() => {
   if (typeof ensureGlobalAnnouncementsUIFinal === 'function') ensureGlobalAnnouncementsUIFinal();

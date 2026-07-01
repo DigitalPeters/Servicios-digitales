@@ -184,7 +184,7 @@ async function refundReportedAccount(reportId, fechaCompra) {
 async function updateAccountReportStatus(reportId){
   try{
     const status=document.getElementById(`reportStatus-${reportId}`)?.value||'pendiente';
-    const admin_response=document.getElementById(`reportResponse-${reportId}`)?.value||'';
+    const admiloadAccountReportsn_response=document.getElementById(`reportResponse-${reportId}`)?.value||'';
     const data=await api('/api/admin/account-reports/'+reportId+'/status',{method:'PATCH',body:JSON.stringify({status,admin_response})});
     showMessage(data.message||'Reporte actualizado');
     await loadAccountReports();
@@ -193,4 +193,23 @@ async function updateAccountReportStatus(reportId){
 
 function toggleCompactItemFinal(id){
   document.getElementById(id)?.classList.toggle('open');
+}
+
+async function loadAccountReports() {
+  if (!__isAdminUserFinal()) return;
+
+  try {
+    const reports = await api('/api/admin/account-reports');
+    const pending = reports.filter(r => String(r.status || '').toLowerCase() === 'pendiente');
+    
+    const stat = document.getElementById('statReports');
+    if (stat) stat.textContent = pending.length;
+    
+    const box = document.getElementById('adminAccountReportsList');
+    if (box) {
+      box.innerHTML = reports.length ? reports.map(renderAdminReportCompactFinal).join('') : 'Sin reportes de falla.';
+    }
+  } catch (e) {
+    console.warn('Error cargando reportes:', e);
+  }
 }
