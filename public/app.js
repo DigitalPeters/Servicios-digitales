@@ -166,7 +166,9 @@ async function loadApp() {
   }
 }
 
+/*
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
+*/
 
 async function loadExpiringCount(){
 console.log('LOAD EXPIRING COUNT EJECUTADO');
@@ -186,8 +188,12 @@ console.log('LOAD EXPIRING COUNT EJECUTADO');
 
 function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
 function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
-function renderProducts(products){let html='';const cats={};products.forEach(p=>{const c=p.category||'Otros';(cats[c]=cats[c]||[]).push(p)});Object.keys(cats).forEach(c=>{html+=`<div class="category-title">${safeText(c)}</div>`+cats[c].map(renderProductRow).join('')});productsList.innerHTML=html||'No hay productos.'}
 
+/*
+function renderProducts(products){let html='';const cats={};products.forEach(p=>{const c=p.category||'Otros';(cats[c]=cats[c]||[]).push(p)});Object.keys(cats).forEach(c=>{html+=`<div class="category-title">${safeText(c)}</div>`+cats[c].map(renderProductRow).join('')});productsList.innerHTML=html||'No hay productos.'}
+*/
+
+/*
 function renderProductRow(product) {
     const stockEnabled = Number(product.stock_enabled || 0) === 1;
     const stock = Number(product.stock || 0);
@@ -215,7 +221,7 @@ function renderProductRow(product) {
         </div>
     </div>`;
 }
-
+*/
 
 function toggleProduct(id){const row=document.querySelector(`.product-row[data-product-id="${id}"]`);if(!row)return;const open=row.classList.contains('open');document.querySelectorAll('.product-row').forEach(r=>r.classList.remove('open'));if(!open)row.classList.add('open')}
 
@@ -253,6 +259,7 @@ function convertFileToBase64(file) {
 }
 
 // Tu función de compra actualizada
+/*
 async function buyProduct(productId) {
   try {
     const product = allProducts.find(p => Number(p.id) === Number(productId)) || 
@@ -301,7 +308,7 @@ async function buyProduct(productId) {
     showMessage(e.message, 'error');
   }
 }
-
+*/
 
 async function loadMyOrders(){
   myOrders=await api('/api/my-orders');
