@@ -64,3 +64,184 @@
   padding:12px;
   cursor:pointer;
 }
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #f8fafc;
+    color: #0f172a;
+}
+
+#app-container {
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 30px 20px;
+    box-sizing: border-box;
+}
+
+.dash-header, .seccion-header {
+    margin-bottom: 25px;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 15px;
+}
+
+.seccion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Rejilla Perfecta de Botones */
+.grid-botones-dashboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    width: 100%;
+}
+
+.btn-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    text-align: left;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.btn-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+}
+
+.btn-icono { font-size: 2.2rem; margin-right: 15px; }
+.btn-info { display: flex; flex-direction: column; }
+.btn-titulo { font-size: 0.95rem; color: #64748b; font-weight: 600; text-transform: uppercase; }
+.btn-conteo { font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 2px; }
+
+/* Variaciones SaaS */
+.alerta-roja .btn-conteo { color: #dc2626; }
+.alerta-roja:hover { background: #fef2f2; border-color: #fca5a5; }
+
+.alerta-amarilla .btn-conteo { color: #d97706; }
+.alerta-amarilla:hover { background: #fffbeb; border-color: #fde68a; }
+
+.financiero .btn-conteo { color: #16a34a; }
+
+/* Botones de control estándar */
+.btn-regresar, .btn-navegacion-tienda {
+    background: #0f172a; color: white; border: none; padding: 10px 20px;
+    border-radius: 6px; cursor: pointer; font-weight: 500;
+}
+.btn-navegacion-tienda { padding: 15px 30px; font-size: 1.1rem; background: #2563eb; }
+
+/* Grid de Tienda */
+.spinner-carga { padding: 40px; text-align: center; color: #64748b; font-size: 1.2rem; }
+.grid-productos-saas { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+.card-producto { background: white; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
+
+/* Financiero */
+.grid-financiero-detalles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; }
+.card-metrica { background: white; padding: 25px; border-radius: 8px; border: 1px solid #e2e8f0; }
+.card-metrica p { font-size: 2rem; font-weight: bold; margin: 5px 0 0 0; }
+.ganancias p { color: #16a34a; }
+
+
+/* ========================================================================= */
+/* 👇 ELIMINACIÓN DEL DISEÑO ANTERIOR Y FUERZA DE ANCHO COMPLETO 👇 */
+/* ========================================================================= */
+
+/* Apaga por completo la barra lateral vieja (busca las etiquetas comunes) */
+aside, 
+.sidebar, 
+#sidebar, 
+.menu-lateral,
+.navigation-bar { 
+    display: none !important; 
+}
+
+/* Obliga al contenedor del contenido a dejar de hacerse a un lado */
+.main-content, 
+#main-content, 
+.contenedor-principal,
+main {
+    margin-left: 0 !important;
+    padding: 20px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+// =========================================================================
+// 🔄 RUTEADOR CENTRALIZADO CONECTADO A TU MOTOR INTERNO NATIVO
+// =========================================================================
+function cambiarSeccion(seccionDestino) {
+    // 1. Para las secciones de usuario nativas, usamos tu showSection original.
+    // Esto asegura que se ejecuten tus llamadas a Railway y no se vea plano o vacío.
+    if (seccionDestino === 'dashboard') {
+        if (typeof showSection === 'function') showSection('dashboard');
+        actualizarConteosDashboard();
+    } 
+    else if (seccionDestino === 'tienda') {
+        if (typeof showSection === 'function') showSection('shop');
+    } 
+    else if (seccionDestino === 'mi-cuenta') {
+        if (typeof showSection === 'function') showSection('account');
+    }
+    else if (seccionDestino === 'renovaciones') {
+        if (typeof showSection === 'function') showSection('alerts');
+    }
+    else if (seccionDestino === 'pedidos') {
+        if (typeof showSection === 'function') showSection('orders');
+    }
+    else if (seccionDestino === 'cargas-saldo') {
+        if (typeof showSection === 'function') showSection('balance');
+    }
+    else if (seccionDestino === 'fallas') {
+        if (typeof showSection === 'function') showSection('reports');
+    }
+    
+    // 2. Para tus sub-paneles de administración internos:
+    else {
+        // Activamos tu sección maestra de administración
+        if (typeof showSection === 'function') showSection('admin');
+        
+        // Ocultamos los sub-paneles internos para que no se encimen uno sobre otro
+        const panelesAdmin = [
+            'adminUsersPanel', 'adminProductsPanel', 'adminPlatformAccountsPanel', 
+            'adminOrdersPanel', 'adminSalesReportPanel', 'adminBalanceRequestsPanel', 'adminAccountReportsPanel'
+        ];
+        panelesAdmin.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        
+        // Desplegamos quirúrgicamente el panel solicitado por el botón
+        if (seccionDestino === 'usuarios') {
+            const el = document.getElementById('adminUsersPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'productos') {
+            const el = document.getElementById('adminProductsPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'stock-bajo' || seccionDestino === 'inventario') {
+            const el = document.getElementById('adminPlatformAccountsPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'pedidos-pendientes') {
+            const el = document.getElementById('adminOrdersPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'reporte-financiero') {
+            const el = document.getElementById('adminSalesReportPanel');
+            if (el) el.style.display = 'block';
+            // Ejecuta tu carga nativa de base de datos para pintar ingresos, costos y ganancias
+            if (typeof openSalesReport === 'function') openSalesReport();
+        }
+    }
+}

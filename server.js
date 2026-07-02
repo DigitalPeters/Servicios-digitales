@@ -1,7 +1,6 @@
 require("dotenv").config();
-
 const express = require("express");
-console.log("DATABASE_URL:", process.env.DATABASE_URL ? "OK" : "NO");
+console.log("VERSION RECUPERACION 11-JUN-2026");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -24,6 +23,65 @@ app.use(express.static("public"));
 app.get("/test-recuperacion", (req, res) => {
   res.send("OK TEST");
 });
+
+// =========================================================================
+// 🚀 ZONA DE RUTAS CRÍTICAS DEL DASHBOARD (PEGAR AQUÍ ARRIBA)
+// =========================================================================
+
+app.get('/api/admin/conteos-dashboard', async (req, res) => {
+    try {
+        const usuarios = await pool.query("SELECT COUNT(*) FROM usuarios WHERE rol = 'vendedor'").catch(() => ({rows:[{count:0}]}));
+        const productos = await pool.query("SELECT COUNT(*) FROM productos").catch(() => ({rows:[{count:0}]}));
+        const inventario = await pool.query("SELECT COUNT(*) FROM inventario WHERE estado = 'disponible'").catch(() => ({rows:[{count:0}]}));
+        const pedidos = await pool.query("SELECT COUNT(*) FROM ventas").catch(() => ({rows:[{count:0}]}));
+        const pedidosPend = await pool.query("SELECT COUNT(*) FROM ventas WHERE estado = 'pendiente'").catch(() => ({rows:[{count:0}]}));
+        const fallas = await pool.query("SELECT COUNT(*) FROM fallas WHERE estado = 'abierta'").catch(() => ({rows:[{count:0}]}));
+        const cargas = await pool.query("SELECT COUNT(*) FROM recargas WHERE estado = 'pendiente'").catch(() => ({rows:[{count:0}]}));
+
+        res.json({
+            usuarios: parseInt(usuarios.rows[0].count || 0),
+            productos: parseInt(productos.rows[0].count || 0),
+            stock_bajo: 0, 
+            inventario: parseInt(inventario.rows[0].count || 0),
+            pedidos: parseInt(pedidos.rows[0].count || 0),
+            pedidos_pendientes: parseInt(pedidosPend.rows[0].count || 0),
+            fallas_reportadas: parseInt(fallas.rows[0].count || 0),
+            carga_pendiente: parseInt(cargas.rows[0].count || 0)
+        });
+    } catch (err) {
+        console.error("Error interno en conteos-dashboard:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/reporte-ventas-hoy', async (req, res) => {
+    try {
+        const query = `
+            SELECT COALESCE(SUM(precio_venta - costo_producto), 0) as ganancias_netas 
+            FROM ventas WHERE fecha_venta::date = CURRENT_DATE
+        `;
+        const resultado = await pool.query(query).catch(() => ({rows:[{ganancias_netas:0}]}));
+        res.json(resultado.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/productos-tienda', async (req, res) => {
+    try {
+        const query = `
+            SELECT p.id, p.nombre, COUNT(i.id) as stock_actual, COALESCE(p.precio, 0) as precio_venta
+            FROM productos p
+            LEFT JOIN inventario i ON p.id = i.producto_id AND i.estado = 'disponible'
+            GROUP BY p.id, p.nombre, p.precio
+        `;
+        const resultado = await pool.query(query).catch(() => ({rows:[]}));
+        res.json(resultado.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ===============================
 // NOTIFICACIONES POR CORREO CON RESEND
 // ===============================
@@ -4729,6 +4787,70 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     res.status(500).json({ error: "Error al archivar y liberar la cuenta." });
   }
 });
+
+
+// =========================================================================
+// 🛡️ VERSION BULLETPROOF: ACTUALIZACIÓN SEGURO SIN CAÍDAS POR IDS NULOS
+// =========================================================================
+async function actualizarConteosDashboard() {
+    try {
+        const res = await fetch('/api/admin/conteos-dashboard');
+        if (!res.ok) return;
+        const datos = await res.json();
+
+        // 1. Mapeo defensivo para tus NUEVOS botones del Dashboard
+        const mapaNuevosBotones = {
+            'count-usuarios': datos.usuarios,
+            'count-productos': datos.productos,
+            'count-stock_bajo': datos.stock_bajo,
+            'count-inventario': datos.inventario,
+            'count-pedidos': datos.pedidos,
+            'count-pedidos_pendientes': datos.pedidos_pendientes,
+            'count-fallas_reportadas': datos.fallas_reportadas,
+            'count-carga_pendiente': datos.carga_pendiente
+        };
+
+        // Bucle seguro: Si el ID no existe en el HTML, no rompe el script
+        for (const [idHtml, valor] of Object.entries(mapaNuevosBotones)) {
+            const el = document.getElementById(idHtml);
+            if (el) {
+                el.innerText = valor !== undefined ? valor : 0;
+            }
+        }
+
+        // 2. Mapeo de respaldo para los IDs VIEJOS (Por si tu app.js original los busca en otra parte)
+        const mapaTarjetasViejas = {
+            'statUsers': datos.usuarios,
+            'statProducts': datos.productos,
+            'statInventory': datos.inventario,
+            'statOrders': datos.pedidos,
+            'statReports': datos.fallas_reportadas,
+            'statBalanceRequests': datos.carga_pendiente
+        };
+
+        for (const [idHtml, valor] of Object.entries(mapaTarjetasViejas)) {
+            const el = document.getElementById(idHtml);
+            if (el) {
+                el.innerText = valor !== undefined ? valor : 0;
+            }
+        }
+        
+        // 3. Intentar cargar de forma aislada las ganancias financieras del día
+        const resFin = await fetch('/api/admin/reporte-ventas-hoy');
+        if (resFin.ok) {
+            const d = await resFin.json();
+            
+            const cFin = document.getElementById('count-financiero');
+            if (cFin) cFin.innerText = `$${parseFloat(d.ganancias_netas || 0).toFixed(2)}`;
+            
+            const statSales = document.getElementById('statSalesToday');
+            if (statSales) statSales.innerText = parseFloat(d.ganancias_netas || 0).toFixed(2);
+        }
+
+    } catch (err) {
+        console.error("Error controlado al actualizar contadores del Dashboard:", err);
+    }
+}
 
 initDatabase()
   .then(() => {

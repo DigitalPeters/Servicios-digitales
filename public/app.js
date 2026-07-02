@@ -5858,3 +5858,258 @@ async function verHistorialCuenta(id) {
     alert("Error al cargar el historial.");
   }
 }
+
+
+// Variable Global simulada para desarrollo local (Reemplazar con ID dinámico en login real)
+const USUARIO_SESION_ID = 1;
+
+// 🔄 RUTEADOR CENTRALIZADO CONECTADO A TU MOTOR INTERNO NATIVO
+// =========================================================================
+function cambiarSeccion(seccionDestino) {
+    // 1. Para las secciones de usuario nativas, usamos tu showSection original.
+    // Esto asegura que se ejecuten tus llamadas a Railway y no se vea plano o vacío.
+    if (seccionDestino === 'dashboard') {
+        if (typeof showSection === 'function') showSection('dashboard');
+        actualizarConteosDashboard();
+    } 
+    else if (seccionDestino === 'tienda') {
+        if (typeof showSection === 'function') showSection('shop');
+    } 
+    else if (seccionDestino === 'mi-cuenta') {
+        if (typeof showSection === 'function') showSection('account');
+    }
+    else if (seccionDestino === 'renovaciones') {
+        if (typeof showSection === 'function') showSection('alerts');
+    }
+    else if (seccionDestino === 'pedidos') {
+        if (typeof showSection === 'function') showSection('orders');
+    }
+    else if (seccionDestino === 'cargas-saldo') {
+        if (typeof showSection === 'function') showSection('balance');
+    }
+    else if (seccionDestino === 'fallas') {
+        if (typeof showSection === 'function') showSection('reports');
+    }
+    
+    // 2. Para tus sub-paneles de administración internos:
+    else {
+        // Activamos tu sección maestra de administración
+        if (typeof showSection === 'function') showSection('admin');
+        
+        // Ocultamos los sub-paneles internos para que no se encimen uno sobre otro
+        const panelesAdmin = [
+            'adminUsersPanel', 'adminProductsPanel', 'adminPlatformAccountsPanel', 
+            'adminOrdersPanel', 'adminSalesReportPanel', 'adminBalanceRequestsPanel', 'adminAccountReportsPanel'
+        ];
+        panelesAdmin.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        
+        // Desplegamos quirúrgicamente el panel solicitado por el botón
+        if (seccionDestino === 'usuarios') {
+            const el = document.getElementById('adminUsersPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'productos') {
+            const el = document.getElementById('adminProductsPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'stock-bajo' || seccionDestino === 'inventario') {
+            const el = document.getElementById('adminPlatformAccountsPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'pedidos-pendientes') {
+            const el = document.getElementById('adminOrdersPanel');
+            if (el) el.style.display = 'block';
+        }
+        else if (seccionDestino === 'reporte-financiero') {
+            const el = document.getElementById('adminSalesReportPanel');
+            if (el) el.style.display = 'block';
+            // Ejecuta tu carga nativa de base de datos para pintar ingresos, costos y ganancias
+            if (typeof openSalesReport === 'function') openSalesReport();
+        }
+    }
+}
+
+// 2. RECOLECCIÓN EN BLOQUE DE CONTADORES (VERSIÓN BLINDADA)
+async function actualizarConteosDashboard() {
+    try {
+        const res = await fetch('/api/admin/conteos-dashboard');
+        if (!res.ok) throw new Error("Error de red");
+        const datos = await res.json();
+
+        // 1. Rellenar los contadores numéricos de manera segura
+        const contadores = {
+            'count-usuarios': datos.usuarios,
+            'count-productos': datos.productos,
+            'count-stock_bajo': datos.stock_bajo,
+            'count-inventario': datos.inventario,
+            'count-pedidos': datos.pedidos,
+            'count-pedidos_pendientes': datos.pedidos_pendientes,
+            'count-fallas_reportadas': datos.fallas_reportadas,
+            'count-carga_pendiente': datos.carga_pendiente
+        };
+
+        for (const [idHtml, valor] of Object.entries(contadores)) {
+            const el = document.getElementById(idHtml);
+            if (el) el.innerText = valor !== undefined ? valor : 0;
+        }
+
+        // =========================================================================
+        // 👮‍♂️ FILTRO DE SEGURIDAD MÁGICO: MISMO DASHBOARD, VISIBILIDAD POR ROLES
+        // =========================================================================
+        
+        // Evaluamos los interruptores de permisos de tu barra lateral oculta
+        const esAdmin = document.getElementById('adminMenuBtn') && !document.getElementById('adminMenuBtn').classList.contains('hidden') && document.getElementById('adminMenuBtn').style.display !== 'none';
+        const esDistribuidor = document.getElementById('distributorMenuBtn') && !document.getElementById('distributorMenuBtn').classList.contains('hidden') && document.getElementById('distributorMenuBtn').style.display !== 'none';
+
+        // --- REGLA 1: TARJETAS Y BOTONES EXCLUSIVOS DE ADMINISTRADOR GLOBAL ---
+        const elementosAdmin = [
+            'global-ventas-btn', 'dashUsersCard', 'dashProductsCard', 
+            'dashOutOfStockCard', 'dashInventoryCard', 'dashReportsCard', 
+            'dashBalanceRequestsCard', 'dashSalesTodayCard', 'dashDailyCutCard', 
+            'dashMonthlyReportCard', 'dashboardChartsPanel'
+        ];
+        elementosAdmin.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (esAdmin) {
+                    el.style.setProperty('display', 'block', 'important');
+                    el.classList.remove('hidden');
+                } else {
+                    el.style.setProperty('display', 'none', 'important');
+                }
+            }
+        });
+
+        // --- REGLA 2: BOTONES Y TARJETAS EXCLUSIVAS DE DISTRIBUIDORES ---
+        const elementosDistribuidor = [
+            'global-comunicados-btn', 'btn-dist-usuarios', 'btn-dist-precios', 
+            'btn-dist-ganancias', 'dashDistributorCard'
+        ];
+        elementosDistribuidor.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (esDistribuidor || esAdmin) {
+                    el.style.setProperty('display', 'block', 'important');
+                    el.classList.remove('hidden');
+                } else {
+                    el.style.setProperty('display', 'none', 'important');
+                }
+            }
+        });
+
+        // Ejecutar carga financiera nativa original
+        if (typeof obtenerMontoBotonFinanciero === 'function') {
+            obtenerMontoBotonFinanciero();
+        }
+
+    } catch (err) {
+        console.error("Error controlado en el Dashboard Unificado:", err);
+    }
+}
+
+// 3. TIENDA SAAS ESTABLE (Cambio de estados visuales por fases de resolución)
+async function inicializarTiendaSaaS() {
+    const grid = document.getElementById('tienda-productos-grid');
+    const spinner = document.getElementById('tienda-loading');
+
+    grid.style.display = 'none';
+    spinner.style.display = 'block';
+    grid.innerHTML = '';
+
+    try {
+        const res = await fetch('/api/productos-tienda');
+        if (!res.ok) throw new Error();
+        const productos = await res.json();
+
+        productos.forEach(prod => {
+            grid.innerHTML += `
+                <div class="card-producto">
+                    <h3>${prod.nombre}</h3>
+                    <p style="font-size: 1.4rem; font-weight: bold; color: #2563eb;">$${parseFloat(prod.precio_venta).toFixed(2)}</p>
+                    <p style="color: #64748b;">Disponibles: ${prod.stock_actual}</p>
+                    <button class="btn-regresar" style="background:#16a34a; width:100%; margin-top:10px;" 
+                        onclick="ejecutarCompraAutomatica(${prod.id})">Comprar Perfil</button>
+                </div>
+            `;
+        });
+
+        spinner.style.display = 'none';
+        grid.style.display = 'grid';
+    } catch (err) {
+        spinner.innerHTML = `<span style="color:red; font-weight:bold;">⚠️ Error de conexión. Inténtalo de nuevo.</span>`;
+    }
+}
+
+// 4. COMPRA AUTOMÁTICA
+async function ejecutarCompraAutomatica(productoId) {
+    if (!confirm("¿Confirmas la compra automatizada de este perfil?")) return;
+    try {
+        const res = await fetch('/api/comprar-perfil', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usuario_id: USUARIO_SESION_ID, producto_id: productoId })
+        });
+        const resultado = await res.json();
+        if (resultado.error) alert(`Error: ${resultado.error}`);
+        else {
+            alert(`¡Compra Exitosa!\nCredenciales: ${resultado.credenciales}`);
+            inicializarTiendaSaaS(); // Recarga la tienda sin parpadeos
+        }
+    } catch (err) {
+        alert("Ocurrió un error al procesar el pago.");
+    }
+}
+
+// 5. CARGA DESDE EXCEL UTILIZANDO SHEETJS
+function subirExcelProcesado(evento) {
+    const archivo = evento.target.files[0];
+    const lector = new FileReader();
+    
+    lector.onload = async function(e) {
+        const data = new Uint8Array(e.target.result);
+        const libro = XLSX.read(data, { type: 'array' });
+        const nombreHoja = libro.SheetNames[0];
+        const json = XLSX.utils.sheet_to_json(libro.Sheets[nombreHoja]);
+
+        // Enviar array estructurado al backend
+        try {
+            const res = await fetch('/api/admin/cargar-inventario-excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filas: json })
+            });
+            const r = await res.json();
+            alert(r.mensaje || r.error);
+        } catch (err) {
+            alert("Error al inyectar el archivo Excel.");
+        }
+    };
+    lector.readAsArrayBuffer(archivo);
+}
+
+// 6. METRICAS DETALLADAS DEL DÍA
+async function obtenerMontoBotonFinanciero() {
+    try {
+        const res = await fetch('/api/admin/reporte-ventas-hoy');
+        const d = await res.json();
+        document.getElementById('count-financiero').innerText = `$${parseFloat(d.ganancias_netas).toFixed(2)}`;
+    } catch (e) {}
+}
+
+async function cargarReporteFinancieroDetallado() {
+    try {
+        const res = await fetch('/api/admin/reporte-ventas-hoy');
+        const d = await res.json();
+        document.getElementById('fin-ventas').innerText = `$${parseFloat(d.ventas_totales).toFixed(2)}`;
+        document.getElementById('fin-costos').innerText = `$${parseFloat(d.costo_total).toFixed(2)}`;
+        document.getElementById('fin-ganancias').innerText = `$${parseFloat(d.ganancias_netas).toFixed(2)}`;
+    } catch (e) {}
+}
+
+// Inicialización Automática en Localhost
+document.addEventListener('DOMContentLoaded', () => {
+    cambiarSeccion('dashboard');
+});

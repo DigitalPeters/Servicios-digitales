@@ -63,60 +63,125 @@ onclick="showSection('distributorEarnings')">
       <div class="sidebar-bottom"><button class="logout-side" onclick="logout()">Cerrar sesión</button></div>
     </aside>
     <main class="main">
-      <div class="topbar">
+      <div class="topbar" style="display: flex; align-items: center; justify-content: space-between; gap: 15px; width: 100%;">
+        
+        <button onclick="cambiarSeccion('dashboard')" style="background: #4f46e5; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+          🏠 Volver al Inicio
+        </button>
+
         <div class="searchbox"><span>🔎</span><input id="globalSearch" placeholder="Buscar producto..." oninput="filterProducts()" /></div>
-        <div class="top-actions"><span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span><span class="pill open">Abierto</span><span class="pill">Online</span><b id="topUserName">Usuario</b></div>
+        
+        <div class="top-actions">
+          <span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span>
+          <span class="pill open">Abierto</span>
+          <span class="pill">Online</span>
+          <b id="topUserName">Usuario</b>
+        </div>
       </div>
 
       <section id="section-dashboard" class="section active">
         <h1 class="section-title" onclick="reloadDashboard()" style="cursor:pointer">
-  Dashboard 🔄
-</h1>
-<div id="panel-botones-vendedor" class="panel" style="margin-bottom: 25px; background: #1e1e2f; padding: 20px; border-radius: 8px;">
-  <h3 style="text-align: center; color: #fff; margin-bottom: 20px;">¿Qué deseas hacer hoy?</h3>
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
-    
-<button onclick="showSection('account')" style="padding: 15px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-bottom: 20px; font-size: 16px; width: 100%; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
-  🔑 Entrar a Mi Perfil y Cambiar Contraseña
-</button>    
-<button onclick="showSection('shop')" style="padding: 15px 10px; background: #6d5dfc; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🛒 Ir a Tienda</button>
-<button onclick="showSection('orders')" style="padding: 15px 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📦 Mis Pedidos</button>
-    <button onclick="showSection('balance')" style="padding: 15px 10px; background: #008c2e; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">💳 Cargar Saldo</button>
-    <button onclick="openReportFaultFormFinal()" style="padding: 15px 10px; background: #dc2626; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">⚠ Reportar Falla</button>
-    <button onclick="openFailureResponsesFinal()" style="padding: 15px 10px; background: #b45309; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📬 Respuestas</button>
+          Dashboard 🔄
+        </h1>
 
-    <button id="btn-dist-usuarios" onclick="showSection('distributor')" style="padding: 15px 10px; background: #ea580c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">👥 Crear Usuarios</button>
-    <button id="btn-dist-precios" onclick="showSection('distributor'); setTimeout(()=>document.getElementById('distributorPricesList').scrollIntoView({behavior:'smooth', block:'start'}), 100);" style="padding: 15px 10px; background: #0891b2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💲 Lista Precios</button>
-   <button id="btn-dist-ganancias" 
-        onclick="irADirectoAGanancias()" 
-        style="padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">
-  💰 Mis Ganancias
-</button>
-
-    <button onclick="logout()" style="padding: 15px 10px; background: #991b1b; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🚪 Salir</button>
-  </div>
-</div>
-        <div class="grid-cards">
-          <div class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value">0</div></div></div>
-          <div class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value">0</div></div></div>
-          <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()"><div class="dash-icon">🚫</div><div><div class="dash-label">Sin stock</div><div id="statOutOfStock" class="dash-value">0</div></div></div>
-          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value">0</div></div></div>
-          <div class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value">0</div></div></div>
-          <div id="dashBalanceCard" class="dash-card clickable" onclick="showSection('balance')"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div></div>
-          <div class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value">0</div></div></div>
-<div id="dashExpiringCard" class="dash-card clickable" onclick="showSection('alerts')">
-  <div class="dash-icon">⏰</div>
-  <div>
-    <div class="dash-label">Renovaciones</div>
-    <div id="statExpiring" class="dash-value">0</div>
-  </div>
-</div>
-     <div class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💰</div><div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value">0</div></div></div>
-          <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
-          <div id="dashDailyCutCard" class="dash-card clickable hidden" onclick="openDailyCut()"><div class="dash-icon">🧾</div><div><div class="dash-label">Corte diario</div><div class="small-text">Ventas, costos y utilidad</div></div></div>
-          <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()"><div class="dash-icon">📥</div><div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div></div>
-          <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
+        <div class="menu-acciones-globales" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 25px; background: #1e1e2f; padding: 12px; border-radius: 8px; border: 1px solid #333;">
+          <button class="primary-btn" style="width: auto; padding: 10px 20px; background: #4f46e5; font-size: 0.9rem;" onclick="cambiarSeccion('mi-cuenta')">👤 Mi Perfil / Contraseña</button>
+          <button class="primary-btn" style="width: auto; padding: 10px 20px; background: #6d5dfc; font-size: 0.9rem;" onclick="cambiarSeccion('tienda')">🛒 Ir a Tienda SaaS</button>
+          
+          <button id="global-comunicados-btn" class="primary-btn" style="display: none; width: auto; padding: 10px 20px; background: #0891b2; font-size: 0.9rem;" onclick="cambiarSeccion('comunicados')">📢 Publicar Comunicados</button>
+          <button id="global-ventas-btn" class="primary-btn" style="display: none; width: auto; padding: 10px 20px; background: #0284c7; font-size: 0.9rem;" onclick="cambiarSeccion('reporte-financiero')">📊 Reporte de Ventas</button>
+          
+          <button class="primary-btn" style="width: auto; padding: 10px 20px; background: #dc2626; font-size: 0.9rem;" onclick="logout()">🚪 Cerrar Sesión</button>
         </div>
+
+        <div id="panel-botones-vendedor" class="panel" style="margin-bottom: 25px; background: #1e1e2f; padding: 20px; border-radius: 8px;">
+          <h3 style="text-align: center; color: #fff; margin-bottom: 20px;">¿Qué deseas hacer hoy?</h3>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
+            
+            <button onclick="showSection('account')" style="padding: 15px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-bottom: 20px; font-size: 16px; width: 100%; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+              🔑 Entrar a Mi Perfil y Cambiar Contraseña
+            </button>    
+            <button onclick="showSection('shop')" style="padding: 15px 10px; background: #6d5dfc; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🛒 Ir a Tienda</button>
+            <button onclick="showSection('orders')" style="padding: 15px 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📦 Mis Pedidos</button>
+            <button onclick="showSection('balance')" style="padding: 15px 10px; background: #008c2e; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">💳 Cargar Saldo</button>
+            <button onclick="openReportFaultFormFinal()" style="padding: 15px 10px; background: #dc2626; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">⚠ Reportar Falla</button>
+            <button onclick="openFailureResponsesFinal()" style="padding: 15px 10px; background: #b45309; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📬 Respuestas</button>
+
+            <button id="btn-dist-usuarios" onclick="showSection('distributor')" style="padding: 15px 10px; background: #ea580c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">👥 Crear Usuarios</button>
+            <button id="btn-dist-precios" onclick="showSection('distributor'); setTimeout(()=>document.getElementById('distributorPricesList').scrollIntoView({behavior:'smooth', block:'start'}), 100);" style="padding: 15px 10px; background: #0891b2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💲 Lista Precios</button>
+            <button id="btn-dist-ganancias" onclick="irADirectoAGanancias()" style="padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💰 Mis Ganancias</button>
+
+            <button onclick="logout()" style="padding: 15px 10px; background: #991b1b; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🚪 Salir</button>
+          </div>
+        </div>
+
+        <div class="grid-cards">
+          <div id="dashUsersCard" class="dash-card clickable" onclick="openUsersFromDashboard()">
+            <div class="dash-icon">👥</div>
+            <div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value"><span id="count-usuarios">0</span></div></div>
+          </div>
+          
+          <div id="dashProductsCard" class="dash-card clickable" onclick="openProductsFromDashboard()">
+            <div class="dash-icon">📦</div>
+            <div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value"><span id="count-productos">0</span></div></div>
+          </div>
+          
+          <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()">
+            <div class="dash-icon">🚫</div>
+            <div><div class="dash-label">Sin stock</div><div id="statOutOfStock" class="dash-value"><span id="count-stock_bajo">0</span></div></div>
+          </div>
+          
+          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()">
+            <div class="dash-icon">🔐</div>
+            <div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value"><span id="count-inventario">0</span></div></div>
+          </div>
+          
+          <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()">
+            <div class="dash-icon">▤</div>
+            <div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value"><span id="count-pedidos">0</span></div></div>
+          </div>
+          
+          <div id="dashBalanceCard" class="dash-card clickable" onclick="showSection('balance')">
+            <div class="dash-icon">💳</div>
+            <div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div>
+          </div>
+          
+          <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()">
+            <div class="dash-icon">⚠</div>
+            <div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value"><span id="count-fallas_reportadas">0</span></div></div>
+          </div>
+          
+          <div id="dashExpiringCard" class="dash-card clickable" onclick="showSection('alerts')">
+            <div class="dash-icon">⏰</div>
+            <div><div class="dash-label">Renovaciones</div><div id="statExpiring" class="dash-value"><span id="count-pedidos_pendientes">0</span></div></div>
+          </div>
+          
+          <div id="dashBalanceRequestsCard" class="dash-card clickable" onclick="openBalanceRequests()">
+            <div class="dash-icon">💰</div>
+            <div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value"><span id="count-carga_pendiente">0</span></div></div>
+          </div>
+          
+          <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()">
+            <div class="dash-icon">📊</div>
+            <div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday"><span id="count-financiero">0.00</span></span></div></div>
+          </div>
+          
+          <div id="dashDailyCutCard" class="dash-card clickable hidden" onclick="openDailyCut()">
+            <div class="dash-icon">🧾</div>
+            <div><div class="dash-label">Corte diario</div><div class="small-text">Ventas, costos y utilidad</div></div>
+          </div>
+          
+          <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()">
+            <div class="dash-icon">📥</div>
+            <div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div>
+          </div>
+          
+          <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')">
+            <div class="dash-icon">🏪</div>
+            <div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div>
+          </div>
+        </div>
+
         <div id="dashboardChartsPanel" class="row hidden">
           <div class="panel dashboard-chart-card">
             <div class="panel-head"><div><h2>Productos más vendidos</h2><p class="chart-note">Productos con más pedidos exitosos hoy.</p></div><button class="outline-btn" style="width:auto" onclick="openSalesReport()">Ver reporte</button></div>
@@ -127,6 +192,7 @@ onclick="showSection('distributorEarnings')">
             <div id="dashboardTopUsersChart" class="empty-chart">Sin ventas todavía.</div>
           </div>
         </div>
+        
         <div id="recentOrdersList" class="hidden"></div>
       </section>
 
