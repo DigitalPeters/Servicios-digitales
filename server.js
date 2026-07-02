@@ -1,5 +1,7 @@
+require("dotenv").config();
+
 const express = require("express");
-console.log("VERSION RECUPERACION 11-JUN-2026");
+console.log("DATABASE_URL:", process.env.DATABASE_URL ? "OK" : "NO");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
