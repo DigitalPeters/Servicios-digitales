@@ -33,155 +33,94 @@
 
   <div id="appSection" class="app hidden">
     <div class="mobile-header"><b>Servicios Digitales Peters</b><button class="hamb" onclick="toggleSidebar()">☰</button></div>
-    <aside id="sidebar" class="sidebar">
+    <aside id="sidebar" class="sidebar sidebar-ghost" aria-hidden="true">
       <div class="brand"><div class="brand-logo">P</div><div><h2>Servicios Digitales Peters</h2><p id="sideEmail">correo</p></div></div>
-      <nav class="menu">
-        <button class="menu-btn active" data-section="dashboard" onclick="showSection('dashboard')">◴ Dashboard</button>
-        
-        <button id="accountMenuBtn"
-class="menu-btn"
-data-section="account"
-onclick="showSection('account')">
-👤 Mi cuenta
-</button>
-        <button class="menu-btn" data-section="shop" onclick="showSection('shop')">🛒 Tienda</button>
-        <button class="menu-btn" data-section="alerts" onclick="showSection('alerts')">⚠️ Renovaciones</button>        
-        <button class="menu-btn" data-section="orders" onclick="showSection('orders')">▤ Mis pedidos</button>
-        <button class="menu-btn" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
-        <button class="menu-btn" data-section="reports" onclick="showSection('reports')">⚠ Reportar falla</button>
-        <button id="adminMenuBtn" class="menu-btn hidden" data-section="admin" onclick="showSection('admin')">⚙ Admin</button>
-        <button id="adminSalesMenuBtn" class="menu-btn hidden" data-section="admin" onclick="openSalesReport()">📊 Reporte ventas</button>
-        <button id="distributorMenuBtn" class="menu-btn hidden" data-section="distributor" onclick="showSection('distributor')">🏪 Mis vendedores</button>
-<button id="distributorEarningsBtn"
-class="menu-btn hidden"
-data-section="distributorEarnings"
-onclick="showSection('distributorEarnings')">
-💵 Ganancias
-</button>
-        <button id="ownerAnnouncementsMenuBtn" class="menu-btn hidden" data-section="ownerAnnouncements" onclick="showSection('ownerAnnouncements')">📢 Comunicados</button>
-      </nav>
-      <div class="sidebar-bottom"><button class="logout-side" onclick="logout()">Cerrar sesión</button></div>
     </aside>
-    <main class="main">
-      <div class="topbar" style="display: flex; align-items: center; justify-content: space-between; gap: 15px; width: 100%;">
-        
-        <button onclick="cambiarSeccion('dashboard')" style="background: #4f46e5; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
-          🏠 Volver al Inicio
-        </button>
-
-        <div class="searchbox"><span>🔎</span><input id="globalSearch" placeholder="Buscar producto..." oninput="filterProducts()" /></div>
-        
-        <div class="top-actions">
-          <span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span>
-          <span class="pill open">Abierto</span>
-          <span class="pill">Online</span>
-          <b id="topUserName">Usuario</b>
+    <main class="main light-contrast-scope">
+      <div class="topbar">
+        <div class="topbar-left-actions">
+          <button class="topbar-home-btn" onclick="cambiarSeccion('dashboard')">🏠 Volver al Inicio</button>
         </div>
+        <div class="searchbox"><span>🔎</span><input id="globalSearch" placeholder="Buscar producto..." oninput="filterProducts()" /></div>
+        <div class="top-actions"><span class="pill" style="background: #eef2ff; color: var(--primary);">Saldo: $<span id="topUserBalance">0.00</span></span><span class="pill open">Abierto</span><span class="pill">Online</span><b id="topUserName">Usuario</b></div>
       </div>
 
-      <section id="section-dashboard" class="section active">
+      <section id="section-dashboard" class="section active dashboard-premium">
+        <div id="dashboardGlobalActionsBar" class="dashboard-command-bar menu-acciones-globales panel">
+          <button class="menu-btn active" data-section="dashboard" onclick="showSection('dashboard')">◴ Dashboard</button>
+          <button id="accountMenuBtn" class="menu-btn" data-section="account" onclick="showSection('account')">👤 Mi Perfil / Contraseña</button>
+          <button id="shopMenuBtn" class="menu-btn" data-section="shop" onclick="showSection('shop')">🛒 Ir a Tienda SaaS</button>
+          <button id="ordersMenuBtn" class="menu-btn hidden" data-section="orders" onclick="showSection('orders')">📦 Mis pedidos</button>
+          <button id="balanceMenuBtn" class="menu-btn hidden" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
+          <button id="reportsMenuBtn" class="menu-btn hidden" data-section="reports" onclick="showSection('reports')">🛟 Reportar falla</button>
+          <button id="responsesMenuBtn" class="dashboard-utility-btn hidden" onclick="openFailureResponsesFinal()">📬 Respuestas</button>
+          <button id="distributorMenuBtn" class="menu-btn hidden" data-section="distributor" onclick="showSection('distributor')">🏪 Mis vendedores</button>
+          <button id="distributorEarningsBtn" class="menu-btn hidden" data-section="distributorEarnings" onclick="showSection('distributorEarnings')">💵 Ganancias</button>
+          <button id="logoutMenuBtn" class="dashboard-utility-btn dashboard-logout-btn" onclick="logout()">🚪 Cerrar sesión</button>
+        </div>
         <h1 class="section-title" onclick="reloadDashboard()" style="cursor:pointer">
-          Dashboard 🔄
-        </h1>
-
-        <div class="menu-acciones-globales" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 25px; background: #1e1e2f; padding: 12px; border-radius: 8px; border: 1px solid #333;">
-          <button class="primary-btn" style="width: auto; padding: 10px 20px; background: #4f46e5; font-size: 0.9rem;" onclick="cambiarSeccion('mi-cuenta')">👤 Mi Perfil / Contraseña</button>
-          <button class="primary-btn" style="width: auto; padding: 10px 20px; background: #6d5dfc; font-size: 0.9rem;" onclick="cambiarSeccion('tienda')">🛒 Ir a Tienda SaaS</button>
-          
-          <button id="global-comunicados-btn" class="primary-btn" style="display: none; width: auto; padding: 10px 20px; background: #0891b2; font-size: 0.9rem;" onclick="cambiarSeccion('comunicados')">📢 Publicar Comunicados</button>
-          <button id="global-ventas-btn" class="primary-btn" style="display: none; width: auto; padding: 10px 20px; background: #0284c7; font-size: 0.9rem;" onclick="cambiarSeccion('reporte-financiero')">📊 Reporte de Ventas</button>
-          
-          <button class="primary-btn" style="width: auto; padding: 10px 20px; background: #dc2626; font-size: 0.9rem;" onclick="logout()">🚪 Cerrar Sesión</button>
-        </div>
-
-        <div id="panel-botones-vendedor" class="panel" style="margin-bottom: 25px; background: #1e1e2f; padding: 20px; border-radius: 8px;">
-          <h3 style="text-align: center; color: #fff; margin-bottom: 20px;">¿Qué deseas hacer hoy?</h3>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
-            
-            <button onclick="showSection('account')" style="padding: 15px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-bottom: 20px; font-size: 16px; width: 100%; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
-              🔑 Entrar a Mi Perfil y Cambiar Contraseña
-            </button>    
-            <button onclick="showSection('shop')" style="padding: 15px 10px; background: #6d5dfc; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🛒 Ir a Tienda</button>
-            <button onclick="showSection('orders')" style="padding: 15px 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📦 Mis Pedidos</button>
-            <button onclick="showSection('balance')" style="padding: 15px 10px; background: #008c2e; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">💳 Cargar Saldo</button>
-            <button onclick="openReportFaultFormFinal()" style="padding: 15px 10px; background: #dc2626; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">⚠ Reportar Falla</button>
-            <button onclick="openFailureResponsesFinal()" style="padding: 15px 10px; background: #b45309; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">📬 Respuestas</button>
-
-            <button id="btn-dist-usuarios" onclick="showSection('distributor')" style="padding: 15px 10px; background: #ea580c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">👥 Crear Usuarios</button>
-            <button id="btn-dist-precios" onclick="showSection('distributor'); setTimeout(()=>document.getElementById('distributorPricesList').scrollIntoView({behavior:'smooth', block:'start'}), 100);" style="padding: 15px 10px; background: #0891b2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💲 Lista Precios</button>
-            <button id="btn-dist-ganancias" onclick="irADirectoAGanancias()" style="padding: 15px 10px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; display: none;">💰 Mis Ganancias</button>
-
-            <button onclick="logout()" style="padding: 15px 10px; background: #991b1b; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px;">🚪 Salir</button>
-          </div>
-        </div>
-
+  Dashboard 🔄
+</h1>
+<div id="panel-botones-vendedor" class="panel dashboard-actions-center">
+  <div class="dashboard-actions-grid">
+    <div id="actionOrdersBtn" onclick="showSection('orders')" class="dash-card clickable hidden">
+      <div class="dash-icon">📦</div>
+      <div><div class="dash-label">Mis pedidos</div><div class="small-text">Historial y seguimiento</div></div>
+    </div>
+    <div id="actionBalanceBtn" onclick="showSection('balance')" class="dash-card clickable hidden">
+      <div class="dash-icon">💳</div>
+      <div><div class="dash-label">Cargar saldo</div><div class="small-text">Enviar solicitud de recarga</div></div>
+    </div>
+    <div id="actionReportBtn" onclick="openReportFaultFormFinal()" class="dash-card clickable hidden">
+      <div class="dash-icon">🛟</div>
+      <div><div class="dash-label">Reportar falla</div><div class="small-text">Abrir reporte con evidencia</div></div>
+    </div>
+    <div id="actionResponsesBtn" onclick="openFailureResponsesFinal()" class="dash-card clickable hidden">
+      <div class="dash-icon">📬</div>
+      <div><div class="dash-label">Respuestas</div><div class="small-text">Ver seguimiento de fallas</div></div>
+    </div>
+    <div id="btn-dist-usuarios" onclick="showSection('distributor')" class="dash-card clickable hidden">
+      <div class="dash-icon">👥</div>
+      <div><div class="dash-label">Crear usuarios</div><div class="small-text">Gestión de vendedores</div></div>
+    </div>
+    <div id="btn-dist-precios" onclick="showSection('distributor'); setTimeout(()=>document.getElementById('distributorPricesList').scrollIntoView({behavior:'smooth', block:'start'}), 100);" class="dash-card clickable hidden">
+      <div class="dash-icon">💲</div>
+      <div><div class="dash-label">Lista de precios</div><div class="small-text">Editar costos por vendedor</div></div>
+    </div>
+    <div id="btn-dist-ganancias" onclick="irADirectoAGanancias()" class="dash-card clickable hidden">
+      <div class="dash-icon">💰</div>
+      <div><div class="dash-label">Mis ganancias</div><div class="small-text">Resumen del panel distribuidor</div></div>
+    </div>
+  </div>
+</div>
         <div class="grid-cards">
-          <div id="dashUsersCard" class="dash-card clickable" onclick="openUsersFromDashboard()">
-            <div class="dash-icon">👥</div>
-            <div><div class="dash-label">Usuarios</div><div id="statUsers" class="dash-value"><span id="count-usuarios">0</span></div></div>
+          <div id="dashUsersCard" class="dash-card clickable" onclick="openUsersFromDashboard()"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="count-usuarios" class="dash-value"><span id="statUsers">0</span></div></div></div>
+          <div id="dashProductsCard" class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">📦</div><div><div class="dash-label">Productos</div><div id="count-productos" class="dash-value"><span id="statProducts">0</span></div></div></div>
+          <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()"><div class="dash-icon">🚫</div><div><div class="dash-label">Sin stock</div><div id="count-stock_bajo" class="dash-value"><span id="statOutOfStock">0</span></div></div></div>
+          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="count-inventario" class="dash-value"><span id="statInventory">0</span></div></div></div>
+          <div id="dashCsvUploadCard" class="dash-card clickable hidden" onclick="document.getElementById('csv-upload-input')?.click()"><div class="dash-icon">📊</div><div><div class="dash-label">CSV Inventario</div><div class="small-text">📊 Cargar Cuentas desde CSV</div></div></div>
+          <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="count-pedidos" class="dash-value"><span id="statOrders">0</span></div></div></div>
+          <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="count-fallas_reportadas" class="dash-value"><span id="statReports">0</span></div></div></div>
+          <div id="dashBalanceRequestsCard" class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo pendiente</div><div id="count-carga_pendiente" class="dash-value"><span id="statBalanceRequests">0</span></div></div></div>
+          <div id="dashQuarantineCard" class="dash-card clickable" onclick="openQuarantineFromDashboard()">
+            <div class="dash-icon">🚨</div>
+            <div>
+              <div class="dash-label">🚨 Cuentas en Cuarentena</div>
+              <div class="dash-value"><span id="statExpiring">0</span></div>
+            </div>
           </div>
-          
-          <div id="dashProductsCard" class="dash-card clickable" onclick="openProductsFromDashboard()">
-            <div class="dash-icon">📦</div>
-            <div><div class="dash-label">Productos</div><div id="statProducts" class="dash-value"><span id="count-productos">0</span></div></div>
+          <div id="dashExpiringCard" class="dash-card clickable">
+              <div class="dash-icon">⏰</div>
+              <div>
+                  <div class="dash-label">Renovaciones / Vencidos</div>
+                  <div class="dash-value"><span id="count-pedidos_pendientes">0</span></div>
+              </div>
           </div>
-          
-          <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()">
-            <div class="dash-icon">🚫</div>
-            <div><div class="dash-label">Sin stock</div><div id="statOutOfStock" class="dash-value"><span id="count-stock_bajo">0</span></div></div>
-          </div>
-          
-          <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()">
-            <div class="dash-icon">🔐</div>
-            <div><div class="dash-label">Inventario</div><div id="statInventory" class="dash-value"><span id="count-inventario">0</span></div></div>
-          </div>
-          
-          <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()">
-            <div class="dash-icon">▤</div>
-            <div><div class="dash-label">Pedidos</div><div id="statOrders" class="dash-value"><span id="count-pedidos">0</span></div></div>
-          </div>
-          
-          <div id="dashBalanceCard" class="dash-card clickable" onclick="showSection('balance')">
-            <div class="dash-icon">💳</div>
-            <div><div class="dash-label">Saldo</div><div class="dash-value">$<span id="statBalance">0.00</span></div></div>
-          </div>
-          
-          <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()">
-            <div class="dash-icon">⚠</div>
-            <div><div class="dash-label">Reportes pendientes</div><div id="statReports" class="dash-value"><span id="count-fallas_reportadas">0</span></div></div>
-          </div>
-          
-          <div id="dashExpiringCard" class="dash-card clickable" onclick="showSection('alerts')">
-            <div class="dash-icon">⏰</div>
-            <div><div class="dash-label">Renovaciones</div><div id="statExpiring" class="dash-value"><span id="count-pedidos_pendientes">0</span></div></div>
-          </div>
-          
-          <div id="dashBalanceRequestsCard" class="dash-card clickable" onclick="openBalanceRequests()">
-            <div class="dash-icon">💰</div>
-            <div><div class="dash-label">Saldo pendiente</div><div id="statBalanceRequests" class="dash-value"><span id="count-carga_pendiente">0</span></div></div>
-          </div>
-          
-          <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()">
-            <div class="dash-icon">📊</div>
-            <div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="statSalesToday"><span id="count-financiero">0.00</span></span></div></div>
-          </div>
-          
-          <div id="dashDailyCutCard" class="dash-card clickable hidden" onclick="openDailyCut()">
-            <div class="dash-icon">🧾</div>
-            <div><div class="dash-label">Corte diario</div><div class="small-text">Ventas, costos y utilidad</div></div>
-          </div>
-          
-          <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()">
-            <div class="dash-icon">📥</div>
-            <div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div>
-          </div>
-          
-          <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')">
-            <div class="dash-icon">🏪</div>
-            <div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div>
-          </div>
+          <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div id="count-financiero" class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
+          <div id="dashDailyCutCard" class="dash-card clickable hidden" onclick="openDailyCut()"><div class="dash-icon">🧾</div><div><div class="dash-label">Corte diario</div><div class="small-text">Ventas, costos y utilidad</div></div></div>
+          <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()"><div class="dash-icon">📥</div><div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div></div>
+          <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>
         </div>
-
         <div id="dashboardChartsPanel" class="row hidden">
           <div class="panel dashboard-chart-card">
             <div class="panel-head"><div><h2>Productos más vendidos</h2><p class="chart-note">Productos con más pedidos exitosos hoy.</p></div><button class="outline-btn" style="width:auto" onclick="openSalesReport()">Ver reporte</button></div>
@@ -192,7 +131,6 @@ onclick="showSection('distributorEarnings')">
             <div id="dashboardTopUsersChart" class="empty-chart">Sin ventas todavía.</div>
           </div>
         </div>
-        
         <div id="recentOrdersList" class="hidden"></div>
       </section>
 
@@ -409,7 +347,7 @@ onclick="showSection('distributorEarnings')">
       <section id="section-admin" class="section">
         <h1 class="section-title">Panel admin</h1>
         <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
-        <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
+        <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><button class="green-btn" onclick="addBalance()">Agregar saldo</button><button id="adminResetPasswordBtn" class="primary-btn" style="margin-top:10px" onclick="botonDePanico()">🔑 Resetear Contraseña</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
         <div id="adminSubadminPricesPanel" class="panel">
           <div class="panel-head">
             <div>
@@ -500,6 +438,12 @@ onclick="showSection('distributorEarnings')">
 
               <label class="field-label">URL para código/soporte (opcional)</label>
               <input id="platformAccessUrl" placeholder="https://..." />
+
+              <button id="csvSelectFileBtn" class="outline-btn" type="button">📁 Seleccionar archivo CSV</button>
+              <button id="csvProcessUploadBtn" class="primary-btn csv-process-btn" type="button" disabled>🚀 Procesar e Iniciar Carga</button>
+              <div id="csvSelectedFileName" class="small-text">Ningún archivo seleccionado.</div>
+              <button id="csvDownloadInventoryBtn" class="outline-btn inventory-download-btn" type="button">📥 Descargar Inventario (CSV)</button>
+              <input type="file" id="csv-upload-input" accept=".csv" style="display:none;" />
               
               <button class="green-btn" onclick="createPlatformAccount()">Guardar cuenta disponible</button>
             </div>
@@ -510,7 +454,12 @@ onclick="showSection('distributorEarnings')">
           </div>
           <hr class="divider">
           <h3>Últimas cuentas agregadas</h3>
-          <div id="platformAccountsList">Sin cuentas.</div>
+          <div id="platformAccountsList" data-inventory-container="true">Sin cuentas.</div>
+          <div id="inventoryPaginationControls" class="table-pagination">
+            <button id="inv-prev-btn" class="outline-btn" type="button" style="width:100%">◀ Anterior</button>
+            <div id="inv-page-info" class="pager-status">Página 1 de 1</div>
+            <button id="inv-next-btn" class="outline-btn" type="button" style="width:100%">Siguiente ▶</button>
+          </div>
         </div>
 
 
@@ -578,6 +527,37 @@ onclick="showSection('distributorEarnings')">
 </div>
 
 <script src="app.js"></script>
+
+  <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
+    <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>
+    <div class="modal-entrega-card" role="dialog" aria-modal="true" aria-labelledby="modalEntregaTitulo">
+      <button class="modal-entrega-close" type="button" onclick="closeModalEntregaInmediata()" aria-label="Cerrar entrega inmediata">✕</button>
+      <h2 id="modalEntregaTitulo">🎉 Entrega Inmediata Completada</h2>
+      <p class="small-text">Copia estos datos y guárdalos en un lugar seguro.</p>
+      <textarea id="modalEntregaInmediataText" readonly></textarea>
+      <div class="modal-entrega-actions">
+        <button class="outline-btn" type="button" onclick="copyEntregaInmediataData()">📋 Copiar datos</button>
+        <button class="modal-entrega-confirm" type="button" onclick="closeModalEntregaInmediata()">✅ Datos Copiados, Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalStatusCSV" class="modal-status-csv hidden" aria-hidden="true">
+    <div class="modal-status-csv-backdrop"></div>
+    <div class="modal-status-csv-card" role="dialog" aria-modal="true" aria-labelledby="modalStatusCSVTitle">
+      <h2 id="modalStatusCSVTitle">Estado de Carga Masiva CSV</h2>
+      <div id="modalStatusCSVLoading" class="modal-status-csv-loading hidden">
+        <div class="csv-spinner"></div>
+        <p>Cargando/Procesando cuentas...</p>
+      </div>
+      <div id="modalStatusCSVResult" class="modal-status-csv-result hidden">
+        <p id="csvSuccessSummary" class="csv-summary-success"></p>
+        <p id="csvErrorSummary" class="csv-summary-error hidden"></p>
+        <div id="csvErrorList" class="csv-error-list hidden"></div>
+      </div>
+      <button id="csvStatusCloseBtn" class="modal-status-csv-close" type="button" onclick="closeModalStatusCSV()">Entendido / Cerrar</button>
+    </div>
+  </div>
 
 </body>
 </html>

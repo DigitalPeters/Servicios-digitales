@@ -1,4 +1,5 @@
-require("dotenv").config();
+process.env.DATABASE_URL = "postgresql://postgres:tIUHZOwRTVTQVaNmQbOXoKTdqtMVSHyN@ballast.proxy.rlwy.net:10856/railway";
+
 const express = require("express");
 console.log("VERSION RECUPERACION 11-JUN-2026");
 const { Pool } = require("pg");
@@ -8,13 +9,12 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const compression = require("compression"); // <-- NUEVO COMPRESOR
 const nodemailer = require("nodemailer");
-const createUsersAccessService = require("./services/usersAccessService");
-const createUsersRoutes = require("./routes/usersRoutes");
 
 const app = express();
 const codigosRecuperacion = new Map();
 
 const PORT = process.env.PORT || 3000;
+const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
 
 app.use(bodyParser.json({ limit: "10mb" }));
 app.use(cors());
@@ -24,65 +24,6 @@ app.use(express.static("public"));
 app.get("/test-recuperacion", (req, res) => {
   res.send("OK TEST");
 });
-
-// =========================================================================
-// 🚀 ZONA DE RUTAS CRÍTICAS DEL DASHBOARD (PEGAR AQUÍ ARRIBA)
-// =========================================================================
-
-app.get('/api/admin/conteos-dashboard', async (req, res) => {
-    try {
-        const usuarios = await pool.query("SELECT COUNT(*) FROM usuarios WHERE rol = 'vendedor'").catch(() => ({rows:[{count:0}]}));
-        const productos = await pool.query("SELECT COUNT(*) FROM productos").catch(() => ({rows:[{count:0}]}));
-        const inventario = await pool.query("SELECT COUNT(*) FROM inventario WHERE estado = 'disponible'").catch(() => ({rows:[{count:0}]}));
-        const pedidos = await pool.query("SELECT COUNT(*) FROM ventas").catch(() => ({rows:[{count:0}]}));
-        const pedidosPend = await pool.query("SELECT COUNT(*) FROM ventas WHERE estado = 'pendiente'").catch(() => ({rows:[{count:0}]}));
-        const fallas = await pool.query("SELECT COUNT(*) FROM fallas WHERE estado = 'abierta'").catch(() => ({rows:[{count:0}]}));
-        const cargas = await pool.query("SELECT COUNT(*) FROM recargas WHERE estado = 'pendiente'").catch(() => ({rows:[{count:0}]}));
-
-        res.json({
-            usuarios: parseInt(usuarios.rows[0].count || 0),
-            productos: parseInt(productos.rows[0].count || 0),
-            stock_bajo: 0, 
-            inventario: parseInt(inventario.rows[0].count || 0),
-            pedidos: parseInt(pedidos.rows[0].count || 0),
-            pedidos_pendientes: parseInt(pedidosPend.rows[0].count || 0),
-            fallas_reportadas: parseInt(fallas.rows[0].count || 0),
-            carga_pendiente: parseInt(cargas.rows[0].count || 0)
-        });
-    } catch (err) {
-        console.error("Error interno en conteos-dashboard:", err.message);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.get('/api/admin/reporte-ventas-hoy', async (req, res) => {
-    try {
-        const query = `
-            SELECT COALESCE(SUM(precio_venta - costo_producto), 0) as ganancias_netas 
-            FROM ventas WHERE fecha_venta::date = CURRENT_DATE
-        `;
-        const resultado = await pool.query(query).catch(() => ({rows:[{ganancias_netas:0}]}));
-        res.json(resultado.rows[0]);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.get('/api/productos-tienda', async (req, res) => {
-    try {
-        const query = `
-            SELECT p.id, p.nombre, COUNT(i.id) as stock_actual, COALESCE(p.precio, 0) as precio_venta
-            FROM productos p
-            LEFT JOIN inventario i ON p.id = i.producto_id AND i.estado = 'disponible'
-            GROUP BY p.id, p.nombre, p.precio
-        `;
-        const resultado = await pool.query(query).catch(() => ({rows:[]}));
-        res.json(resultado.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
 // ===============================
 // NOTIFICACIONES POR CORREO CON RESEND
 // ===============================
@@ -365,27 +306,276 @@ function normalizeFieldName(name) {
     .replace(/^_+|_+$/g, "");
 }
 
-const usersAccessService = createUsersAccessService({
-  pool,
-  jwt,
-  secret: process.env.JWT_SECRET || "mi_super_secreto"
-});
+function generateToken(user) {
+  return jwt.sign(
+    {
+      id: user.id,
+      role: user.role
+    },
+    SECRET,
+    {
+      expiresIn: "24h"
+    }
+  );
+}
 
-const {
-  generateToken,
-  authMiddleware,
-  adminMiddleware,
-  mainAdminMiddleware,
-  distributorMiddleware,
-  getAdminPanelForEmail,
-  getViewerContext,
-  getOwnerAndNotificationForUser,
-  adminOwnedWhere,
-  getEffectiveProductPrice,
-  getReportScopeOwnerId,
-  getScopedOrdersCondition,
-  getScopedReportsCondition
-} = usersAccessService;
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Token faltante" });
+  }
+
+  try {
+    req.user = jwt.verify(token, SECRET);
+    next();
+  } catch {
+    return res.status(403).json({ error: "Token inválido" });
+  }
+}
+
+async function adminMiddleware(req, res, next) {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin requerido" });
+    }
+
+    const userResult = await pool.query(
+      `SELECT u.id, u.email, u.name, u.role, u.balance,
+              COALESCE(u.is_subadmin, false) AS is_subadmin,
+              u.owner_user_id,
+              ap.id AS admin_panel_id,
+              ap.business_name AS admin_panel_business_name,
+              ap.status AS admin_panel_status
+       FROM users u
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       WHERE u.id = $1`,
+      [req.user.id]
+    );
+
+    const user = userResult.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    if (user.admin_panel_id && String(user.admin_panel_status || "activo").toLowerCase() !== "activo") {
+      return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    }
+
+    req.adminUser = user;
+    req.isPanelAdmin = Boolean(user.admin_panel_id);
+    req.isMainAdmin = !req.isPanelAdmin;
+    next();
+  } catch (err) {
+    console.error("Error validando admin:", err.message);
+    return res.status(500).json({ error: "Error validando permisos" });
+  }
+}
+
+function mainAdminMiddleware(req, res, next) {
+  if (!req.isMainAdmin) {
+    return res.status(403).json({ error: "Admin principal requerido" });
+  }
+  next();
+}
+
+
+async function distributorMiddleware(req, res, next) {
+  try {
+    const result = await pool.query(
+      `SELECT id, role, COALESCE(is_subadmin, false) AS is_subadmin FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+
+    const user = result.rows[0];
+
+    if (!user || (user.role !== "admin" && user.is_subadmin !== true)) {
+      return res.status(403).json({ error: "Distribuidor requerido" });
+    }
+
+    req.distributor = user;
+    next();
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error validando distribuidor" });
+  }
+}
+
+async function getFullUser(userId, client = pool) {
+  const result = await client.query(
+    `SELECT id, name, email, role, balance,
+            COALESCE(is_subadmin, false) AS is_subadmin,
+            owner_user_id
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+
+  return result.rows[0];
+}
+
+async function getAdminPanelForEmail(email, client = pool) {
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  const result = await client.query(
+    `SELECT id, business_name, admin_name, email, status, plan_type, expires_at,
+            bank_name, bank_holder, bank_clabe, payment_concept, notification_email
+     FROM admin_panels
+     WHERE lower(email) = lower($1)
+     LIMIT 1`,
+    [cleanEmail]
+  );
+
+  return result.rows[0] || null;
+}
+
+
+async function getViewerContext(userId, client = pool) {
+  const result = await client.query(
+    `SELECT u.id, u.name, u.email, u.role, u.balance,
+            COALESCE(u.is_subadmin, false) AS is_subadmin,
+            u.owner_user_id,
+            ap.id AS admin_panel_id,
+            ap.business_name AS admin_panel_business_name,
+            ap.bank_name, ap.bank_holder, ap.bank_clabe, ap.payment_concept,
+            ap.notification_email, ap.status AS admin_panel_status,
+            owner_panel.id AS owner_panel_id
+     FROM users u
+     LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+     LEFT JOIN users owner_user ON owner_user.id = u.owner_user_id
+     LEFT JOIN admin_panels owner_panel ON lower(owner_panel.email) = lower(owner_user.email)
+     WHERE u.id = $1`,
+    [userId]
+  );
+  const viewer = result.rows[0] || null;
+  if (!viewer) return null;
+  viewer.is_panel_admin = Boolean(viewer.admin_panel_id);
+  viewer.owner_is_panel_admin = Boolean(viewer.owner_panel_id);
+  // Reglas de negocio:
+  // - admin principal: datos globales (owner_admin_id NULL/0)
+  // - usuario convertido a distribuidor: usa productos/stock globales del admin principal
+  // - panel vendido/rentado: usa sus propios productos/stock (owner_admin_id = su id de users)
+  // - vendedor de panel vendido/rentado: usa productos/stock del panel dueño
+  // - vendedor de distribuidor convertido: usa productos/stock globales del admin principal
+  viewer.owner_admin_id = viewer.is_panel_admin ? viewer.id : (viewer.owner_is_panel_admin ? viewer.owner_user_id : null);
+  return viewer;
+}
+
+
+async function getOwnerAndNotificationForUser(userId, client = pool) {
+  const result = await client.query(
+    `SELECT
+       u.id,
+       u.email,
+       u.owner_user_id,
+       owner.email AS owner_email,
+       own_panel.id AS owner_panel_id,
+       own_panel.notification_email AS owner_notification_email,
+       self_panel.id AS self_panel_id,
+       self_panel.notification_email AS self_notification_email
+     FROM users u
+     LEFT JOIN users owner ON owner.id = u.owner_user_id
+     LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
+     LEFT JOIN admin_panels self_panel ON lower(self_panel.email) = lower(u.email)
+     WHERE u.id = $1
+     LIMIT 1`,
+    [userId]
+  );
+
+  const row = result.rows[0] || {};
+  const ownerAdminId = row.owner_user_id || (row.self_panel_id ? row.id : null);
+  const notificationEmail = row.owner_notification_email || row.self_notification_email || "";
+
+  return { ownerAdminId, notificationEmail };
+}
+
+function adminOwnedWhere(viewer, alias = "") {
+  const prefix = alias ? alias + "." : "";
+
+  // Panel vendido/rentado y sus vendedores: solo datos propios del panel.
+  if (viewer && viewer.owner_admin_id) {
+    return { clause: `${prefix}owner_admin_id = $1`, params: [viewer.owner_admin_id] };
+  }
+
+  // Admin principal, usuarios normales y distribuidores convertidos: datos globales.
+  return { clause: `(${prefix}owner_admin_id IS NULL OR ${prefix}owner_admin_id = 0)`, params: [] };
+}
+
+function dynamicStockSubquery(productAlias = "products") {
+  return `COALESCE((
+    SELECT COUNT(*)::int
+    FROM platform_accounts pa
+    WHERE pa.status IN ('available', 'disponible')
+      AND (
+        (${productAlias}.owner_admin_id IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
+        OR pa.owner_admin_id = ${productAlias}.owner_admin_id
+      )
+      AND (
+        lower(pa.product_name) = lower(${productAlias}.name)
+        OR lower(pa.platform) = lower(${productAlias}.name)
+        OR lower(pa.platform) = lower(${productAlias}.category)
+      )
+  ), 0)`;
+}
+
+async function getEffectiveProductPrice(client, user, product) {
+  const fallbackPrice = Number(product.price || 0);
+
+  if (!user) return fallbackPrice;
+
+  if (user.role === "admin") {
+    return fallbackPrice;
+  }
+
+  // Si este usuario es vendedor de un distribuidor, toma el precio final que su distribuidor definió.
+  if (user.owner_user_id) {
+    const resellerPriceResult = await client.query(
+      `SELECT sale_price
+       FROM subadmin_reseller_prices
+       WHERE owner_user_id = $1 AND product_id = $2`,
+      [user.owner_user_id, product.id]
+    );
+
+    if (resellerPriceResult.rows[0]) {
+      return Number(resellerPriceResult.rows[0].sale_price || fallbackPrice);
+    }
+
+    // Si no tiene precio final, usa el costo/precio que ese distribuidor tiene contigo.
+    const ownerPriceResult = await client.query(
+      `SELECT sale_price
+       FROM user_product_prices
+       WHERE user_id = $1 AND product_id = $2`,
+      [user.owner_user_id, product.id]
+    );
+
+    if (ownerPriceResult.rows[0]) {
+      return Number(ownerPriceResult.rows[0].sale_price || fallbackPrice);
+    }
+
+    return fallbackPrice;
+  }
+
+  // Si es usuario normal o admin independiente, toma su precio especial si existe.
+  const customPriceResult = await client.query(
+    `SELECT sale_price
+     FROM user_product_prices
+     WHERE user_id = $1 AND product_id = $2`,
+    [user.id, product.id]
+  );
+
+  if (customPriceResult.rows[0]) {
+    return Number(customPriceResult.rows[0].sale_price || fallbackPrice);
+  }
+
+  return fallbackPrice;
+}
 
 async function initDatabase() {
   await pool.query(`
@@ -701,13 +891,38 @@ function formatFechaMX(fecha) {
   });
 }
 
+function isPdfOrCourseProduct(productName = "", productCategory = "", productType = "", assignedAccount = null) {
+  const combined = `${String(productName || "")} ${String(productCategory || "")} ${String(productType || "")}`.toLowerCase();
+  const hasPdfOrCourseWord = /(pdf|curso|ebook|manual|guia|guía)/i.test(combined);
+  const accountUrl = String(assignedAccount?.access_url || "").toLowerCase();
+  const hasPdfUrl = accountUrl.includes('.pdf');
+  return hasPdfOrCourseWord || hasPdfUrl;
+}
+
 // AÑADIMOS EL PARÁMETRO "originalDate = null"
-function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "", originalDate = null) {
+function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "", originalDate = null, productType = "") {
   // Si nos mandan una fecha vieja (reemplazo), usamos esa. Si no (venta nueva), usamos la de hoy.
   const fechaEntrega = originalDate ? new Date(originalDate) : new Date();
   
   const fechaVencimiento = new Date(fechaEntrega);
   fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+
+  const isDigitalClean = isPdfOrCourseProduct(productName, productCategory, productType, assignedAccount);
+
+  if (isDigitalClean) {
+    const cleanLines = [
+      "📄 Entrega Digital Inmediata",
+      "",
+      `📌 Producto: ${String(productName || assignedAccount.platform || productCategory || "").toUpperCase()}`,
+      `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`
+    ];
+
+    if (assignedAccount.access_url) {
+      cleanLines.push(`🔗 Enlace de acceso/descarga: ${assignedAccount.access_url}`);
+    }
+
+    return cleanLines.join("\n");
+  }
 
   const lines = [
     "🎬 Cuenta de Streaming Entregada",
@@ -779,9 +994,11 @@ async function getComboItems(client, comboItemsValue) {
   if (!ids.length) return [];
 
   const result = await client.query(
-    `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount
-     FROM products
-     WHERE id = ANY($1::int[]) AND active = 1`,
+    `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
+            ${dynamicStockSubquery("p")} AS stock,
+            p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
+     FROM products p
+     WHERE p.id = ANY($1::int[]) AND p.active = 1`,
     [ids]
   );
 
@@ -847,28 +1064,159 @@ async function findAvailableAccountForProduct(client, product, userId) {
   return result.rows[0] || null;
 }
 
-app.use(createUsersRoutes({
-  pool,
-  bcrypt,
-  generateToken,
-  getAdminPanelForEmail,
-  getViewerContext,
-  authMiddleware,
-  adminMiddleware,
-  distributorMiddleware
-}));
+// REGISTRO
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "Faltan datos" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role, balance)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, role, balance`,
+      [name.trim(), email.trim().toLowerCase(), hashedPassword, "user", 0]
+    );
+
+    const user = result.rows[0];
+    const token = generateToken(user);
+
+    res.json({
+      token,
+      message: "Usuario registrado con éxito"
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(400).json({ error: "El usuario ya existe o los datos son inválidos" });
+  }
+});
+
+// LOGIN
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const cleanEmail = String(email || "").trim().toLowerCase();
+
+    const result = await pool.query(
+      `SELECT *
+       FROM users
+       WHERE lower(regexp_replace(trim(email), '\\s+', '', 'g')) = lower(regexp_replace($1, '\\s+', '', 'g'))
+       ORDER BY id DESC
+       LIMIT 1`,
+      [cleanEmail]
+    );
+
+    let user = result.rows[0];
+
+    // Si todavía no existe en users, pero sí existe como panel admin rentado, crea su acceso automáticamente.
+    if (!user) {
+      const panel = await getAdminPanelForEmail(cleanEmail);
+      if (!panel) {
+        return res.status(404).json({ error: "Usuario no encontrado" });
+      }
+
+      if (String(panel.status || "activo").toLowerCase() !== "activo") {
+        return res.status(403).json({ error: "Panel suspendido o inactivo" });
+      }
+
+      const panelPass = await pool.query(`SELECT password FROM admin_panels WHERE id = $1`, [panel.id]);
+      const matchPanel = await bcrypt.compare(password || "", panelPass.rows[0]?.password || "");
+      if (!matchPanel) {
+        return res.status(401).json({ error: "Contraseña incorrecta" });
+      }
+
+      const created = await pool.query(
+        `INSERT INTO users (name, email, password, role, balance, is_subadmin)
+         VALUES ($1, $2, $3, 'admin', 0, false)
+         RETURNING *`,
+        [panel.admin_name || panel.business_name || cleanEmail, cleanEmail, panelPass.rows[0].password]
+      );
+      user = created.rows[0];
+    }
+
+    const panel = await getAdminPanelForEmail(user.email);
+    if (panel && String(panel.status || "activo").toLowerCase() !== "activo") {
+      return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    }
+
+    const match = await bcrypt.compare(password || "", user.password);
+
+    if (!match) {
+      return res.status(401).json({ error: "Contraseña incorrecta" });
+    }
+
+    const token = generateToken(user);
+
+    res.json({ token });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error iniciando sesión" });
+  }
+});
+
+// MI CUENTA
+app.get("/api/me", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role, u.balance,
+              COALESCE(u.is_subadmin, false) AS is_subadmin,
+              u.owner_user_id,
+              ap.id AS admin_panel_id,
+              ap.business_name AS admin_panel_business_name,
+              ap.status AS admin_panel_status,
+              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+              CASE
+                WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
+                WHEN u.role = 'admin' THEN 'admin_global'
+                ELSE 'usuario'
+              END AS account_type,
+              CASE
+                WHEN ap.id IS NOT NULL THEN 'Panel propietario'
+                WHEN COALESCE(u.is_subadmin, false) = true THEN 'Admin distribuidor'
+                WHEN u.role = 'admin' THEN 'Admin global'
+                ELSE 'Usuario'
+              END AS role_label
+       FROM users u
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       WHERE u.id = $1`,
+      [req.user.id]
+    );
+
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    if (user.is_panel_admin && String(user.admin_panel_status || "activo").toLowerCase() !== "activo") {
+      return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    }
+
+    res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando usuario" });
+  }
+});
 
 // PRODUCTOS ACTIVOS
 app.get("/api/products", authMiddleware, async (req, res) => {
   try {
     const viewer = await getViewerContext(req.user.id);
-    const owner = adminOwnedWhere(viewer, "products");
+    const owner = adminOwnedWhere(viewer, "p");
 
     const result = await pool.query(
-      `SELECT id, name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id
-       FROM products
-       WHERE active = 1 AND ${owner.clause}
-       ORDER BY category ASC, name ASC`,
+      `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
+              ${dynamicStockSubquery("p")} AS stock,
+              p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
+       FROM products p
+       WHERE p.active = 1 AND ${owner.clause}
+       ORDER BY p.category ASC, p.name ASC`,
       owner.params
     );
 
@@ -1048,9 +1396,13 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     await client.query("BEGIN");
 
     const viewerContext = await getViewerContext(userId, client);
-    const ownerFilter = adminOwnedWhere(viewerContext, "products");
+    const ownerFilter = adminOwnedWhere(viewerContext, "p");
     const productResult = await client.query(
-      `SELECT * FROM products WHERE id = $1 AND active = 1 AND ${ownerFilter.clause} FOR UPDATE`,
+      `SELECT p.*,
+              ${dynamicStockSubquery("p")} AS stock
+       FROM products p
+       WHERE p.id = $1 AND p.active = 1 AND ${ownerFilter.clause}
+       FOR UPDATE`,
       [productId, ...ownerFilter.params]
     );
 
@@ -1235,39 +1587,13 @@ console.log(
         });
       }
 
-      const fechaEntrega = new Date();
-      const fechaVencimiento = new Date(fechaEntrega);
-      fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
-
-      function formatFechaMX(fecha) {
-        return fecha.toLocaleDateString("es-MX", {
-          timeZone: "America/Mexico_City",
-          day: "2-digit",
-          month: "2-digit",
-          year: "2-digit"
-        });
-      }
-
-      deliveredAccountData = [
-        "🎬 Cuenta de Streaming Entregada",
-        "",
-        `📌 Plataforma: ${String(assignedAccount.platform || productCategory || productName || "").toUpperCase()}`,
-        `📧 Correo: ${assignedAccount.account_email || ""}`,
-        `🔐 Contraseña: ${assignedAccount.account_password || ""}`,
-        `👤 Perfil: ${assignedAccount.profile_name || "No aplica"}`,
-        `🔢 PIN de acceso: ${assignedAccount.profile_pin || "No aplica"}`,
-        `📅 Fecha de entrega: ${formatFechaMX(fechaEntrega)}`,
-        `📅 Fecha de vencimiento: ${formatFechaMX(fechaVencimiento)}`,
-        assignedAccount.access_url ? `🔗 URL para código/soporte: ${assignedAccount.access_url}` : null,
-        "",
-        "📌 Normas de uso:",
-        "✅ No editar datos de acceso",
-        "✅ No cambiar el nombre ni el código del perfil",
-        "✅ Uso exclusivo en un solo equipo",
-        "✅ No compartir el acceso con otros",
-        "",
-        "Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes."
-      ].filter(line => line !== null && line !== undefined).join("\n");
+      deliveredAccountData = buildDeliveredAccountData(
+        assignedAccount,
+        productName,
+        productCategory,
+        null,
+        product.product_type
+      );
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
@@ -1370,6 +1696,8 @@ console.log(
 
 app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   try {
+    const viewer = await getViewerContext(req.user.id);
+    const scope = adminOwnedWhere(viewer, "orders");
 
     const result = await pool.query(`
   SELECT
@@ -1380,13 +1708,14 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   FROM orders
   WHERE status = 'exito'
   AND refunded = 0
+  AND ${scope.clause}
   AND (
     created_at + INTERVAL '28 days'
   )::date
   BETWEEN CURRENT_DATE
   AND (CURRENT_DATE + INTERVAL '3 days')::date
   ORDER BY expires_at ASC
-    `);
+    `, scope.params);
 
     res.json(result.rows);
 
@@ -1398,17 +1727,21 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
 
 app.get("/api/alerts/count", authMiddleware, async (req, res) => {
   try {
+    const viewer = await getViewerContext(req.user.id);
+    const scope = adminOwnedWhere(viewer, "orders");
+
     const result = await pool.query(`
       SELECT COUNT(*) AS total
       FROM orders
       WHERE status = 'exito'
       AND refunded = 0
+      AND ${scope.clause}
       AND (
         created_at + INTERVAL '28 days'
       )::date
       BETWEEN CURRENT_DATE
       AND (CURRENT_DATE + INTERVAL '3 days')::date
-    `);
+    `, scope.params);
 
     res.json({
       count: Number(result.rows[0].total || 0)
@@ -1495,13 +1828,60 @@ app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (
       ? { clause: "owner_admin_id = $1", params: [req.user.id] }
       : { clause: "(owner_admin_id IS NULL OR owner_admin_id = 0)", params: [] };
 
-    const result = await pool.query(
-      `SELECT * FROM platform_accounts WHERE ${owner.clause} ORDER BY id DESC`,
+    const pageRaw = Number(req.query.page || 1);
+    const limitRaw = Number(req.query.limit || 50);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
+    const offset = (page - 1) * limit;
+
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM platform_accounts WHERE ${owner.clause}`,
       owner.params
     );
-    
-    // Devolvemos el array directo, sin paginación
-    res.json(result.rows);
+    const total = Number(totalResult.rows[0]?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    const summaryResult = await pool.query(
+      `SELECT
+         COALESCE(NULLIF(TRIM(product_name), ''), NULLIF(TRIM(platform), ''), 'Sin plataforma') AS product,
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status = 'available')::int AS available,
+         COUNT(*) FILTER (WHERE status = 'delivered')::int AS delivered,
+         COUNT(*) FILTER (WHERE status = 'sold_outside')::int AS sold_outside,
+         COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+       FROM platform_accounts
+       WHERE ${owner.clause}
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      owner.params
+    );
+
+    const totalsByStatusResult = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'available')::int AS available,
+         COUNT(*)::int AS total
+       FROM platform_accounts
+       WHERE ${owner.clause}`,
+      owner.params
+    );
+
+    const result = await pool.query(
+      `SELECT * FROM platform_accounts WHERE ${owner.clause} ORDER BY id DESC LIMIT $${owner.params.length + 1} OFFSET $${owner.params.length + 2}`,
+      [...owner.params, limit, offset]
+    );
+
+    res.json({
+      rows: result.rows,
+      page,
+      limit,
+      total,
+      totalPages,
+      summary: {
+        available: Number(totalsByStatusResult.rows[0]?.available || 0),
+        total: Number(totalsByStatusResult.rows[0]?.total || 0)
+      },
+      productSummary: summaryResult.rows
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error obteniendo cuentas" });
@@ -1624,6 +2004,212 @@ app.patch("/api/admin/platform-accounts/:id", authMiddleware, adminMiddleware, a
   }
 );
 
+app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload"], authMiddleware, adminMiddleware, async (req, res) => {
+  const normalizeHeader = (value) =>
+    String(value || "")
+      .replace(/^\uFEFF/, "")
+      .replace(/[\u200B-\u200D\u2060]/g, "")
+      .trim()
+      .toLowerCase();
+
+  const parseCsvLine = (rawLine, separator) => {
+    const line = String(rawLine || "");
+    const out = [];
+    let cur = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      const nxt = line[i + 1];
+      if (ch === '"') {
+        if (inQuotes && nxt === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+      if (ch === separator && !inQuotes) {
+        out.push(cur.trim());
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    out.push(cur.trim());
+    return out;
+  };
+
+  const detectSeparator = (headerLine) => {
+    const text = String(headerLine || "");
+    const semicolonCols = parseCsvLine(text, ';').length;
+    const commaCols = parseCsvLine(text, ',').length;
+    return semicolonCols > commaCols ? ';' : ',';
+  };
+
+  const parseRowsFromCsvText = (csvText) => {
+    const expected = ["producto", "correo", "contrasena", "perfil", "pin", "fecha_compra", "cuenta_madre", "url_soporte"];
+    const normalized = String(csvText || "")
+      .replace(/^\uFEFF/, "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+
+    const lines = normalized.split("\n").filter((line) => String(line).trim() !== "");
+    if (lines.length < 2) {
+      throw new Error("Archivo CSV vacío o sin filas válidas.");
+    }
+
+    const separator = detectSeparator(lines[0]);
+    const headers = parseCsvLine(lines[0], separator).map(normalizeHeader);
+    const missing = expected.filter((h) => !headers.includes(h));
+    if (missing.length) {
+      throw new Error(`Encabezados faltantes en CSV: ${missing.join(", ")}`);
+    }
+
+    const indexByHeader = {};
+    headers.forEach((h, i) => {
+      if (indexByHeader[h] === undefined) indexByHeader[h] = i;
+    });
+
+    return lines.slice(1).map((line, idx) => {
+      const cols = parseCsvLine(line, separator);
+      const row = {};
+      expected.forEach((h) => {
+        row[h] = String(cols[indexByHeader[h]] || "").trim();
+      });
+      row.__rowNumber = idx + 2;
+      return row;
+    });
+  };
+
+  let rows = [];
+  if (Array.isArray(req.body?.rows) && req.body.rows.length) {
+    rows = req.body.rows;
+  } else if (typeof req.body?.csvText === "string" && req.body.csvText.trim()) {
+    rows = parseRowsFromCsvText(req.body.csvText);
+  }
+
+  if (!rows.length) {
+    return res.status(400).json({
+      successCount: 0,
+      errorCount: 1,
+      errors: ["Archivo vacío o sin filas válidas."]
+    });
+  }
+
+  const ownerId = req.isPanelAdmin ? req.user.id : null;
+  const productScopeClause = req.isPanelAdmin
+    ? "owner_admin_id = $1"
+    : "(owner_admin_id IS NULL OR owner_admin_id = 0)";
+
+  const preparedRows = [];
+  const errors = [];
+
+  try {
+    const productsResult = await pool.query(
+      `SELECT id, name, category FROM products WHERE active = 1 AND ${productScopeClause}`,
+      req.isPanelAdmin ? [ownerId] : []
+    );
+
+    const productsMap = new Map();
+    productsResult.rows.forEach((p) => {
+      const key = String(p.name || "").trim().toLowerCase();
+      if (key) productsMap.set(key, p);
+    });
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || {};
+      const rowNumber = Number(row.__rowNumber) || i + 2;
+
+      const producto = String(row.producto || "").trim();
+      const correo = String(row.correo || "").trim();
+      const contrasena = String(row.contrasena || "").trim();
+      const perfil = String(row.perfil || "").trim();
+      const pin = String(row.pin || "").trim();
+      const fechaCompra = String(row.fecha_compra || "").trim();
+      const cuentaMadre = String(row.cuenta_madre || "").trim();
+      const urlSoporte = String(row.url_soporte || "").trim();
+
+      if (!producto) {
+        errors.push(`Fila ${rowNumber}: Falta el campo producto.`);
+        continue;
+      }
+
+      const product = productsMap.get(producto.toLowerCase());
+      if (!product) {
+        errors.push(`Fila ${rowNumber}: El producto '${producto}' no coincide con tu lista.`);
+        continue;
+      }
+
+      const isReusable = !!urlSoporte;
+      if (!isReusable && (!correo || !contrasena)) {
+        errors.push(`Fila ${rowNumber}: Para cuentas normales debes enviar correo y contrasena.`);
+        continue;
+      }
+
+      const parsedDate = fechaCompra && /^\d{4}-\d{2}-\d{2}$/.test(fechaCompra) ? fechaCompra : null;
+
+      preparedRows.push({
+        rowNumber,
+        platform: cuentaMadre || product.name || producto,
+        product_name: product.name || producto,
+        account_email: correo,
+        account_password: contrasena,
+        profile_name: perfil,
+        profile_pin: pin,
+        extra_data: "",
+        terms_conditions: "",
+        access_url: urlSoporte,
+        owner_admin_id: ownerId,
+        reusable: isReusable ? 1 : 0,
+        official_purchase_date: parsedDate
+      });
+    }
+
+    let successCount = 0;
+    for (const item of preparedRows) {
+      try {
+        await pool.query(
+          `INSERT INTO platform_accounts
+           (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)`,
+          [
+            item.platform,
+            item.product_name,
+            item.account_email,
+            item.account_password,
+            item.profile_name,
+            item.profile_pin,
+            item.extra_data,
+            item.terms_conditions,
+            item.access_url,
+            item.owner_admin_id,
+            item.reusable,
+            item.official_purchase_date
+          ]
+        );
+        successCount++;
+      } catch (insertErr) {
+        errors.push(`Fila ${item.rowNumber}: ${insertErr.message || "Error al insertar en base de datos."}`);
+      }
+    }
+
+    return res.json({
+      successCount,
+      errorCount: errors.length,
+      errors
+    });
+  } catch (err) {
+    console.error("Error bulk upload inventario:", err.message);
+    return res.status(500).json({
+      successCount: 0,
+      errorCount: errors.length + 1,
+      errors: [...errors, err.message || "Error interno procesando la carga masiva."]
+    });
+  }
+});
+
 // MIS PEDIDOS
 // MIS PEDIDOS
 app.get("/api/my-orders", authMiddleware, async (req, res) => {
@@ -1658,6 +2244,97 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Error cargando pedidos" });
   }
 });
+
+// ADMIN: USUARIOS
+app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    let result;
+    if (req.isPanelAdmin) {
+      result = await pool.query(
+        `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+                owner.name AS owner_name,
+                owner.email AS owner_email,
+                own_panel.business_name AS owner_panel_name,
+                own_panel.id AS owner_panel_id,
+                CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+                CASE WHEN own_panel.id IS NULL THEN false ELSE true END AS belongs_to_panel_owner,
+                CASE WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                     WHEN own_panel.id IS NOT NULL AND COALESCE(u.is_subadmin, false) = true THEN 'distribuidor_del_panel'
+                     WHEN own_panel.id IS NOT NULL THEN 'vendedor_panel'
+                     WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
+                     WHEN u.role = 'admin' THEN 'admin_global'
+                     ELSE 'usuario' END AS account_type
+         FROM users u
+         LEFT JOIN users owner ON owner.id = u.owner_user_id
+         LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
+         LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+         WHERE u.owner_user_id = $1
+         ORDER BY u.id DESC`,
+        [req.user.id]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+              owner.name AS owner_name,
+              owner.email AS owner_email,
+              own_panel.business_name AS owner_panel_name,
+              own_panel.id AS owner_panel_id,
+              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
+              CASE WHEN own_panel.id IS NULL THEN false ELSE true END AS belongs_to_panel_owner,
+              CASE WHEN ap.id IS NOT NULL THEN 'panel_propietario'
+                   WHEN own_panel.id IS NOT NULL AND COALESCE(u.is_subadmin, false) = true THEN 'distribuidor_del_panel'
+                   WHEN own_panel.id IS NOT NULL THEN 'vendedor_panel'
+                   WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
+                   WHEN u.role = 'admin' THEN 'admin_global'
+                   ELSE 'usuario' END AS account_type
+       FROM users u
+       LEFT JOIN users owner ON owner.id = u.owner_user_id
+       LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       ORDER BY u.id DESC`
+      );
+    }
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando usuarios" });
+  }
+});
+
+// ADMIN: AGREGAR SALDO
+app.post("/api/admin/add-balance", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { user_id, amount, note } = req.body;
+
+    if (!user_id || !amount) {
+      return res.status(400).json({ error: "ID de usuario y cantidad son obligatorios" });
+    }
+
+    const amountNumber = Number(amount);
+
+    if (amountNumber <= 0) {
+      return res.status(400).json({ error: "La cantidad debe ser mayor a 0" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2 AND ($3::int IS NULL OR owner_user_id = $3)`,
+      [amountNumber, user_id, req.isPanelAdmin ? req.user.id : null]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    res.json({
+      message: `Saldo agregado correctamente${note ? ": " + note : ""}`
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error agregando saldo" });
+  }
+});
+
 
 // USUARIO: SOLICITAR CARGA DE SALDO
 app.post("/api/balance-requests", authMiddleware, async (req, res) => {
@@ -2767,6 +3444,22 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
 // ADMIN: PEDIDOS
 app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const pageRaw = Number(req.query.page || 1);
+    const limitRaw = Number(req.query.limit || 50);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
+    const offset = (page - 1) * limit;
+    const ownerId = req.isPanelAdmin ? req.user.id : null;
+
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM orders
+       WHERE ($1::int IS NULL OR orders.owner_admin_id = $1)`,
+      [ownerId]
+    );
+    const total = Number(totalResult.rows[0]?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
     const result = await pool.query(
       `SELECT
         orders.id,
@@ -2790,14 +3483,50 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
        JOIN users ON orders.user_id = users.id
        JOIN products ON orders.product_id = products.id
        WHERE ($1::int IS NULL OR orders.owner_admin_id = $1)
-       ORDER BY orders.id DESC`,
-      [req.isPanelAdmin ? req.user.id : null]
+       ORDER BY orders.id DESC
+       LIMIT $2 OFFSET $3`,
+      [ownerId, limit, offset]
     );
 
-    res.json(result.rows);
+    res.json({
+      rows: result.rows,
+      page,
+      limit,
+      total,
+      totalPages
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando pedidos de admin" });
+  }
+});
+
+app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const ownerId = req.isPanelAdmin ? req.user.id : null;
+
+    const [usersCount, productsCount, ordersCount, inventoryCount, reportsPendingCount, balancePendingCount] = await Promise.all([
+      req.isPanelAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM users WHERE owner_user_id = $1`, [req.user.id])
+        : pool.query(`SELECT COUNT(*)::int AS total FROM users`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ($1::int IS NULL OR owner_admin_id = $1)`, [ownerId]),
+      pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE status = 'available' AND ($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0) OR owner_admin_id = $1)`, [ownerId]),
+      pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE status = 'pendiente' AND ($1::int IS NULL OR owner_admin_id = $1 OR user_id = $1 OR user_id IN (SELECT id FROM users WHERE owner_user_id = $1))`, [ownerId]),
+      pool.query(`SELECT COUNT(*)::int AS total FROM balance_requests WHERE status = 'pendiente' AND ($1::int IS NULL OR owner_admin_id = $1)`, [ownerId])
+    ]);
+
+    res.json({
+      users: Number(usersCount.rows[0]?.total || 0),
+      products: Number(productsCount.rows[0]?.total || 0),
+      orders: Number(ordersCount.rows[0]?.total || 0),
+      inventory: Number(inventoryCount.rows[0]?.total || 0),
+      reportsPending: Number(reportsPendingCount.rows[0]?.total || 0),
+      balancePending: Number(balancePendingCount.rows[0]?.total || 0)
+    });
+  } catch (err) {
+    console.error("Error dashboard counts:", err.message);
+    res.status(500).json({ error: err.message || "Error obteniendo conteos de dashboard" });
   }
 });
 
@@ -3049,6 +3778,501 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
 
 
+
+// ADMIN: activar/desactivar usuario como admin independiente
+app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const isSubadmin = req.body.is_subadmin === true;
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "Usuario inválido" });
+    }
+
+    const targetResult = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role, u.owner_user_id,
+              owner.name AS owner_name,
+              own_panel.id AS owner_panel_id,
+              own_panel.business_name AS owner_panel_name,
+              ap.id AS target_panel_id
+       FROM users u
+       LEFT JOIN users owner ON owner.id = u.owner_user_id
+       LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
+       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       WHERE u.id = $1
+       LIMIT 1`,
+      [userId]
+    );
+
+    const target = targetResult.rows[0];
+    if (!target || target.role === "admin" || target.target_panel_id) {
+      return res.status(404).json({ error: "Usuario no encontrado o no se puede modificar" });
+    }
+
+    // Si quien modifica es Panel propietario, solo puede convertir/desactivar a sus propios vendedores.
+    if (req.isPanelAdmin && Number(target.owner_user_id || 0) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "Solo puedes modificar vendedores de tu propio panel" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET is_subadmin = $1 WHERE id = $2 AND role <> 'admin'
+       RETURNING id, name, email, role, balance, COALESCE(is_subadmin, false) AS is_subadmin, owner_user_id`,
+      [isSubadmin, userId]
+    );
+
+    const isPanelSeller = Boolean(target.owner_panel_id);
+    const label = isPanelSeller ? "distribuidor del panel" : "admin distribuidor";
+    res.json({
+      message: isSubadmin ? `Usuario convertido en ${label}` : `${label.charAt(0).toUpperCase() + label.slice(1)} desactivado`,
+      user: result.rows[0]
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error actualizando distribuidor" });
+  }
+});
+
+// ADMIN: precios que tú le das a un admin independiente
+// ADMIN: precios que tú le das a un admin independiente
+app.get("/api/admin/subadmin-prices/:userId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+
+    const result = await pool.query(
+      `SELECT
+         products.id AS product_id,
+         products.name,
+         products.category,
+         products.price AS general_price,
+         products.cost_price,
+         COALESCE(user_product_prices.sale_price, products.price) AS sale_price
+       FROM products
+       LEFT JOIN user_product_prices
+         ON user_product_prices.product_id = products.id
+        AND user_product_prices.user_id = $1
+       WHERE products.active = 1
+       ORDER BY products.category ASC, products.name ASC`,
+      [userId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando precios del admin independiente" });
+  }
+});
+
+app.patch("/api/admin/subadmin-prices", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { user_id, product_id, sale_price } = req.body;
+    const priceNumber = Number(sale_price);
+
+    if (!user_id || !product_id || !priceNumber || priceNumber <= 0) {
+      return res.status(400).json({ error: "Usuario, producto y precio válido son obligatorios" });
+    }
+
+    const updateResult = await pool.query(
+      `UPDATE user_product_prices
+       SET sale_price = $3, updated_at = NOW()
+       WHERE user_id = $1 AND product_id = $2`,
+      [user_id, product_id, priceNumber]
+    );
+
+    if (updateResult.rowCount === 0) {
+      await pool.query(
+        `INSERT INTO user_product_prices (user_id, product_id, sale_price, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())`,
+        [user_id, product_id, priceNumber]
+      );
+    }
+
+    res.json({ message: "Precio del admin independiente actualizado" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error guardando precio" });
+  }
+});
+
+// DISTRIBUIDOR: vendedores y precios para vendedores
+app.get("/api/distributor/resellers", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, role, balance, owner_user_id, created_at
+       FROM users
+       WHERE owner_user_id = $1
+       ORDER BY id DESC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando vendedores" });
+  }
+});
+
+app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    const cleanName = String(name || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
+
+    if (!cleanName || !cleanEmail || !password) {
+      return res.status(400).json({ error: "Nombre, correo y contraseña son obligatorios" });
+    }
+
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Si el correo ya existe, no lo duplicamos. Lo validamos y, si pertenece al mismo panel,
+    // actualizamos su acceso para que pueda iniciar sesión correctamente.
+    const existing = await pool.query(
+      `SELECT id, name, email, owner_user_id
+       FROM users
+       WHERE lower(trim(email)) = lower($1)
+       LIMIT 1`,
+      [cleanEmail]
+    );
+
+    let user;
+
+    if (existing.rows[0]) {
+      const existingUser = existing.rows[0];
+
+      if (existingUser.owner_user_id && Number(existingUser.owner_user_id) !== Number(req.user.id)) {
+        return res.status(400).json({ error: "Ese correo ya pertenece a otro panel" });
+      }
+
+      const updated = await pool.query(
+        `UPDATE users
+         SET name = $1,
+             email = $5,
+             password = $2,
+             role = 'user',
+             owner_user_id = $3,
+             is_subadmin = FALSE
+         WHERE id = $4
+         RETURNING id, name, email, role, balance, owner_user_id`,
+        [cleanName, hashedPassword, req.user.id, existingUser.id, cleanEmail]
+      );
+
+      user = updated.rows[0];
+      return res.json({ message: "Vendedor actualizado y acceso habilitado correctamente", user });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
+       VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
+       RETURNING id, name, email, role, balance, owner_user_id`,
+      [cleanName, cleanEmail, hashedPassword, req.user.id]
+    );
+
+    user = result.rows[0];
+    res.json({ message: "Vendedor creado correctamente y acceso de login habilitado", user });
+  } catch (err) {
+    console.error("Error creando vendedor:", err.message);
+    res.status(400).json({ error: "No se pudo crear vendedor. Revisa si el correo ya existe." });
+  }
+});
+
+
+app.delete("/api/distributor/resellers/:id", authMiddleware, distributorMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const resellerId = Number(req.params.id);
+
+    if (!resellerId) {
+      return res.status(400).json({ error: "ID de vendedor inválido" });
+    }
+
+    await client.query("BEGIN");
+
+    const sellerResult = await client.query(
+      `SELECT id, name, email, owner_user_id
+       FROM users
+       WHERE id = $1 AND owner_user_id = $2
+       LIMIT 1`,
+      [resellerId, req.user.id]
+    );
+
+    const seller = sellerResult.rows[0];
+    if (!seller) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Vendedor no encontrado en tu panel" });
+    }
+
+    const usage = await client.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM orders WHERE user_id = $1) AS orders_count,
+         (SELECT COUNT(*)::int FROM balance_requests WHERE user_id = $1) AS balance_count,
+         (SELECT COUNT(*)::int FROM account_reports WHERE user_id = $1) AS reports_count`,
+      [resellerId]
+    );
+
+    const counts = usage.rows[0] || {};
+    const hasMovements = Number(counts.orders_count || 0) > 0 || Number(counts.balance_count || 0) > 0 || Number(counts.reports_count || 0) > 0;
+
+    if (hasMovements) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: "No se puede eliminar porque este vendedor ya tiene pedidos, solicitudes de saldo o reportes. Así se evita perder historial."
+      });
+    }
+
+    await client.query(`DELETE FROM subadmin_reseller_prices WHERE owner_user_id = $1`, [resellerId]);
+    await client.query(`DELETE FROM user_product_prices WHERE user_id = $1`, [resellerId]);
+    await client.query(`DELETE FROM users WHERE id = $1 AND owner_user_id = $2`, [resellerId, req.user.id]);
+
+    await client.query("COMMIT");
+    res.json({ message: "Vendedor eliminado correctamente" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error eliminando vendedor:", err.message);
+    res.status(500).json({ error: "Error eliminando vendedor" });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/distributor/resellers/:id/reset-access", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const resellerId = Number(req.params.id);
+    const { password } = req.body;
+
+    if (!resellerId || !password || String(password).length < 6) {
+      return res.status(400).json({ error: "ID y contraseña mínima de 6 caracteres son obligatorios" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `UPDATE users
+       SET email = lower(trim(email)),
+           password = $1,
+           role = 'user',
+           owner_user_id = $2,
+           is_subadmin = FALSE
+       WHERE id = $3
+         AND (owner_user_id = $2 OR owner_user_id IS NULL OR owner_user_id = 0)
+       RETURNING id, name, email, role, balance, owner_user_id`,
+      [hashedPassword, req.user.id, resellerId]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "Vendedor no encontrado en tu panel" });
+    }
+
+    res.json({ message: "Acceso del vendedor reparado correctamente", user: result.rows[0] });
+  } catch (err) {
+    console.error("Error reparando acceso de vendedor:", err.message);
+    res.status(500).json({ error: "Error reparando acceso del vendedor" });
+  }
+});
+
+
+
+// Repara acceso por correo exacto desde el panel independiente.
+// Útil cuando el vendedor fue creado antes pero no quedó ligado correctamente.
+app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const cleanEmail = String(req.body.email || "").trim().toLowerCase();
+    const cleanName = String(req.body.name || "").trim() || cleanEmail;
+    const password = String(req.body.password || "");
+
+    if (!cleanEmail || !password || password.length < 6) {
+      return res.status(400).json({ error: "Correo y contraseña mínima de 6 caracteres son obligatorios" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const existing = await pool.query(
+      `SELECT id, owner_user_id
+       FROM users
+       WHERE lower(regexp_replace(trim(email), '\s+', '', 'g')) = lower(regexp_replace($1, '\s+', '', 'g'))
+       ORDER BY id DESC
+       LIMIT 1`,
+      [cleanEmail]
+    );
+
+    let result;
+
+    if (existing.rows[0]) {
+      const existingUser = existing.rows[0];
+      if (existingUser.owner_user_id && Number(existingUser.owner_user_id) !== Number(req.user.id)) {
+        return res.status(400).json({ error: "Ese correo ya pertenece a otro panel" });
+      }
+      result = await pool.query(
+        `UPDATE users
+         SET name = $1,
+             email = $2,
+             password = $3,
+             role = 'user',
+             owner_user_id = $4,
+             is_subadmin = FALSE
+         WHERE id = $5
+         RETURNING id, name, email, role, balance, owner_user_id`,
+        [cleanName, cleanEmail, hashedPassword, req.user.id, existingUser.id]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
+         VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
+         RETURNING id, name, email, role, balance, owner_user_id`,
+        [cleanName, cleanEmail, hashedPassword, req.user.id]
+      );
+    }
+
+    res.json({ message: "Acceso reparado correctamente. Ya puede iniciar sesión con esa contraseña.", user: result.rows[0] });
+  } catch (err) {
+    console.error("Error reparando acceso por correo:", err.message);
+    res.status(500).json({ error: "Error reparando acceso por correo" });
+  }
+});
+
+app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const viewer = await getViewerContext(req.user.id);
+
+    // Si es panel vendido/rentado: solo sus productos propios.
+    if (viewer && viewer.is_panel_admin) {
+      const result = await pool.query(
+        `SELECT
+           products.id AS product_id,
+           products.name,
+           products.category,
+           products.price AS general_price,
+           COALESCE(products.cost_price, products.price, 0) AS owner_price,
+           COALESCE(subadmin_reseller_prices.sale_price, products.price) AS reseller_price
+         FROM products
+         LEFT JOIN subadmin_reseller_prices
+           ON subadmin_reseller_prices.product_id = products.id
+          AND subadmin_reseller_prices.owner_user_id = $1
+         WHERE products.active = 1
+           AND products.owner_admin_id = $1
+         ORDER BY products.category ASC, products.name ASC`,
+        [req.user.id]
+      );
+      return res.json(result.rows);
+    }
+
+    // Si es usuario convertido a distribuidor independiente: depende del admin global.
+    // Ve productos globales y los precios especiales que el admin principal le asignó.
+    const result = await pool.query(
+      `SELECT
+         products.id AS product_id,
+         products.name,
+         products.category,
+         products.price AS general_price,
+         COALESCE(user_product_prices.sale_price, products.price) AS owner_price,
+         COALESCE(subadmin_reseller_prices.sale_price, user_product_prices.sale_price, products.price) AS reseller_price
+       FROM products
+       LEFT JOIN user_product_prices
+         ON user_product_prices.product_id = products.id
+        AND user_product_prices.user_id = $1
+       LEFT JOIN subadmin_reseller_prices
+         ON subadmin_reseller_prices.product_id = products.id
+        AND subadmin_reseller_prices.owner_user_id = $1
+       WHERE products.active = 1
+         AND (products.owner_admin_id IS NULL OR products.owner_admin_id = 0)
+       ORDER BY products.category ASC, products.name ASC`,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando precios para vendedores" });
+  }
+});
+
+app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const { product_id, sale_price } = req.body;
+    const priceNumber = Number(sale_price);
+
+    if (!product_id || !priceNumber || priceNumber <= 0) {
+      return res.status(400).json({ error: "Producto y precio válido son obligatorios" });
+    }
+
+    const viewer = await getViewerContext(req.user.id);
+    const productParams = viewer?.is_panel_admin ? [product_id, req.user.id] : [product_id];
+    const productWhere = viewer?.is_panel_admin
+      ? `id = $1 AND active = 1 AND owner_admin_id = $2`
+      : `id = $1 AND active = 1 AND (owner_admin_id IS NULL OR owner_admin_id = 0)`;
+
+    const productCheck = await pool.query(`SELECT id FROM products WHERE ${productWhere} LIMIT 1`, productParams);
+    if (!productCheck.rows.length) {
+      return res.status(404).json({ error: "Producto no disponible para este panel" });
+    }
+
+    const updateResult = await pool.query(
+      `UPDATE subadmin_reseller_prices
+       SET sale_price = $3, updated_at = NOW()
+       WHERE owner_user_id = $1 AND product_id = $2`,
+      [req.user.id, product_id, priceNumber]
+    );
+
+    if (updateResult.rowCount === 0) {
+      await pool.query(
+        `INSERT INTO subadmin_reseller_prices (owner_user_id, product_id, sale_price, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())`,
+        [req.user.id, product_id, priceNumber]
+      );
+    }
+
+    res.json({ message: "Precio para vendedores actualizado" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error guardando precio para vendedores" });
+  }
+});
+
+app.post("/api/distributor/add-balance", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const { user_id, amount, note } = req.body;
+    const amountNumber = Number(amount);
+
+    if (!user_id || !amountNumber || amountNumber <= 0) {
+      return res.status(400).json({ error: "Vendedor y cantidad son obligatorios" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2 AND owner_user_id = $3`,
+      [amountNumber, user_id, req.user.id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Vendedor no encontrado" });
+    }
+
+    res.json({ message: `Saldo agregado al vendedor${note ? ": " + note : ""}` });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error agregando saldo al vendedor" });
+  }
+});
+
+
+function getReportScopeOwnerId(req) {
+  try {
+    if (req.isPanelAdmin) return Number(req.user.id);
+    if (req.adminUser && (req.adminUser.is_subadmin === true || req.adminUser.is_subadmin === 'true' || req.adminUser.is_subadmin === 1)) return Number(req.user.id);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getScopedOrdersCondition() {
+  return `($2::int IS NULL OR orders.owner_admin_id = $2 OR orders.user_id = $2 OR orders.user_id IN (SELECT id FROM users WHERE owner_user_id = $2))`;
+}
+
+function getScopedReportsCondition() {
+  return `($3::int IS NULL OR account_reports.owner_admin_id = $3 OR account_reports.user_id = $3 OR account_reports.user_id IN (SELECT id FROM users WHERE owner_user_id = $3))`;
+}
 
 // ADMIN: REPORTE DE VENTAS (fecha local México) - con costo y ganancia
 app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, res) => {
@@ -3841,70 +5065,6 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     res.status(500).json({ error: "Error al archivar y liberar la cuenta." });
   }
 });
-
-
-// =========================================================================
-// 🛡️ VERSION BULLETPROOF: ACTUALIZACIÓN SEGURO SIN CAÍDAS POR IDS NULOS
-// =========================================================================
-async function actualizarConteosDashboard() {
-    try {
-        const res = await fetch('/api/admin/conteos-dashboard');
-        if (!res.ok) return;
-        const datos = await res.json();
-
-        // 1. Mapeo defensivo para tus NUEVOS botones del Dashboard
-        const mapaNuevosBotones = {
-            'count-usuarios': datos.usuarios,
-            'count-productos': datos.productos,
-            'count-stock_bajo': datos.stock_bajo,
-            'count-inventario': datos.inventario,
-            'count-pedidos': datos.pedidos,
-            'count-pedidos_pendientes': datos.pedidos_pendientes,
-            'count-fallas_reportadas': datos.fallas_reportadas,
-            'count-carga_pendiente': datos.carga_pendiente
-        };
-
-        // Bucle seguro: Si el ID no existe en el HTML, no rompe el script
-        for (const [idHtml, valor] of Object.entries(mapaNuevosBotones)) {
-            const el = document.getElementById(idHtml);
-            if (el) {
-                el.innerText = valor !== undefined ? valor : 0;
-            }
-        }
-
-        // 2. Mapeo de respaldo para los IDs VIEJOS (Por si tu app.js original los busca en otra parte)
-        const mapaTarjetasViejas = {
-            'statUsers': datos.usuarios,
-            'statProducts': datos.productos,
-            'statInventory': datos.inventario,
-            'statOrders': datos.pedidos,
-            'statReports': datos.fallas_reportadas,
-            'statBalanceRequests': datos.carga_pendiente
-        };
-
-        for (const [idHtml, valor] of Object.entries(mapaTarjetasViejas)) {
-            const el = document.getElementById(idHtml);
-            if (el) {
-                el.innerText = valor !== undefined ? valor : 0;
-            }
-        }
-        
-        // 3. Intentar cargar de forma aislada las ganancias financieras del día
-        const resFin = await fetch('/api/admin/reporte-ventas-hoy');
-        if (resFin.ok) {
-            const d = await resFin.json();
-            
-            const cFin = document.getElementById('count-financiero');
-            if (cFin) cFin.innerText = `$${parseFloat(d.ganancias_netas || 0).toFixed(2)}`;
-            
-            const statSales = document.getElementById('statSalesToday');
-            if (statSales) statSales.innerText = parseFloat(d.ganancias_netas || 0).toFixed(2);
-        }
-
-    } catch (err) {
-        console.error("Error controlado al actualizar contadores del Dashboard:", err);
-    }
-}
 
 initDatabase()
   .then(() => {

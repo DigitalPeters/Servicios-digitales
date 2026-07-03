@@ -1,4 +1,6 @@
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
+let currentInventoryPage = 1;
+let currentOrdersPage = 1;
 
 function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
@@ -28,30 +30,27 @@ function showSection(name) {
 
   if (name === 'alerts') loadExpiringAlerts();
 
-  // --- SECCIÓN DASHBOARD Y BOTÓN HISTORIAL ---
+  // --- SECCIÓN DASHBOARD ---
   if (name === 'dashboard' && currentUser?.role === 'admin') {
     loadExpiringCount();
-
-    const dash = document.getElementById('section-dashboard'); 
-    if (dash && !document.getElementById('btnHistorialId')) {
-      const btn = document.createElement('button');
-      btn.id = 'btnHistorialId';
-      btn.innerText = "📜 Ver Historial de Recuperaciones";
-      btn.style.cssText = "margin: 20px 0; padding: 15px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold;";
-      
-      btn.onclick = window.abrirModalHistorial;
-      dash.prepend(btn);
-    }
-  }
-
-  // --- CONTROL DEL BOTÓN REGRESAR ---
-  if (name !== 'dashboard') {
-    if (typeof mostrarBotonRegresar === 'function') mostrarBotonRegresar();
-    if (typeof activarHistorialCelular === 'function') activarHistorialCelular();
-  } else {
-    if (typeof ocultarBotonRegresar === 'function') ocultarBotonRegresar();
   }
 } // <--- Esta es la ÚNICA llave que cierra toda la función
+
+function cambiarSeccion(name){
+  const key = String(name || '').toLowerCase().trim();
+  const map = {
+    dashboard: 'dashboard',
+    inicio: 'dashboard',
+    'mi-cuenta': 'account',
+    micuenta: 'account',
+    cuenta: 'account',
+    tienda: 'shop',
+    pedidos: 'orders',
+    saldo: 'balance',
+    reportes: 'reports'
+  };
+  showSection(map[key] || name);
+}
 
 function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
 
@@ -108,7 +107,7 @@ function fieldLabel(f){const labels={curp:'CURP',rfc:'RFC',idcif:'IDCIF',nss:'NS
 function getChargeModeText(m){return m==='on_success'?'Se descuenta cuando el admin marque Éxito':'Se descuenta al comprar'}
 function getStatusText(s){return({accion_en_espera:'Acción en espera',en_proceso:'En proceso',exito:'Éxito',rechazado:'Rechazado'}[s]||s)}
 function formatMoney(v){return Number(v||0).toFixed(2)}
-async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.Authorization='Bearer '+token;if(!(opt.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');return d}
+async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.Authorization='Bearer '+token;if(!(opt.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok){const detailed=(Array.isArray(d.errors)&&d.errors.length?d.errors.join(' | '):'')||(typeof d.error==='string'&&d.error)||`Error HTTP ${r.status}`;throw new Error(detailed)}return d}
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
@@ -129,18 +128,13 @@ async function loadApp() {
     statBalance.textContent = formatMoney(currentUser.balance);
     statUsers.textContent = '0';
     
-    // Creación segura del botón (solo si no existe ya)
-    if (!document.getElementById('btnHistorialId')) {
-      const btnHistorial = document.createElement('button');
-      btnHistorial.id = 'btnHistorialId';
-      btnHistorial.innerText = "📜 Historial";
-      btnHistorial.style.cssText = "position: fixed; bottom: 20px; right: 20px; background: #4b5563; color: white; padding: 15px; border: none; cursor: pointer; border-radius: 50px; z-index: 999999;";
+    const btnHistorial = document.getElementById('btnHistorialId');
+    if (btnHistorial) {
       btnHistorial.onclick = function() {
         if (typeof window.abrirModalHistorial === 'function') {
           window.abrirModalHistorial();
         }
       };
-      document.body.appendChild(btnHistorial);
     }
 
     await loadProducts();
@@ -168,16 +162,20 @@ async function loadApp() {
 async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
 
 async function loadExpiringCount(){
-console.log('LOAD EXPIRING COUNT EJECUTADO');
-
   try{
-    const data = await api('/api/alerts/count');
-
-    const stat = document.getElementById('statExpiring');
-
-    if(stat){
-      stat.textContent = data.count || 0;
+    if(!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin'){
+      const renewalsNoAdmin = document.getElementById('count-pedidos_pendientes');
+      if(renewalsNoAdmin) renewalsNoAdmin.textContent = '0';
+      return;
     }
+
+    const data = await api('/api/alerts/count');
+    const renewals = Number(data?.count || 0);
+    const renewalsEl = document.getElementById('count-pedidos_pendientes');
+    if(renewalsEl) renewalsEl.textContent = String(renewals);
+
+    const expiringCard = document.getElementById('dashExpiringCard');
+    if(expiringCard) expiringCard.classList.remove('hidden');
   }catch(e){
     console.warn('Error cargando contador de renovaciones', e);
   }
@@ -293,6 +291,7 @@ async function buyProduct(productId) {
     });
     
     showMessage(data.message || 'Compra realizada');
+    if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
     await loadApp();
     showSection('orders');
     
@@ -376,7 +375,39 @@ setTimeout(() => {
   }, 500);
 }
 
-function renderOrderData(data){const entries=Object.entries(data||{});if(!entries.length)return'';return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>`<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(v)}</p>`).join('')}</div>`}
+function isLikelyAttachmentValue(v){
+  const s=String(v||'').trim();
+  if(!s) return false;
+  if(/^data:image\//i.test(s)) return true;
+  if(/^https?:\/\//i.test(s)) return true;
+  if(/\.(png|jpe?g|webp|gif|bmp|svg|pdf)(\?|#|$)/i.test(s)) return true;
+  return false;
+}
+
+function isLikelyImageAttachment(v){
+  const s=String(v||'').trim();
+  if(/^data:image\//i.test(s)) return true;
+  if(/\.(png|jpe?g|webp|gif|bmp|svg)(\?|#|$)/i.test(s)) return true;
+  return false;
+}
+
+function renderAttachmentButtons(url){
+  const safeUrl=safeText(url||'');
+  return `<div class="proof-actions"><a class="proof-action-btn" href="${safeUrl}" target="_blank" rel="noopener noreferrer">👁️ Ver Imagen</a><a class="proof-action-btn proof-action-download" href="${safeUrl}" download>📥 Descargar Comprobante</a></div>`;
+}
+
+function renderOrderData(data){
+  const entries=Object.entries(data||{});
+  if(!entries.length)return'';
+  return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>{
+    const value=String(v??'').trim();
+    if(isLikelyAttachmentValue(value)){
+      const preview=isLikelyImageAttachment(value)?`<div class="proof-preview"><img src="${safeText(value)}" alt="Comprobante adjunto"></div>`:'';
+      return `<div class="order-proof-row"><p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b></p>${renderAttachmentButtons(value)}${preview}</div>`;
+    }
+    return `<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(value)}</p>`;
+  }).join('')}</div>`
+}
 async function enviarSolicitudSaldo(){
   try{
     const nombre=(document.getElementById('saldoNombre')?.value||'').trim();
@@ -577,6 +608,28 @@ function copyAccountDataFromOrder(orderId,source='my'){
     text=getAccountTextFromOrder(order);
   }
   copyToClipboard(text,'Datos de cuenta copiados');
+}
+
+function openModalEntregaInmediata(text){
+  const modal=document.getElementById('modalEntregaInmediata');
+  const box=document.getElementById('modalEntregaInmediataText');
+  if(!modal || !box) return;
+  box.value=String(text||'').trim();
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden','false');
+}
+
+function closeModalEntregaInmediata(){
+  const modal=document.getElementById('modalEntregaInmediata');
+  if(!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden','true');
+}
+
+function copyEntregaInmediataData(){
+  const text=document.getElementById('modalEntregaInmediataText')?.value||'';
+  if(!text.trim()) return showMessage('No hay datos para copiar','error');
+  copyToClipboard(text,'Datos de entrega copiados');
 }
 function extractAccountEmailFromText(text){
   const value=String(text||'');
@@ -1006,10 +1059,63 @@ function populatePlatformProductSelect(){
   if(current)sel.value=current;
 }
 
-// Variable global para recordar en qué página estamos y no perdernos al guardar
-let currentInventoryPage = 1;
+// Variables globales de paginación para paneles pesados
+const ADMIN_TABLE_PAGE_LIMIT = 50;
 
-window.loadPlatformInventory = async function() {
+function renderTablePager(container, pagerId, page, totalPages, prevFn, nextFn){
+  if(!container) return;
+  let pager=document.getElementById(pagerId);
+  if(!pager){
+    pager=document.createElement('div');
+    pager.id=pagerId;
+    pager.className='table-pagination';
+    container.parentNode?.appendChild(pager);
+  }
+  const safePage=Math.max(1, Number(page||1));
+  const safeTotal=Math.max(1, Number(totalPages||1));
+  const disabledPrev=safePage<=1 ? 'disabled' : '';
+  const disabledNext=safePage>=safeTotal ? 'disabled' : '';
+  pager.innerHTML=`<button class="outline-btn" style="width:100%" ${disabledPrev} onclick="${prevFn}()">◀ Anterior</button><div class="pager-status">Página ${safePage} de ${safeTotal}</div><button class="outline-btn" style="width:100%" ${disabledNext} onclick="${nextFn}()">Siguiente ▶</button>`;
+}
+
+window.goInventoryPagePrev = function(){
+  if(currentInventoryPage>1) loadPlatformInventory(currentInventoryPage-1);
+};
+
+window.goInventoryPageNext = function(){
+  loadPlatformInventory(currentInventoryPage+1);
+};
+
+function bindInventoryPaginationControls(){
+  const prevBtn=document.getElementById('inv-prev-btn');
+  const nextBtn=document.getElementById('inv-next-btn');
+  if(!prevBtn || !nextBtn || prevBtn.dataset.boundInvPager==='1') return;
+
+  prevBtn.dataset.boundInvPager='1';
+  prevBtn.onclick=function(){
+    if(currentInventoryPage<=1) return;
+    currentInventoryPage-=1;
+    loadPlatformInventory(currentInventoryPage);
+  };
+
+  nextBtn.onclick=function(){
+    currentInventoryPage+=1;
+    loadPlatformInventory(currentInventoryPage);
+  };
+}
+
+function updateInventoryPagerInfo(page,totalPages){
+  const prevBtn=document.getElementById('inv-prev-btn');
+  const nextBtn=document.getElementById('inv-next-btn');
+  const info=document.getElementById('inv-page-info');
+  const safePage=Math.max(1, Number(page||1));
+  const safeTotal=Math.max(1, Number(totalPages||1));
+  if(info) info.textContent=`Página ${safePage} de ${safeTotal}`;
+  if(prevBtn) prevBtn.disabled=safePage<=1;
+  if(nextBtn) nextBtn.disabled=safePage>=safeTotal;
+}
+
+window.loadPlatformInventory = async function(page = currentInventoryPage) {
   if(currentUser?.role !== 'admin') return;
   try {
     if(!allProducts.length) allProducts = await api('/api/products');
@@ -1017,31 +1123,28 @@ window.loadPlatformInventory = async function() {
     
     const countEl = document.getElementById('adminPlatformAccountsCount');
     const summaryBox = document.getElementById('platformStockSummary');
-    const listBox = document.getElementById('platformAccountsList');
+    const listBox = document.getElementById('platformAccountsList') || document.getElementById('adminPlatformAccountsList');
 
-    if(listBox) listBox.innerHTML = '<p class="small-text">Cargando todo el inventario...</p>';
+    if(!listBox){
+      throw new Error('No se encontró el contenedor de inventario (platformAccountsList).');
+    }
 
-    // Pedimos todos los datos al servidor (sin parámetros de página)
-    const accounts = await api('/api/admin/platform-accounts');
+    if(listBox) listBox.innerHTML = '<p class="small-text">Cargando inventario...</p>';
+
+    const payload = await api(`/api/admin/platform-accounts?page=${Math.max(1, Number(page||1))}&limit=${ADMIN_TABLE_PAGE_LIMIT}`);
+    const accounts = Array.isArray(payload?.rows) ? payload.rows : [];
+    currentInventoryPage = Number(payload?.page || 1);
+    const totalPages = Number(payload?.totalPages || 1);
+    bindInventoryPaginationControls();
+    updateInventoryPagerInfo(currentInventoryPage, totalPages);
 
     // --- CONTEO Y RESUMEN ---
-    if(countEl) countEl.textContent = accounts.filter(a => a.status === 'available').length;
-
-    const summary = {};
-    accounts.forEach(a => {
-      const key = a.product_name || a.platform || 'Sin plataforma';
-      if(!summary[key]) summary[key] = { available:0, delivered:0, sold_outside:0, failed:0, total:0 };
-      summary[key].total++;
-      if(a.status === 'available') summary[key].available++;
-      if(a.status === 'delivered') summary[key].delivered++;
-      if(a.status === 'sold_outside') summary[key].sold_outside++;
-      if(a.status === 'failed') summary[key].failed++;
-    });
+    if(countEl) countEl.textContent = Number(payload?.summary?.available || 0);
 
     if(summaryBox) {
-      const rows = Object.entries(summary).sort((a,b) => a[0].localeCompare(b[0]));
+      const rows = Array.isArray(payload?.productSummary) ? payload.productSummary : [];
       summaryBox.innerHTML = rows.length 
-        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Vendidas fuera</th><th>Fallidas</th><th>Total</th></tr></thead><tbody>${rows.map(([name,v]) => `<tr><td><b>${safeText(name)}</b>${v.available<=2?`<br><span class="error">Stock bajo</span>`:''}</td><td class="${v.available<=0?'error':(v.available<=2?'status':'success')}">${v.available}</td><td>${v.delivered}</td><td>${v.sold_outside}</td><td>${v.failed}</td><td>${v.total}</td></tr>`).join('')}</tbody></table></div>` 
+        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Plataforma</th><th>Disponibles</th><th>Entregadas</th><th>Vendidas fuera</th><th>Fallidas</th><th>Total</th></tr></thead><tbody>${rows.map(v => {const name=v.product||'Sin plataforma';const available=Number(v.available||0);const delivered=Number(v.delivered||0);const soldOutside=Number(v.sold_outside||0);const failed=Number(v.failed||0);const total=Number(v.total||0);return `<tr><td><b>${safeText(name)}</b>${available<=2?`<br><span class="error">Stock bajo</span>`:''}</td><td class="${available<=0?'error':(available<=2?'status':'success')}">${available}</td><td>${delivered}</td><td>${soldOutside}</td><td>${failed}</td><td>${total}</td></tr>`;}).join('')}</tbody></table></div>` 
         : 'Sin cuentas.';
     }
 
@@ -1483,9 +1586,9 @@ if (!isAdmin && !esPanelPropietario) {
     const btnUsr = document.getElementById('btn-dist-usuarios');
     const btnPre = document.getElementById('btn-dist-precios');
     const btnGan = document.getElementById('btn-dist-ganancias');
-    if (btnUsr) btnUsr.style.display = esDist ? 'block' : 'none';
-    if (btnPre) btnPre.style.display = esDist ? 'block' : 'none';
-    if (btnGan) btnGan.style.display = esDist ? 'block' : 'none';
+    if (btnUsr) btnUsr.classList.toggle('hidden', !esDist);
+    if (btnPre) btnPre.classList.toggle('hidden', !esDist);
+    if (btnGan) btnGan.classList.toggle('hidden', !esDist);
 
   
   // TRUCO A PRUEBA DE BALAS PARA FULMINAR LAS TARJETAS VIEJAS
@@ -1521,11 +1624,9 @@ showSection = function(name){
     Promise.allSettled([
       typeof loadUsers==='function'?loadUsers():Promise.resolve(),
       typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
-      typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
       typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
       typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
-      typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-      typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve()
+      typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve()
     ]);
   }
 };
@@ -1536,6 +1637,8 @@ function scrollToAdmin(id){
   setTimeout(()=>{
     const el=document.getElementById(id);
     if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') loadAdminOrders(1);
+    if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') loadPlatformInventory(1);
   },120);
 }
 
@@ -1549,8 +1652,8 @@ function openSalesReport(){ if(isAdminUserSafe()) scrollToAdmin('adminSalesRepor
 
 const __baseLoadPlatformInventorySafe = typeof loadPlatformInventory === 'function' ? loadPlatformInventory : null;
 if(__baseLoadPlatformInventorySafe){
-  loadPlatformInventory = async function(){
-    await __baseLoadPlatformInventorySafe();
+  loadPlatformInventory = async function(page){
+    await __baseLoadPlatformInventorySafe(page);
     const src=document.getElementById('adminPlatformAccountsCount');
     const dst=document.getElementById('statInventory');
     if(src && dst) dst.textContent = src.textContent || '0';
@@ -1605,11 +1708,9 @@ loadApp = async function(){
     await Promise.allSettled([
       typeof loadUsers==='function'?loadUsers():Promise.resolve(),
       typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
-      typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
       typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
       typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
       typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-      typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve(),
       typeof loadDailySummary==='function'?loadDailySummary():Promise.resolve(),
       typeof loadAdminActivity==='function'?loadAdminActivity():Promise.resolve()
     ]);
@@ -2209,11 +2310,9 @@ async function autoRefreshPanel(){
     await loadAnnouncements();
     if(currentUser.role === 'admin'){
       await Promise.allSettled([
-        typeof loadAdminOrders==='function'?loadAdminOrders():Promise.resolve(),
         typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
         typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
         typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-        typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve(),
         typeof loadProducts==='function'?loadProducts():Promise.resolve(),
         typeof loadAdminAnnouncements==='function'?loadAdminAnnouncements():Promise.resolve()
       ]);
@@ -2448,19 +2547,39 @@ function renderAdminOrderCompactFinal(o){
   </div>`;
 }
 
-async function loadAdminOrders(){
+async function loadAdminOrders(page){
   try{
-    adminOrders=await api('/api/admin/orders');
+    if(Number.isFinite(Number(page)) && Number(page)>0) currentOrdersPage=Math.floor(Number(page));
+    adminOrders=await api(`/api/admin/orders?page=${Math.max(1, Number(currentOrdersPage||1))}&limit=${ADMIN_TABLE_PAGE_LIMIT}`);
+    const rows=Array.isArray(adminOrders?.rows) ? adminOrders.rows : [];
+    const total=Number(adminOrders?.total || rows.length || 0);
+    const totalPages=Number(adminOrders?.totalPages || 1);
+    currentOrdersPage=Number(adminOrders?.page || 1);
+    adminOrders=rows;
+
     const adminCount=document.getElementById('adminOrdersCount');
-    if(adminCount)adminCount.textContent=adminOrders.length;
+    if(adminCount)adminCount.textContent=total;
     const stat=document.getElementById('statOrders');
-    if(stat)stat.textContent=currentUser?.role==='admin'?adminOrders.length:(myOrders||[]).length;
+    if(stat)stat.textContent=currentUser?.role==='admin'?total:(myOrders||[]).length;
     const list=document.getElementById('adminOrdersList');
     const oldNotice=document.getElementById('manualPendingNotice');
     if(oldNotice)oldNotice.remove();
     if(list)list.innerHTML=adminOrders.length?adminOrders.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos.';
+    if(list)renderTablePager(list, 'ordersPaginationControls', currentOrdersPage, totalPages, 'goAdminOrdersPagePrev', 'goAdminOrdersPageNext');
     if(typeof updateManualPendingCount==='function') updateManualPendingCount();
   }catch(e){showMessage(e.message||'Error cargando pedidos','error')}
+}
+
+function goAdminOrdersPagePrev(){
+  if(currentOrdersPage>1){
+    currentOrdersPage-=1;
+    loadAdminOrders();
+  }
+}
+
+function goAdminOrdersPageNext(){
+  currentOrdersPage+=1;
+  loadAdminOrders();
 }
 
 function renderAdminOrdersManualPendingOnly(){
@@ -2493,22 +2612,7 @@ function renderAdminReportCompactFinal(r){
       <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
       <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
-      ${r.evidence_image ? `
-<div style="margin:12px 0;">
-  <details>
-    <summary style="cursor:pointer;font-weight:bold;color:#10b981;">
-      📷 Ver evidencia adjunta
-    </summary>
-    <div style="margin-top:10px;">
-      <img
-        src="${r.evidence_image}"
-        alt="Evidencia"
-        style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid #444;"
-      />
-    </div>
-  </details>
-</div>
-` : ''}
+      ${r.evidence_image ? `<div class="order-proof-row"><p style="margin:5px 0"><b>Evidencia adjunta:</b></p>${renderAttachmentButtons(r.evidence_image)}<div class="proof-preview"><img src="${safeText(r.evidence_image)}" alt="Evidencia"></div></div>` : ''}
 <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
@@ -3379,11 +3483,9 @@ showSection = function(name){
     Promise.allSettled([
       !isPanelAdminRented() && typeof loadUsers==='function' ? loadUsers() : Promise.resolve(),
       typeof loadAdminProducts==='function' ? loadAdminProducts() : Promise.resolve(),
-      typeof loadAdminOrders==='function' ? loadAdminOrders() : Promise.resolve(),
       !isPanelAdminRented() && typeof loadBalanceRequests==='function' ? loadBalanceRequests() : Promise.resolve(),
       !isPanelAdminRented() && typeof loadAccountReports==='function' ? loadAccountReports() : Promise.resolve(),
-      !isPanelAdminRented() && typeof loadSalesReport==='function' ? loadSalesReport(true) : Promise.resolve(),
-      typeof loadPlatformInventory==='function' ? loadPlatformInventory() : Promise.resolve()
+      !isPanelAdminRented() && typeof loadSalesReport==='function' ? loadSalesReport(true) : Promise.resolve()
     ]).then(()=>applyRentedAdminLayout());
   }
 };
@@ -3395,6 +3497,8 @@ function scrollToAdmin(id){
     applyRentedAdminLayout();
     const el=document.getElementById(id);
     if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') loadAdminOrders(1);
+    if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') loadPlatformInventory(1);
   },160);
 }
 
@@ -3439,8 +3543,7 @@ if(__loadAppBeforeRentedAdmin){
       const statUsersEl=document.getElementById('statUsers'); if(statUsersEl) statUsersEl.textContent='0';
       await Promise.allSettled([
         typeof loadDistributorPanel==='function'?loadDistributorPanel():Promise.resolve(),
-        typeof loadProducts==='function'?loadProducts():Promise.resolve(),
-        typeof loadPlatformInventory==='function'?loadPlatformInventory():Promise.resolve()
+        typeof loadProducts==='function'?loadProducts():Promise.resolve()
       ]);
       applyRentedAdminLayout();
     }
@@ -4067,6 +4170,9 @@ setTimeout(() => {
 (function(){
   function isPanelOwnerUser(){
     return currentUser && (
+      (String(currentUser.role || '').toLowerCase() === 'admin' &&
+       !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true') &&
+       !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true')) ||
       currentUser.is_panel_admin === true ||
       currentUser.is_panel_admin === 1 ||
       currentUser.is_panel_admin === 'true' ||
@@ -4244,6 +4350,7 @@ window.buyProduct = async function(productId){
     });
 
     showMessage(data.message || 'Compra realizada');
+    if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
     await loadApp();
     showSection('orders');
   } catch(e) {
@@ -5370,18 +5477,19 @@ async function cambiarMiPassword() {
 setInterval(() => {
   if (!currentUser) return;
 
-  const esDistribuidor = (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' || 
-                         currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
-                         currentUser.account_type === 'admin_distribuidor' || currentUser.account_type === 'distribuidor_del_panel' || currentUser.account_type === 'panel_propietario');
+  const role = String(currentUser.role || '').toLowerCase();
+  const accountType = String(currentUser.account_type || '').toLowerCase();
+  const isSubadmin = currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true';
+  const esDistribuidor = (accountType === 'admin_distribuidor' || accountType === 'distribuidor_del_panel' || (role !== 'admin' && isSubadmin));
 
   const btnUsr = document.getElementById('btn-dist-usuarios');
   const btnPre = document.getElementById('btn-dist-precios');
   const btnGan = document.getElementById('btn-dist-ganancias');
 
   // Solo mostramos los botones si el usuario es distribuidor
-  if (btnUsr) btnUsr.style.display = esDistribuidor ? 'block' : 'none';
-  if (btnPre) btnPre.style.display = esDistribuidor ? 'block' : 'none';
-  if (btnGan) btnGan.style.display = esDistribuidor ? 'block' : 'none';
+  if (btnUsr) btnUsr.classList.toggle('hidden', !esDistribuidor);
+  if (btnPre) btnPre.classList.toggle('hidden', !esDistribuidor);
+  if (btnGan) btnGan.classList.toggle('hidden', !esDistribuidor);
 
 }, 1000);
 
@@ -5417,54 +5525,47 @@ async function checkQuarantineAccounts() {
       headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     });
     const quarantineList = await res.json();
+    const campanaVieja = document.getElementById('btn-cuarentena-alarma');
+    if (campanaVieja) campanaVieja.remove();
 
-    // --- DENTRO DE checkQuarantineAccounts() ---
-// 3. Dibujar la campana si hay cuentas pendientes
-let campana = document.getElementById('btn-cuarentena-alarma');
-if (quarantineList && quarantineList.length > 0) {
-  if (!campana) {
-    campana = document.createElement('button');
-    campana.id = 'btn-cuarentena-alarma';
-    
-    // ESTILO FLOTANTE FIJO (Siempre visible en la esquina inferior derecha)
-    campana.style.cssText = `
-      position: fixed; 
-      bottom: 20px; 
-      right: 20px; 
-      z-index: 99; 
-      background: #dc2626 !important; 
-      color: white !important; 
-      padding: 15px 25px; 
-      border-radius: 50px; 
-      font-weight: bold; 
-      border: 2px solid white; 
-      cursor: pointer; 
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-      animation: pulseAlarm 1.5s infinite;
-    `;
-    
-    campana.innerHTML = `🚨 Recuperar (${quarantineList.length})`;
-    campana.onclick = () => showQuarantineModal(quarantineList);
-    
-    // Lo añadimos al body directamente para que nada lo oculte
-    document.body.appendChild(campana);
-    
-    // Agregar animación css
-    if(!document.getElementById('anim-cuarentena')) {
-      const style = document.createElement('style');
-      style.id = 'anim-cuarentena';
-      style.innerHTML = `@keyframes pulseAlarm { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }`;
-      document.head.appendChild(style);
+    const recoverBtn = document.getElementById('btnHistorialId');
+    const count = Array.isArray(quarantineList) ? quarantineList.length : 0;
+    if (recoverBtn) {
+      recoverBtn.textContent = count > 0 ? `♻ Recuperar (${count})` : '♻ Recuperar';
+      recoverBtn.onclick = () => {
+        if (count > 0) showQuarantineModal(quarantineList);
+        else if (typeof window.abrirModalHistorial === 'function') window.abrirModalHistorial();
+      };
     }
-  } else {
-    campana.innerHTML = `🚨 Recuperar (${quarantineList.length})`;
-  }
-} else {
-  if (campana) campana.remove();
-}
+
+    const stat = document.getElementById('statExpiring');
+    if (stat) stat.textContent = String(count);
+
+    const quarantineCard = document.getElementById('dashQuarantineCard');
+    if (quarantineCard && currentUser && String(currentUser.role || '').toLowerCase() === 'admin') {
+      quarantineCard.classList.remove('hidden');
+    }
   } catch (err) {
     console.error("Error en sistema de cuarentena", err);
   }
+}
+
+function openQuarantineFromDashboard() {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) return;
+
+  fetch('/api/admin/accounts/quarantine', {
+    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+  })
+    .then(r => r.json())
+    .then(list => {
+      const quarantineList = Array.isArray(list) ? list : [];
+      const stat = document.getElementById('statExpiring');
+      if (stat) stat.textContent = String(quarantineList.length);
+      showQuarantineModal(quarantineList);
+    })
+    .catch(err => {
+      console.error('Error abriendo cuarentena:', err);
+    });
 }
 
 function showQuarantineModal(list) {
@@ -5624,37 +5725,13 @@ setInterval(checkQuarantineAccounts, 300000);
 // BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR (CENTRADO Y PEQUEÑO)
 // ==========================================
 function mostrarBotonRegresar() {
-    // 1. EL CANDADO: Si eres el Admin Global, no se muestra.
-    if (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin' && !currentUser.is_subadmin && !currentUser.is_panel_admin) {
-        return; 
-    }
-
-    if (document.getElementById('btn-volver-universal')) {
-        document.getElementById('btn-volver-universal').style.display = 'block';
-        return;
-    }
-
-    const btn = document.createElement('button');
-    btn.id = 'btn-volver-universal';
-    btn.innerHTML = '🏠 Volver al Inicio';
-    
-    // 2. POSICIÓN CENTRADA ABAJO Y TAMAÑO REDUCIDO
-   btn.style.cssText = 'position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 99; background: #ff6b00; color: white; border: none; padding: 8px 16px; border-radius: 50px; font-weight: bold; font-size: 14px; cursor: pointer; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.5); transition: 0.3s; white-space: nowrap;';
-
-    btn.onclick = () => {
-        if (typeof showSection === 'function') {
-            showSection('dashboard');
-        } else {
-            window.location.reload();
-        }
-    };
-
-    document.body.appendChild(btn);
+  const btn = document.getElementById('btn-volver-universal');
+  if (btn) btn.remove();
 }
 
 function ocultarBotonRegresar() {
     const btn = document.getElementById('btn-volver-universal');
-    if (btn) btn.style.display = 'none';
+  if (btn) btn.remove();
 }
 // Hack para atrapar el botón físico de retroceso en celulares
 window.addEventListener('popstate', function(event) {
@@ -5686,11 +5763,6 @@ async function loadExpiringAlerts() {
   try {
     list.innerHTML = '<p class="small-text">Buscando cuentas por vencer...</p>';
     const accounts = await api('/api/alerts/expiring');
-
-    const badgeContador = document.getElementById('statExpiring'); 
-    if (badgeContador) {
-        badgeContador.innerText = accounts.length;
-    }
 
     if (accounts.length === 0) {
       list.innerHTML = '<p style="color: green; font-weight: bold;">✅ No hay cuentas por vencer pronto. Todo al día.</p>';
@@ -5859,257 +5931,587 @@ async function verHistorialCuenta(id) {
   }
 }
 
-
-// Variable Global simulada para desarrollo local (Reemplazar con ID dinámico en login real)
-const USUARIO_SESION_ID = 1;
-
-// 🔄 RUTEADOR CENTRALIZADO CONECTADO A TU MOTOR INTERNO NATIVO
-// =========================================================================
-function cambiarSeccion(seccionDestino) {
-    // 1. Para las secciones de usuario nativas, usamos tu showSection original.
-    // Esto asegura que se ejecuten tus llamadas a Railway y no se vea plano o vacío.
-    if (seccionDestino === 'dashboard') {
-        if (typeof showSection === 'function') showSection('dashboard');
-        actualizarConteosDashboard();
-    } 
-    else if (seccionDestino === 'tienda') {
-        if (typeof showSection === 'function') showSection('shop');
-    } 
-    else if (seccionDestino === 'mi-cuenta') {
-        if (typeof showSection === 'function') showSection('account');
-    }
-    else if (seccionDestino === 'renovaciones') {
-        if (typeof showSection === 'function') showSection('alerts');
-    }
-    else if (seccionDestino === 'pedidos') {
-        if (typeof showSection === 'function') showSection('orders');
-    }
-    else if (seccionDestino === 'cargas-saldo') {
-        if (typeof showSection === 'function') showSection('balance');
-    }
-    else if (seccionDestino === 'fallas') {
-        if (typeof showSection === 'function') showSection('reports');
-    }
-    
-    // 2. Para tus sub-paneles de administración internos:
-    else {
-        // Activamos tu sección maestra de administración
-        if (typeof showSection === 'function') showSection('admin');
-        
-        // Ocultamos los sub-paneles internos para que no se encimen uno sobre otro
-        const panelesAdmin = [
-            'adminUsersPanel', 'adminProductsPanel', 'adminPlatformAccountsPanel', 
-            'adminOrdersPanel', 'adminSalesReportPanel', 'adminBalanceRequestsPanel', 'adminAccountReportsPanel'
-        ];
-        panelesAdmin.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
-        
-        // Desplegamos quirúrgicamente el panel solicitado por el botón
-        if (seccionDestino === 'usuarios') {
-            const el = document.getElementById('adminUsersPanel');
-            if (el) el.style.display = 'block';
-        }
-        else if (seccionDestino === 'productos') {
-            const el = document.getElementById('adminProductsPanel');
-            if (el) el.style.display = 'block';
-        }
-        else if (seccionDestino === 'stock-bajo' || seccionDestino === 'inventario') {
-            const el = document.getElementById('adminPlatformAccountsPanel');
-            if (el) el.style.display = 'block';
-        }
-        else if (seccionDestino === 'pedidos-pendientes') {
-            const el = document.getElementById('adminOrdersPanel');
-            if (el) el.style.display = 'block';
-        }
-        else if (seccionDestino === 'reporte-financiero') {
-            const el = document.getElementById('adminSalesReportPanel');
-            if (el) el.style.display = 'block';
-            // Ejecuta tu carga nativa de base de datos para pintar ingresos, costos y ganancias
-            if (typeof openSalesReport === 'function') openSalesReport();
-        }
-    }
+// ==========================================
+// MATRIZ FINAL DE VISIBILIDAD DASHBOARD (MODO CLARO)
+// Regla: ocultar/mostrar unicamente con clase .hidden
+// ==========================================
+function isGlobalAdminForDashboard(){
+  if(!currentUser) return false;
+  const role=String(currentUser.role||'').toLowerCase();
+  return role==='admin' && !isPanelAdminForDashboard();
 }
 
-// 2. RECOLECCIÓN EN BLOQUE DE CONTADORES (VERSIÓN BLINDADA)
-async function actualizarConteosDashboard() {
-    try {
-        const res = await fetch('/api/admin/conteos-dashboard');
-        if (!res.ok) throw new Error("Error de red");
-        const datos = await res.json();
+function isTruthyRoleFlag(v){
+  return v===true || v===1 || v==='1' || v==='true';
+}
 
-        // 1. Rellenar los contadores numéricos de manera segura
-        const contadores = {
-            'count-usuarios': datos.usuarios,
-            'count-productos': datos.productos,
-            'count-stock_bajo': datos.stock_bajo,
-            'count-inventario': datos.inventario,
-            'count-pedidos': datos.pedidos,
-            'count-pedidos_pendientes': datos.pedidos_pendientes,
-            'count-fallas_reportadas': datos.fallas_reportadas,
-            'count-carga_pendiente': datos.carga_pendiente
-        };
+function isPanelAdminForDashboard(){
+  if(!currentUser) return false;
+  const role=String(currentUser.role||'').toLowerCase();
+  const accountType=String(currentUser.account_type||'').toLowerCase();
+  if(role!=='admin') return false;
+  return isTruthyRoleFlag(currentUser.is_panel_admin) ||
+    ['panel_propietario','panel_admin','admin_panel'].includes(accountType) ||
+    (isTruthyRoleFlag(currentUser.is_subadmin) && accountType!=='admin_distribuidor');
+}
 
-        for (const [idHtml, valor] of Object.entries(contadores)) {
-            const el = document.getElementById(idHtml);
-            if (el) el.innerText = valor !== undefined ? valor : 0;
-        }
+function isDistributorForDashboard(){
+  if(!currentUser) return false;
+  if(isPanelAdminForDashboard()) return false;
+  const role=String(currentUser.role||'').toLowerCase();
+  const accountType=String(currentUser.account_type||'').toLowerCase();
+  return ['admin_distribuidor','distribuidor_del_panel'].includes(accountType) ||
+    (role!=='admin' && isTruthyRoleFlag(currentUser.is_subadmin));
+}
 
-        // =========================================================================
-        // 👮‍♂️ FILTRO DE SEGURIDAD MÁGICO: MISMO DASHBOARD, VISIBILIDAD POR ROLES
-        // =========================================================================
-        
-        // Evaluamos los interruptores de permisos de tu barra lateral oculta
-        const esAdmin = document.getElementById('adminMenuBtn') && !document.getElementById('adminMenuBtn').classList.contains('hidden') && document.getElementById('adminMenuBtn').style.display !== 'none';
-        const esDistribuidor = document.getElementById('distributorMenuBtn') && !document.getElementById('distributorMenuBtn').classList.contains('hidden') && document.getElementById('distributorMenuBtn').style.display !== 'none';
+function isVendorForDashboard(){
+  return !!(currentUser && !isGlobalAdminForDashboard() && !isPanelAdminForDashboard() && !isDistributorForDashboard());
+}
 
-        // --- REGLA 1: TARJETAS Y BOTONES EXCLUSIVOS DE ADMINISTRADOR GLOBAL ---
-        const elementosAdmin = [
-            'global-ventas-btn', 'dashUsersCard', 'dashProductsCard', 
-            'dashOutOfStockCard', 'dashInventoryCard', 'dashReportsCard', 
-            'dashBalanceRequestsCard', 'dashSalesTodayCard', 'dashDailyCutCard', 
-            'dashMonthlyReportCard', 'dashboardChartsPanel'
-        ];
-        elementosAdmin.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                if (esAdmin) {
-                    el.style.setProperty('display', 'block', 'important');
-                    el.classList.remove('hidden');
-                } else {
-                    el.style.setProperty('display', 'none', 'important');
-                }
-            }
-        });
+function ensureVendorDashboardCards(){
+  ['actionAccountCard','actionShopCard','actionLogoutCard'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.classList.add('hidden');
+  });
+}
 
-        // --- REGLA 2: BOTONES Y TARJETAS EXCLUSIVAS DE DISTRIBUIDORES ---
-        const elementosDistribuidor = [
-            'global-comunicados-btn', 'btn-dist-usuarios', 'btn-dist-precios', 
-            'btn-dist-ganancias', 'dashDistributorCard'
-        ];
-        elementosDistribuidor.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                if (esDistribuidor || esAdmin) {
-                    el.style.setProperty('display', 'block', 'important');
-                    el.classList.remove('hidden');
-                } else {
-                    el.style.setProperty('display', 'none', 'important');
-                }
-            }
-        });
+function resetScrollToTop(){
+  try{ window.scrollTo({ top: 0, behavior: 'smooth' }); }catch(_){ window.scrollTo(0,0); }
+  const content=document.getElementById('main-content') || document.getElementById('appSection');
+  if(content) content.scrollTop=0;
+  if(document.documentElement) document.documentElement.scrollTop=0;
+  if(document.body) document.body.scrollTop=0;
+}
 
-        // Ejecutar carga financiera nativa original
-        if (typeof obtenerMontoBotonFinanciero === 'function') {
-            obtenerMontoBotonFinanciero();
-        }
+function toggleCardByInnerId(innerId, hidden){
+  const valueEl=document.getElementById(innerId);
+  const card=valueEl ? valueEl.closest('.dash-card') : null;
+  if(card) card.classList.toggle('hidden', !!hidden);
+}
 
-    } catch (err) {
-        console.error("Error controlado en el Dashboard Unificado:", err);
+function applyDashboardRoleVisibilityMatrix(){
+  if(!currentUser) return;
+
+  const isAdminGlobal=isGlobalAdminForDashboard();
+  const isPanelAdmin=isPanelAdminForDashboard();
+  const isAdminLike=isAdminGlobal || isPanelAdmin;
+  const isDistributor=isDistributorForDashboard();
+  const isVendor=isVendorForDashboard();
+
+  ensureVendorDashboardCards();
+
+  const toggle=(id, hidden)=>{ const el=document.getElementById(id); if(el) el.classList.toggle('hidden', !!hidden); };
+  const hardHide=(id, hidden)=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    el.classList.toggle('hidden', !!hidden);
+    if(hidden){
+      el.style.setProperty('display', 'none', 'important');
+    }else{
+      el.style.removeProperty('display');
     }
-}
+  };
 
-// 3. TIENDA SAAS ESTABLE (Cambio de estados visuales por fases de resolución)
-async function inicializarTiendaSaaS() {
-    const grid = document.getElementById('tienda-productos-grid');
-    const spinner = document.getElementById('tienda-loading');
 
-    grid.style.display = 'none';
-    spinner.style.display = 'block';
-    grid.innerHTML = '';
-
-    try {
-        const res = await fetch('/api/productos-tienda');
-        if (!res.ok) throw new Error();
-        const productos = await res.json();
-
-        productos.forEach(prod => {
-            grid.innerHTML += `
-                <div class="card-producto">
-                    <h3>${prod.nombre}</h3>
-                    <p style="font-size: 1.4rem; font-weight: bold; color: #2563eb;">$${parseFloat(prod.precio_venta).toFixed(2)}</p>
-                    <p style="color: #64748b;">Disponibles: ${prod.stock_actual}</p>
-                    <button class="btn-regresar" style="background:#16a34a; width:100%; margin-top:10px;" 
-                        onclick="ejecutarCompraAutomatica(${prod.id})">Comprar Perfil</button>
-                </div>
-            `;
-        });
-
-        spinner.style.display = 'none';
-        grid.style.display = 'grid';
-    } catch (err) {
-        spinner.innerHTML = `<span style="color:red; font-weight:bold;">⚠️ Error de conexión. Inténtalo de nuevo.</span>`;
+  const hardHideSelector=(selector, hidden)=>{
+    const el=document.querySelector(selector);
+    if(!el) return;
+    el.classList.toggle('hidden', !!hidden);
+    if(hidden){
+      el.style.setProperty('display', 'none', 'important');
+    }else{
+      el.style.removeProperty('display');
     }
+  };
+
+  const adminCards=[
+    'dashUsersCard',
+    'dashProductsCard',
+    'dashOutOfStockCard',
+    'dashInventoryCard',
+    'dashOrdersCard',
+    'dashReportsCard',
+    'dashBalanceRequestsCard',
+    'dashQuarantineCard',
+    'dashExpiringCard',
+    'dashSalesTodayCard'
+  ];
+
+  const distOnlyButtons=['btn-dist-usuarios','btn-dist-precios','btn-dist-ganancias'];
+  const actionButtons=['actionOrdersBtn','actionBalanceBtn','actionReportBtn','actionResponsesBtn'];
+  const vendorOnlyCards=['actionAccountCard','actionShopCard','actionLogoutCard'];
+  const globalInfraIds=['adminPanelsCardPhase1','adminPanelsPanelPhase1','dashAdminPanelsCardMainFinal','ownerAnnouncementsMenuBtn','panicResetMenuBtn'];
+
+  // Base segura para cualquier rol
+  toggle('accountMenuBtn', false);
+  toggle('shopMenuBtn', false);
+  toggle('logoutMenuBtn', false);
+
+  if(isAdminLike){
+    hardHide('dashboardGlobalActionsBar', false);
+    hardHide('panel-botones-vendedor', true);
+    hardHideSelector('#section-dashboard .grid-cards', false);
+    hardHide('dashboardChartsPanel', false);
+    hardHide('section-admin', false);
+
+    adminCards.forEach(id=>hardHide(id,false));
+    hardHide('dashCsvUploadCard', true);
+    hardHide('dashDailyCutCard', true);
+    hardHide('dashMonthlyReportCard', true);
+
+    // Oculta infraestructura global para panel admin independiente.
+    hardHide('adminMenuBtn', true);
+    hardHide('adminSalesMenuBtn', true);
+    globalInfraIds.forEach(id=>hardHide(id, isPanelAdmin));
+    hardHide('btnHistorialId', true);
+
+    hardHide('alertsMenuBtn', true);
+    hardHide('ordersMenuBtn', true);
+    hardHide('balanceMenuBtn', true);
+    hardHide('reportsMenuBtn', true);
+    hardHide('responsesMenuBtn', true);
+
+    actionButtons.forEach(id=>hardHide(id,true));
+    distOnlyButtons.forEach(id=>hardHide(id,true));
+    vendorOnlyCards.forEach(id=>hardHide(id,true));
+    hardHide('distributorMenuBtn', true);
+    hardHide('distributorEarningsBtn', true);
+
+    hardHide('dashBalanceCard', true);
+    hardHide('dashDistributorCard', true);
+    return;
+  }
+
+  // Roles no-admin: misma estética, pero jerarquía por ocultación
+  hardHide('section-admin', true);
+  hardHide('dashboardChartsPanel', true);
+  hardHideSelector('#section-dashboard .grid-cards', true);
+  adminCards.forEach(id=>hardHide(id,true));
+  hardHide('dashBalanceCard', true);
+  hardHide('dashDistributorCard', true);
+
+  hardHide('adminMenuBtn', true);
+  hardHide('adminSalesMenuBtn', true);
+  hardHide('ownerAnnouncementsMenuBtn', true);
+  hardHide('panicResetMenuBtn', true);
+  hardHide('btnHistorialId', true);
+
+  if(isDistributor){
+    // Distribuidor: acciones comerciales y de gestión de su red.
+    hardHide('dashboardGlobalActionsBar', false);
+    hardHide('panel-botones-vendedor', false);
+
+    hardHide('alertsMenuBtn', true);
+    hardHide('ordersMenuBtn', true);
+    hardHide('balanceMenuBtn', true);
+    hardHide('reportsMenuBtn', true);
+    hardHide('responsesMenuBtn', true);
+
+    actionButtons.forEach(id=>hardHide(id,false));
+    distOnlyButtons.forEach(id=>hardHide(id,false));
+    vendorOnlyCards.forEach(id=>hardHide(id,true));
+    hardHide('distributorMenuBtn', true);
+    hardHide('distributorEarningsBtn', true);
+    return;
+  }
+
+  if(isVendor){
+    hardHide('dashboardGlobalActionsBar', false);
+    hardHide('panel-botones-vendedor', false);
+
+    hardHide('alertsMenuBtn', true);
+    hardHide('ordersMenuBtn', true);
+    hardHide('balanceMenuBtn', true);
+    hardHide('reportsMenuBtn', true);
+    hardHide('responsesMenuBtn', true);
+
+    actionButtons.forEach(id=>hardHide(id,false));
+    vendorOnlyCards.forEach(id=>hardHide(id,false));
+    distOnlyButtons.forEach(id=>hardHide(id,true));
+    hardHide('distributorMenuBtn', true);
+    hardHide('distributorEarningsBtn', true);
+
+    // Blindaje implacable: vendedor no ve herramientas admin/distribuidor.
+    [
+      'dashUsersCard','dashProductsCard','dashOutOfStockCard','dashInventoryCard','dashCsvUploadCard',
+      'dashBalanceRequestsCard','dashSalesTodayCard','dashDailyCutCard','dashMonthlyReportCard','dashQuarantineCard',
+      'dashDistributorCard','dashAdminPanelsCardMainFinal','adminPanelsCardPhase1','adminPanelsPanelPhase1',
+      'adminMenuBtn','adminSalesMenuBtn','ownerAnnouncementsMenuBtn','panicResetMenuBtn'
+    ].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.classList.add('hidden');
+      hardHide(id,true);
+    });
+  }
 }
 
-// 4. COMPRA AUTOMÁTICA
-async function ejecutarCompraAutomatica(productoId) {
-    if (!confirm("¿Confirmas la compra automatizada de este perfil?")) return;
-    try {
-        const res = await fetch('/api/comprar-perfil', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usuario_id: USUARIO_SESION_ID, producto_id: productoId })
-        });
-        const resultado = await res.json();
-        if (resultado.error) alert(`Error: ${resultado.error}`);
-        else {
-            alert(`¡Compra Exitosa!\nCredenciales: ${resultado.credenciales}`);
-            inicializarTiendaSaaS(); // Recarga la tienda sin parpadeos
-        }
-    } catch (err) {
-        alert("Ocurrió un error al procesar el pago.");
+let __dashboardCountsLastTs = 0;
+let __dashboardCountsCache = null;
+
+function actualizarConteosDashboard(){
+  if(!currentUser) return;
+
+  const setText=(id, val)=>{
+    const el=document.getElementById(id);
+    if(el) el.textContent=String(val ?? '0');
+  };
+
+  const isAdminLike=isGlobalAdminForDashboard() || isPanelAdminForDashboard();
+  if(isAdminLike){
+    const now=Date.now();
+    const useCache=__dashboardCountsCache && (now-__dashboardCountsLastTs)<10000;
+    if(useCache){
+      setText('statUsers', __dashboardCountsCache.users);
+      setText('statProducts', __dashboardCountsCache.products);
+      setText('statOrders', __dashboardCountsCache.orders);
+      setText('statInventory', __dashboardCountsCache.inventory);
+      setText('statReports', __dashboardCountsCache.reportsPending);
+      setText('statBalanceRequests', __dashboardCountsCache.balancePending);
+      setText('adminUsersCount', __dashboardCountsCache.users);
+      setText('adminProductsCount', __dashboardCountsCache.products);
+      setText('adminOrdersCount', __dashboardCountsCache.orders);
+      setText('adminPlatformAccountsCount', __dashboardCountsCache.inventory);
+    }else{
+      api('/api/admin/dashboard-counts')
+        .then(data=>{
+          __dashboardCountsCache={
+            users:Number(data?.users||0),
+            products:Number(data?.products||0),
+            orders:Number(data?.orders||0),
+            inventory:Number(data?.inventory||0),
+            reportsPending:Number(data?.reportsPending||0),
+            balancePending:Number(data?.balancePending||0)
+          };
+          __dashboardCountsLastTs=Date.now();
+          setText('statUsers', __dashboardCountsCache.users);
+          setText('statProducts', __dashboardCountsCache.products);
+          setText('statOrders', __dashboardCountsCache.orders);
+          setText('statInventory', __dashboardCountsCache.inventory);
+          setText('statReports', __dashboardCountsCache.reportsPending);
+          setText('statBalanceRequests', __dashboardCountsCache.balancePending);
+          setText('adminUsersCount', __dashboardCountsCache.users);
+          setText('adminProductsCount', __dashboardCountsCache.products);
+          setText('adminOrdersCount', __dashboardCountsCache.orders);
+          setText('adminPlatformAccountsCount', __dashboardCountsCache.inventory);
+        })
+        .catch(()=>{});
     }
+  }
+
+  applyDashboardRoleVisibilityMatrix();
 }
 
-// 5. CARGA DESDE EXCEL UTILIZANDO SHEETJS
-function subirExcelProcesado(evento) {
-    const archivo = evento.target.files[0];
-    const lector = new FileReader();
-    
-    lector.onload = async function(e) {
-        const data = new Uint8Array(e.target.result);
-        const libro = XLSX.read(data, { type: 'array' });
-        const nombreHoja = libro.SheetNames[0];
-        const json = XLSX.utils.sheet_to_json(libro.Sheets[nombreHoja]);
-
-        // Enviar array estructurado al backend
-        try {
-            const res = await fetch('/api/admin/cargar-inventario-excel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filas: json })
-            });
-            const r = await res.json();
-            alert(r.mensaje || r.error);
-        } catch (err) {
-            alert("Error al inyectar el archivo Excel.");
-        }
-    };
-    lector.readAsArrayBuffer(archivo);
+const __showSectionBeforeRoleMatrix = typeof showSection === 'function' ? showSection : null;
+if(__showSectionBeforeRoleMatrix){
+  showSection = function(name){
+    __showSectionBeforeRoleMatrix(name);
+    if(name==='dashboard') resetScrollToTop();
+    applyDashboardRoleVisibilityMatrix();
+    actualizarConteosDashboard();
+    if(name==='dashboard' && currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
+      loadExpiringCount();
+    }
+  };
 }
 
-// 6. METRICAS DETALLADAS DEL DÍA
-async function obtenerMontoBotonFinanciero() {
-    try {
-        const res = await fetch('/api/admin/reporte-ventas-hoy');
-        const d = await res.json();
-        document.getElementById('count-financiero').innerText = `$${parseFloat(d.ganancias_netas).toFixed(2)}`;
-    } catch (e) {}
+const __loadAppBeforeRoleMatrix = typeof loadApp === 'function' ? loadApp : null;
+if(__loadAppBeforeRoleMatrix){
+  loadApp = async function(){
+    await __loadAppBeforeRoleMatrix();
+    applyDashboardRoleVisibilityMatrix();
+    actualizarConteosDashboard();
+  };
 }
 
-async function cargarReporteFinancieroDetallado() {
-    try {
-        const res = await fetch('/api/admin/reporte-ventas-hoy');
-        const d = await res.json();
-        document.getElementById('fin-ventas').innerText = `$${parseFloat(d.ventas_totales).toFixed(2)}`;
-        document.getElementById('fin-costos').innerText = `$${parseFloat(d.costo_total).toFixed(2)}`;
-        document.getElementById('fin-ganancias').innerText = `$${parseFloat(d.ganancias_netas).toFixed(2)}`;
-    } catch (e) {}
+setInterval(()=>{
+  applyDashboardRoleVisibilityMatrix();
+  actualizarConteosDashboard();
+}, 1500);
+
+// Navegación final por tarjetas: separa panel admin de distribuidor.
+openUsersFromDashboard = function(){
+  if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminUsersPanel');
+  return showSection('account');
+};
+
+openProductsFromDashboard = function(){
+  if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminProductsPanel');
+  return showSection('shop');
+};
+
+openInventoryFromDashboard = function(){
+  if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminPlatformAccountsPanel');
+  return showSection('shop');
+};
+
+openOrdersFromDashboard = function(){
+  if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminOrdersPanel');
+  return showSection('orders');
+};
+
+openAccountReportsFromDashboard = function(){
+  if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminAccountReportsPanel');
+  return showSection('reports');
+};
+
+openBalanceRequests = function(){
+  if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminBalanceRequestsPanel');
+  return showSection('balance');
+};
+
+function setupExpiringCardAction(){
+  const card=document.getElementById('dashExpiringCard');
+  if(!card || card.dataset.boundExpiring==='1') return;
+  card.dataset.boundExpiring='1';
+  card.onclick=function(){ showSection('alerts'); };
 }
 
-// Inicialización Automática en Localhost
-document.addEventListener('DOMContentLoaded', () => {
-    cambiarSeccion('dashboard');
-});
+let selectedInventoryCsvFile = null;
+
+function openModalStatusCSV(){
+  const modal=document.getElementById('modalStatusCSV');
+  if(!modal) return;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden','false');
+}
+
+function closeModalStatusCSV(){
+  const modal=document.getElementById('modalStatusCSV');
+  if(!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden','true');
+}
+
+function setCsvModalLoadingState(){
+  const loading=document.getElementById('modalStatusCSVLoading');
+  const result=document.getElementById('modalStatusCSVResult');
+  const closeBtn=document.getElementById('csvStatusCloseBtn');
+  const success=document.getElementById('csvSuccessSummary');
+  const error=document.getElementById('csvErrorSummary');
+  const list=document.getElementById('csvErrorList');
+
+  if(loading) loading.classList.remove('hidden');
+  if(result) result.classList.add('hidden');
+  if(closeBtn) closeBtn.classList.add('hidden');
+  if(success) success.textContent='';
+  if(error){ error.textContent=''; error.classList.add('hidden'); }
+  if(list){ list.textContent=''; list.classList.add('hidden'); }
+}
+
+function setCsvModalResultState(successCount, errorCount, errors){
+  const loading=document.getElementById('modalStatusCSVLoading');
+  const result=document.getElementById('modalStatusCSVResult');
+  const closeBtn=document.getElementById('csvStatusCloseBtn');
+  const success=document.getElementById('csvSuccessSummary');
+  const error=document.getElementById('csvErrorSummary');
+  const list=document.getElementById('csvErrorList');
+
+  if(loading) loading.classList.add('hidden');
+  if(result) result.classList.remove('hidden');
+  if(closeBtn) closeBtn.classList.remove('hidden');
+  if(success) success.textContent=`✅ Cuentas cargadas con éxito: ${Number(successCount || 0)}`;
+
+  const hasErrors=Number(errorCount || 0) > 0;
+  if(error){
+    error.textContent=`❌ Cuentas con fallas: ${Number(errorCount || 0)}`;
+    error.classList.toggle('hidden', !hasErrors);
+  }
+
+  if(list){
+    const lines=Array.isArray(errors) ? errors : [];
+    list.textContent=lines.length ? lines.join('\n') : '';
+    list.classList.toggle('hidden', !lines.length);
+  }
+}
+
+function parseCsvLine(rawLine, separator=','){
+  const line=String(rawLine||'');
+  const out=[];
+  let cur='';
+  let inQuotes=false;
+
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    const nxt=line[i+1];
+    if(ch==='"'){
+      if(inQuotes && nxt==='"'){
+        cur+='"';
+        i++;
+      }else{
+        inQuotes=!inQuotes;
+      }
+      continue;
+    }
+    if(ch===separator && !inQuotes){
+      out.push(cur.trim());
+      cur='';
+      continue;
+    }
+    cur+=ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function detectCsvSeparator(headerLine){
+  const line=String(headerLine||'');
+  const semicolonCols=parseCsvLine(line,';').length;
+  const commaCols=parseCsvLine(line,',').length;
+  return semicolonCols>commaCols ? ';' : ',';
+}
+
+function cleanCsvHeader(value){
+  return String(value||'')
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function parseInventoryCsvText(text){
+  const normalized=String(text||'')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+  const lines=normalized.split(/\r?\n/).filter(line=>String(line).trim()!=='');
+  if(lines.length<2) throw new Error('El archivo CSV no tiene filas de datos.');
+
+  const separator=detectCsvSeparator(lines[0]);
+  const headers=parseCsvLine(lines[0], separator).map(cleanCsvHeader);
+  const expected=['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte'];
+  const missing=expected.filter(h=>!headers.includes(h));
+  if(missing.length){
+    throw new Error(`Encabezados faltantes en CSV: ${missing.join(', ')}`);
+  }
+
+  const indexByHeader={};
+  headers.forEach((h,i)=>{ if(indexByHeader[h]===undefined) indexByHeader[h]=i; });
+
+  return lines.slice(1).map((line, idx)=>{
+    const cols=parseCsvLine(line, separator);
+    const row={};
+    expected.forEach(h=>{ row[h]=String(cols[indexByHeader[h]] || '').trim(); });
+    row.__rowNumber=idx+2;
+    return row;
+  });
+}
+
+function setupInventoryCsvUploadFlow(){
+  const selectBtn=document.getElementById('csvSelectFileBtn');
+  const processBtn=document.getElementById('csvProcessUploadBtn');
+  const input=document.getElementById('csv-upload-input');
+  const nameEl=document.getElementById('csvSelectedFileName');
+  if(!selectBtn || !processBtn || !input || selectBtn.dataset.boundCsvFlow==='1') return;
+
+  selectBtn.dataset.boundCsvFlow='1';
+  processBtn.disabled=true;
+
+  selectBtn.onclick=function(){ input.click(); };
+
+  input.onchange=function(){
+    const file=input.files && input.files[0] ? input.files[0] : null;
+    selectedInventoryCsvFile=file;
+    const valid=file && /\.csv$/i.test(file.name||'');
+    processBtn.disabled=!valid;
+    if(nameEl){
+      nameEl.textContent=valid ? `Archivo listo: ${file.name}` : 'Ningún archivo seleccionado.';
+    }
+    if(file && !valid){
+      showMessage('Selecciona un archivo con extensión .csv', 'error');
+    }
+  };
+
+  processBtn.onclick=async function(){
+    if(!selectedInventoryCsvFile){
+      showMessage('Primero selecciona un archivo CSV.', 'error');
+      return;
+    }
+
+    openModalStatusCSV();
+    setCsvModalLoadingState();
+
+    try{
+      const text=await selectedInventoryCsvFile.text();
+      let rows=[];
+      try{ rows=parseInventoryCsvText(text); }catch{ rows=[]; }
+      const result=await api('/api/admin/inventario/bulk-upload', {
+        method:'POST',
+        body:JSON.stringify({ rows, csvText:text })
+      });
+
+      setCsvModalResultState(result.successCount, result.errorCount, result.errors);
+      if(typeof loadPlatformInventory==='function') await loadPlatformInventory();
+      if(typeof loadExpiringCount==='function') await loadExpiringCount();
+    }catch(e){
+      setCsvModalResultState(0, 1, [e.message || 'Error procesando el archivo CSV']);
+    }
+  };
+}
+
+function csvEscape(value){
+  return `"${String(value ?? '').replace(/"/g,'""')}"`;
+}
+
+async function downloadInventoryCsv(){
+  try{
+    const rows = [];
+    let page = 1;
+    let totalPages = 1;
+    do{
+      const payload = await api(`/api/admin/platform-accounts?page=${page}&limit=200`);
+      const chunk = Array.isArray(payload?.rows) ? payload.rows : [];
+      rows.push(...chunk);
+      totalPages = Number(payload?.totalPages || 1);
+      page += 1;
+    }while(page <= totalPages);
+
+    const headers = ['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte'];
+
+    const lines = [headers.map(csvEscape).join(',')];
+    (Array.isArray(rows) ? rows : []).forEach(acc => {
+      const line = [
+        acc.product_name || acc.platform || '',
+        acc.account_email || '',
+        acc.account_password || '',
+        acc.profile_name || '',
+        acc.profile_pin || '',
+        acc.official_purchase_date ? String(acc.official_purchase_date).slice(0,10) : '',
+        acc.platform || acc.product_name || '',
+        acc.access_url || ''
+      ].map(csvEscape).join(',');
+      lines.push(line);
+    });
+
+    const csv = '\ufeff' + lines.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `inventario_actual_${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showMessage('Inventario CSV descargado');
+  }catch(e){
+    showMessage(e.message || 'Error descargando inventario CSV', 'error');
+  }
+}
+
+function setupInventoryCsvDownloadTrigger(){
+  const btn=document.getElementById('csvDownloadInventoryBtn');
+  if(!btn || btn.dataset.boundCsvDownload==='1') return;
+  btn.dataset.boundCsvDownload='1';
+  btn.onclick=function(){ downloadInventoryCsv(); };
+}
+
+setTimeout(setupInventoryCsvUploadFlow, 400);
+setInterval(setupInventoryCsvUploadFlow, 3000);
+setTimeout(setupInventoryCsvDownloadTrigger, 500);
+setInterval(setupInventoryCsvDownloadTrigger, 3000);
+setTimeout(setupExpiringCardAction, 450);
+setInterval(setupExpiringCardAction, 3000);
+setInterval(()=>{
+  if(currentUser && String(currentUser.role || '').toLowerCase()==='admin') loadExpiringCount();
+}, 30000);
