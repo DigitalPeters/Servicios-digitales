@@ -13,20 +13,22 @@
     <div class="auth-card">
       <div class="auth-logo">P</div>
       <h1>Servicios Digitales Peters</h1>
-      <div class="tabs">
+      <p class="auth-subtitle">Accede a tu panel SaaS y administra tus servicios en un solo lugar.</p>
+      <div class="tabs auth-tabs auth-tabs-single">
         <button id="loginTab" class="tab-btn active" onclick="showAuth('login')">Iniciar sesión</button>
-        <button id="registerTab" class="tab-btn" onclick="showAuth('register')">Crear cuenta</button>
       </div>
       <div id="loginForm">
         <label class="field-label">Correo</label><input id="loginEmail" placeholder="Correo" />
         <label class="field-label">Contraseña</label><input id="loginPassword" type="password" placeholder="Contraseña" />
         <button class="primary-btn" onclick="login()">Iniciar sesión</button>
+        <p class="auth-switch-text">¿No tienes cuenta? <button type="button" class="auth-switch-btn" onclick="showAuth('register')">Regístrate aquí</button></p>
       </div>
       <div id="registerForm" class="hidden">
         <label class="field-label">Nombre</label><input id="registerName" placeholder="Nombre" />
         <label class="field-label">Correo</label><input id="registerEmail" placeholder="Correo" />
         <label class="field-label">Contraseña</label><input id="registerPassword" type="password" placeholder="Contraseña" />
-        <button class="primary-btn" onclick="register()">Crear cuenta</button>
+        <button class="primary-btn" onclick="register()">Registrarse</button>
+        <p class="auth-switch-text">¿Ya tienes cuenta? <button type="button" class="auth-switch-btn" onclick="showAuth('login')">Inicia sesión aquí</button></p>
       </div>
     </div>
   </div>
@@ -47,9 +49,10 @@
 
       <section id="section-dashboard" class="section active dashboard-premium">
         <div id="dashboardGlobalActionsBar" class="dashboard-command-bar menu-acciones-globales panel">
-          <button class="menu-btn active" data-section="dashboard" onclick="showSection('dashboard')">◴ Dashboard</button>
           <button id="accountMenuBtn" class="menu-btn" data-section="account" onclick="showSection('account')">👤 Mi Perfil / Contraseña</button>
           <button id="shopMenuBtn" class="menu-btn" data-section="shop" onclick="showSection('shop')">🛒 Ir a Tienda SaaS</button>
+          <button id="btn-anuncios" class="menu-btn" type="button">📣 Anuncios</button>
+          <button id="btn-top-reporte-ventas" class="menu-btn" type="button">📈 Reporte de Ventas</button>
           <button id="ordersMenuBtn" class="menu-btn hidden" data-section="orders" onclick="showSection('orders')">📦 Mis pedidos</button>
           <button id="balanceMenuBtn" class="menu-btn hidden" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
           <button id="reportsMenuBtn" class="menu-btn hidden" data-section="reports" onclick="showSection('reports')">🛟 Reportar falla</button>
@@ -58,6 +61,7 @@
           <button id="distributorEarningsBtn" class="menu-btn hidden" data-section="distributorEarnings" onclick="showSection('distributorEarnings')">💵 Ganancias</button>
           <button id="logoutMenuBtn" class="dashboard-utility-btn dashboard-logout-btn" onclick="logout()">🚪 Cerrar sesión</button>
         </div>
+        <div id="dashboardWelcomeBanner" class="dashboard-welcome-banner hidden" aria-live="polite"></div>
         <h1 class="section-title" onclick="reloadDashboard()" style="cursor:pointer">
   Dashboard 🔄
 </h1>
@@ -98,6 +102,7 @@
           <div id="dashProductsCard" class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">📦</div><div><div class="dash-label">Productos</div><div id="count-productos" class="dash-value"><span id="statProducts">0</span></div></div></div>
           <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()"><div class="dash-icon">🚫</div><div><div class="dash-label">Sin stock</div><div id="count-stock_bajo" class="dash-value"><span id="statOutOfStock">0</span></div></div></div>
           <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="count-inventario" class="dash-value"><span id="statInventory">0</span></div></div></div>
+          <div id="dashAccountTraceCard" class="dash-card clickable hidden" onclick="openInventoryTraceFromDashboard()"><div class="dash-icon">🕵️</div><div><div class="dash-label">Trazabilidad cuenta</div><div class="small-text">Movimientos por correo</div></div></div>
           <div id="dashCsvUploadCard" class="dash-card clickable hidden" onclick="document.getElementById('csv-upload-input')?.click()"><div class="dash-icon">📊</div><div><div class="dash-label">CSV Inventario</div><div class="small-text">📊 Cargar Cuentas desde CSV</div></div></div>
           <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="count-pedidos" class="dash-value"><span id="statOrders">0</span></div></div></div>
           <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="count-fallas_reportadas" class="dash-value"><span id="statReports">0</span></div></div></div>
@@ -407,6 +412,28 @@
     </div>
     <button class="outline-btn" style="width:auto" onclick="loadPlatformInventory()">Actualizar</button>
   </div>
+
+  <div class="search-container" style="margin: 15px 0; display: flex; gap: 10px; padding: 0 10px;">
+    <input type="text" id="input-busqueda-email" placeholder="🔍 Buscar cuenta por correo..." style="padding: 8px; width: 300px; border: 1px solid #ccc; border-radius: 4px; background: white; color: black;">
+    <button id="btn-ejecutar-busqueda" style="padding: 8px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Buscar</button>
+    <button id="btn-limpiar-busqueda" style="padding: 8px 15px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Limpiar</button>
+  </div>
+
+  <div id="inventoryTracePanel" class="panel" style="margin: 10px; border: 1px solid #dbeafe; background: #f8fbff;">
+    <div class="panel-head">
+      <div>
+        <h2 style="margin:0; color:#0f3f76;">Trazabilidad de cuenta por correo</h2>
+        <p class="small-text">Consulta venta inicial, reportes, reemplazos, perfil afectado y vencimiento a 30 días.</p>
+      </div>
+    </div>
+    <div class="tools" style="margin-bottom:10px;">
+      <input id="traceEmailInput" type="text" placeholder="correo@ejemplo.com" onkeydown="if(event.key==='Enter'){event.preventDefault();loadAccountTraceByEmail();}" />
+      <button class="primary-btn" style="width:auto" onclick="loadAccountTraceByEmail()">Consultar movimientos</button>
+      <button class="outline-btn" style="width:auto" onclick="clearAccountTraceByEmail()">Limpiar</button>
+    </div>
+    <div id="inventoryTraceResult" class="small-text">Ingresa un correo para ver su historial.</div>
+  </div>
+
   <div class="row">
     <div>
 
@@ -511,7 +538,7 @@
     <label class="checkbox-row">
       <input type="checkbox" id="productStockEnabled" /> Activar stock
     </label>
-    <input id="productStock" type="number" min="0" value="0" />
+    <input id="productStock" type="number" value="0" />
     <button onclick="createProduct()" class="primary-btn">Crear producto</button>
     <hr class="divider">
   </div>
@@ -525,8 +552,6 @@
   </div>
   <div id="adminOrdersList"></div>
 </div>
-
-<script src="app.js"></script>
 
   <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
     <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>
@@ -558,6 +583,28 @@
       <button id="csvStatusCloseBtn" class="modal-status-csv-close" type="button" onclick="closeModalStatusCSV()">Entendido / Cerrar</button>
     </div>
   </div>
+
+  
+  <script src="app.js"></script>
+
+<div id="modal-anuncios" class="modal-entrega hidden" aria-hidden="true" style="display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center; background:rgba(0,0,0,0.5);">
+    <div id="backdrop-anuncios" class="modal-entrega-backdrop"></div>
+    <div class="modal-entrega-card" role="dialog" aria-modal="true" aria-labelledby="announcementModalTitle">
+      <button id="btn-cerrar-anuncios-x" class="modal-entrega-close" type="button" aria-label="Cerrar anuncios">✕</button>
+      <h2 id="announcementModalTitle">Anuncios</h2>
+      <p class="small-text"><b>📢 Anuncio Activo Actual:</b></p>
+      <div id="anuncio-activo-txt" class="order-data" style="min-height:52px; margin-bottom:12px;">Cargando...</div>
+      <label class="field-label">Nuevo Anuncio</label>
+      <textarea id="announcementNewText" placeholder="Escribe aquí el nuevo anuncio importante..."></textarea>
+      <div class="modal-entrega-actions" style="margin-top:12px;">
+        <button id="btn-activar-anuncios" class="primary-btn" type="button">✅ Activar</button>
+        <button id="btn-ocultar-anuncios" class="danger-btn" type="button">🗑️ Desactivar / Ocultar</button>
+        <button id="btn-eliminar-anuncios" class="danger-btn" type="button">🧹 Eliminar</button>
+        <button id="btn-cerrar-anuncios" class="outline-btn" type="button">❌ Cerrar</button>
+      </div>
+    </div>
+  </div>
+
 
 </body>
 </html>

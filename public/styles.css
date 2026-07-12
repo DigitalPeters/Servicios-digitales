@@ -451,6 +451,182 @@
   color:#0f172a!important;
 }
 
+/* ===== Auth SaaS Premium (final override) ===== */
+#authSection.auth-page{
+  min-height:100vh;
+  padding:32px 16px;
+  display:grid;
+  place-items:center;
+  background:
+    radial-gradient(1000px 420px at 10% -10%, rgba(59, 130, 246, 0.22), transparent 60%),
+    radial-gradient(900px 360px at 95% 105%, rgba(14, 165, 233, 0.18), transparent 60%),
+    linear-gradient(145deg, #0f172a 0%, #172338 52%, #1e293b 100%);
+}
+
+#authSection .auth-card{
+  width:min(100%, 520px);
+  margin:0;
+  padding:34px 30px 24px;
+  border-radius:12px;
+  border:1px solid rgba(148, 163, 184, 0.28);
+  box-shadow:0 18px 55px rgba(2, 6, 23, 0.44);
+  background:rgba(255, 255, 255, 0.97);
+  position:relative;
+  backdrop-filter:blur(8px);
+}
+
+#authSection .auth-logo{
+  width:64px;
+  height:64px;
+  margin:0 auto 14px;
+  border-radius:16px;
+  font-size:30px;
+  font-weight:900;
+  background:linear-gradient(145deg, #0ea5e9 0%, #2563eb 100%);
+  color:#fff;
+  box-shadow:0 10px 25px rgba(37, 99, 235, 0.35);
+}
+
+#authSection .auth-card h1{
+  margin:0;
+  text-align:center;
+  font-size:27px;
+  color:#0f172a;
+  letter-spacing:0.01em;
+}
+
+#authSection .auth-subtitle{
+  margin:10px 0 20px;
+  text-align:center;
+  color:#475569;
+  font-size:14px;
+  line-height:1.45;
+}
+
+#authSection .auth-tabs{
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-bottom:18px;
+}
+
+#authSection .tab-btn{
+  min-height:44px;
+  border-radius:10px;
+  border:1px solid #dbe5f2;
+  background:#f8fafc;
+  color:#1e293b;
+  font-size:14px;
+  font-weight:700;
+}
+
+#authSection .tab-btn:hover{
+  transform:translateY(-1px);
+  background:#eef2ff;
+}
+
+#authSection .tab-btn.active{
+  background:linear-gradient(120deg, #1d4ed8, #2563eb);
+  border-color:#2563eb;
+  color:#fff;
+  box-shadow:0 8px 18px rgba(37, 99, 235, 0.32);
+}
+
+#authSection .field-label{
+  margin:2px 0 6px;
+  display:block;
+  font-size:13px;
+  font-weight:700;
+  color:#334155;
+}
+
+#authSection input{
+  width:100%;
+  border:1px solid #d6deea;
+  background:#f8fafc;
+  color:#0f172a;
+  border-radius:10px;
+  padding:13px 14px;
+  margin:0 0 12px;
+  transition:border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+}
+
+#authSection input::placeholder{
+  color:#94a3b8;
+}
+
+#authSection input:focus{
+  outline:none;
+  border-color:#2563eb;
+  background:#fff;
+  box-shadow:0 0 0 4px rgba(37, 99, 235, 0.15);
+}
+
+#authSection .primary-btn{
+  width:100%;
+  margin-top:4px;
+  min-height:46px;
+  border-radius:10px;
+  background:linear-gradient(120deg, #1d4ed8, #2563eb);
+  color:#fff;
+  font-weight:800;
+  letter-spacing:.01em;
+}
+
+#authSection .primary-btn:hover{
+  transform:translateY(-1px) scale(1.01);
+  filter:brightness(.95);
+}
+
+#authSection .auth-switch-text{
+  margin:14px 0 2px;
+  text-align:center;
+  color:#64748b;
+  font-size:13px;
+}
+
+#authSection .auth-switch-btn{
+  width:auto;
+  padding:0;
+  margin:0;
+  border:0;
+  background:transparent;
+  color:#1d4ed8;
+  font-size:13px;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+
+#authSection .auth-switch-btn:hover{
+  color:#1e40af;
+  transform:none;
+}
+
+#authSection #loginForm,
+#authSection #registerForm{
+  min-height:232px;
+}
+
+@media (max-width: 640px){
+  #authSection.auth-page{
+    padding:24px 14px;
+  }
+
+  #authSection .auth-card{
+    width:100%;
+    padding:26px 18px 20px;
+  }
+
+  #authSection .auth-card h1{
+    font-size:23px;
+  }
+
+  #authSection #loginForm,
+  #authSection #registerForm{
+    min-height:0;
+  }
+}
+
 #appSection input,
 #appSection textarea,
 #appSection select,
@@ -582,6 +758,119 @@
   color:#f8fafc!important;
   cursor:not-allowed;
   box-shadow:none;
+}
+
+/* ===== Trazabilidad de cuentas por correo ===== */
+#inventoryTracePanel{
+  overflow:hidden;
+}
+
+#inventoryTracePanel .tools{
+  display:grid;
+  grid-template-columns:minmax(220px, 1fr) auto auto;
+  gap:10px;
+  align-items:center;
+}
+
+.trace-summary{
+  background:#eff6ff;
+  border:1px solid #bfdbfe;
+  border-radius:12px;
+  padding:12px;
+  color:#0f172a;
+  margin-bottom:12px;
+  overflow-wrap:anywhere;
+}
+
+.trace-timeline{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.trace-card{
+  border:1px solid #dbeafe;
+  border-left:5px solid #3b82f6;
+  border-radius:14px;
+  padding:12px;
+  background:#ffffff;
+  overflow-wrap:anywhere;
+}
+
+.trace-card.trace-first-sale{
+  border-left-color:#2563eb;
+  background:#eff6ff;
+}
+
+.trace-card.trace-report{
+  border-left-color:#f97316;
+  background:#fff7ed;
+}
+
+.trace-head{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:6px;
+}
+
+.trace-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+  background:#dbeafe;
+  color:#1d4ed8;
+}
+
+.trace-date{
+  font-size:12px;
+  color:#334155;
+  font-weight:700;
+}
+
+.trace-title{
+  margin:0 0 8px;
+  font-size:16px;
+  color:#0f172a;
+}
+
+.trace-line{
+  margin:4px 0;
+  color:#0f172a;
+  line-height:1.45;
+  font-size:14px;
+}
+
+@media (max-width: 760px){
+  #inventoryTracePanel{
+    margin:10px 0!important;
+    padding:14px;
+  }
+
+  #inventoryTracePanel .tools{
+    grid-template-columns:1fr;
+  }
+
+  #inventoryTracePanel .tools button{
+    width:100%!important;
+  }
+
+  .trace-card{
+    padding:10px;
+    border-radius:12px;
+  }
+
+  .trace-title{
+    font-size:15px;
+  }
+
+  .trace-line{
+    font-size:13px;
+  }
 }
 
 .csv-process-btn:not(:disabled){

@@ -19,7 +19,21 @@ const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
 app.use(bodyParser.json({ limit: "10mb" }));
 app.use(cors());
 app.use(compression()); // <-- EXPRIME LA PÁGINA PARA QUE CARGUE RÁPIDO
+
+// Compatibilidad de sesión: evita bloqueos cuando no hay middleware de sesión persistente.
+app.use((req, _res, next) => {
+  if (!req.session || typeof req.session !== "object") {
+    req.session = {};
+  }
+  next();
+});
+
 app.use(express.static("public"));
+
+// Ruta pública inicial siempre libre de validaciones por sesión/rol.
+app.get("/", (_req, res) => {
+  res.sendFile("index.html", { root: "public" });
+});
 
 app.get("/test-recuperacion", (req, res) => {
   res.send("OK TEST");
@@ -102,7 +116,7 @@ async function sendDirectUserEmail({ to, subject, text }) {
 }
 
 
-async function sendNewOrderEmail({ orderId, customerName, customerEmail, productName, amount, orderData }) {
+async function sendNewOrderEmail({ orderId, customerName, customerEmail, productName, amount, orderData, notifyToOverride, storeNameOverride }) {
   try {
     if (!isMailConfigured()) {
       console.log("Correo NO enviado: faltan variables RESEND_API_KEY, NOTIFY_EMAIL o FROM_EMAIL.");
@@ -110,8 +124,15 @@ async function sendNewOrderEmail({ orderId, customerName, customerEmail, product
     }
 
     const { apiKey, notifyTo, fromEmail } = getMailConfig();
+    const targetTo = String(notifyToOverride || notifyTo || "").trim();
+    const storeName = String(storeNameOverride || "Servicios Digitales Peters").trim() || "Servicios Digitales Peters";
 
-    const subject = `Nuevo pedido #${orderId} - ${productName}`;
+    if (!targetTo) {
+      console.log("Correo NO enviado: no hay destinatario para notificación de compra.");
+      return;
+    }
+
+    const subject = `🛒 Nuevo pedido en ${storeName} #${orderId} - ${productName}`;
     const text = `
 Nuevo pedido recibido en Servicios Digitales Peters
 
@@ -127,7 +148,7 @@ ${formatOrderData(orderData)}
 Entra al panel de administrador para revisar el pedido.
     `.trim();
 
-    console.log(`Intentando enviar correo con Resend desde ${fromEmail} hacia ${notifyTo}`);
+    console.log(`Intentando enviar correo con Resend desde ${fromEmail} hacia ${targetTo}`);
 
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -137,7 +158,7 @@ Entra al panel de administrador para revisar el pedido.
       },
       body: JSON.stringify({
         from: `Servicios Digitales Peters <${fromEmail}>`,
-        to: [notifyTo],
+        to: [targetTo],
         subject,
         text
       })
@@ -150,10 +171,41 @@ Entra al panel de administrador para revisar el pedido.
       return;
     }
 
-    console.log(`Correo enviado correctamente con Resend para pedido #${orderId} a ${notifyTo}`);
+    console.log(`Correo enviado correctamente con Resend para pedido #${orderId} a ${targetTo}`);
   } catch (error) {
     console.error("Error enviando correo de nuevo pedido:", error.message);
   }
+}
+
+async function resolvePanelNotificationTarget(ownerAdminId, client = pool) {
+  const fallbackNotify = String(process.env.NOTIFY_EMAIL || process.env.ADMIN_EMAIL || process.env.EMAIL_USER || "").trim();
+  const defaultStoreName = "Servicios Digitales Peters";
+
+  if (!Number.isInteger(Number(ownerAdminId)) || Number(ownerAdminId) <= 0) {
+    return {
+      notifyTo: fallbackNotify,
+      storeName: defaultStoreName
+    };
+  }
+
+  const result = await client.query(
+    `SELECT u.id,
+            u.email,
+            u.name,
+            ap.business_name,
+            ap.notification_email
+     FROM users u
+     LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+     WHERE u.id = $1
+     LIMIT 1`,
+    [Number(ownerAdminId)]
+  );
+
+  const row = result.rows[0] || {};
+  return {
+    notifyTo: String(row.notification_email || row.email || fallbackNotify || "").trim(),
+    storeName: String(row.business_name || row.name || defaultStoreName).trim() || defaultStoreName
+  };
 }
 
 
@@ -310,7 +362,8 @@ function generateToken(user) {
   return jwt.sign(
     {
       id: user.id,
-      role: user.role
+      role: user.role,
+      panelId: user.panel_id || null
     },
     SECRET,
     {
@@ -334,6 +387,14 @@ function authMiddleware(req, res, next) {
 
   try {
     req.user = jwt.verify(token, SECRET);
+
+    if (!req.session || typeof req.session !== "object") {
+      req.session = {};
+    }
+    req.session.userId = req.user.id;
+    req.session.role = req.user.role;
+    req.session.panelId = req.user.panelId || null;
+
     next();
   } catch {
     return res.status(403).json({ error: "Token inválido" });
@@ -509,20 +570,24 @@ function adminOwnedWhere(viewer, alias = "") {
 }
 
 function dynamicStockSubquery(productAlias = "products") {
-  return `COALESCE((
-    SELECT COUNT(*)::int
-    FROM platform_accounts pa
-    WHERE pa.status IN ('available', 'disponible')
-      AND (
-        (${productAlias}.owner_admin_id IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
-        OR pa.owner_admin_id = ${productAlias}.owner_admin_id
-      )
-      AND (
-        lower(pa.product_name) = lower(${productAlias}.name)
-        OR lower(pa.platform) = lower(${productAlias}.name)
-        OR lower(pa.platform) = lower(${productAlias}.category)
-      )
-  ), 0)`;
+  return `CASE
+    WHEN COALESCE(${productAlias}.product_type, 'streaming_auto') = 'manual'
+      THEN COALESCE(${productAlias}.stock, 0)::int
+    ELSE COALESCE((
+      SELECT COUNT(*)::int
+      FROM platform_accounts pa
+      WHERE pa.status IN ('available', 'disponible')
+        AND (
+          (${productAlias}.owner_admin_id IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
+          OR pa.owner_admin_id = ${productAlias}.owner_admin_id
+        )
+        AND (
+          lower(pa.product_name) = lower(${productAlias}.name)
+          OR lower(pa.platform) = lower(${productAlias}.name)
+          OR lower(pa.platform) = lower(${productAlias}.category)
+        )
+    ), 0)
+  END`;
 }
 
 async function getEffectiveProductPrice(client, user, product) {
@@ -807,6 +872,23 @@ async function initDatabase() {
   `);
   await pool.query(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS panel_announcements (
+      id SERIAL PRIMARY KEY,
+      panel_id INTEGER NOT NULL DEFAULT 0,
+      message TEXT NOT NULL,
+      updated_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(panel_id)
+    )
+  `);
+  await pool.query(`ALTER TABLE panel_announcements ADD COLUMN IF NOT EXISTS panel_id INTEGER NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE panel_announcements ADD COLUMN IF NOT EXISTS message TEXT NOT NULL DEFAULT '¡Bienvenidos a la plataforma de servicios digitales!'`);
+  await pool.query(`ALTER TABLE panel_announcements ADD COLUMN IF NOT EXISTS updated_by INTEGER`);
+  await pool.query(`ALTER TABLE panel_announcements ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE panel_announcements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_panels (
@@ -1046,18 +1128,25 @@ async function findAvailableAccountForProduct(client, product, userId) {
 
   const ownerId = product.owner_admin_id || null;
   const result = await client.query(
-    `SELECT *
-     FROM platform_accounts
-     WHERE status = 'available'
-       AND ($3::int IS NULL OR owner_admin_id = $3)
-       AND (
-         lower(product_name) = lower($1)
-         OR lower(platform) = lower($1)
-         OR lower(platform) = lower($2)
-       )
-     ORDER BY id ASC
-     LIMIT 1
-     FOR UPDATE SKIP LOCKED`,
+    `WITH picked AS (
+       SELECT id
+       FROM platform_accounts
+       WHERE status = 'available'
+         AND ($3::int IS NULL OR owner_admin_id = $3)
+         AND (
+           lower(product_name) = lower($1)
+           OR lower(platform) = lower($1)
+           OR lower(platform) = lower($2)
+         )
+       ORDER BY id ASC
+       LIMIT 1
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE platform_accounts pa
+     SET status = 'delivered'
+     FROM picked
+     WHERE pa.id = picked.id
+     RETURNING pa.*`,
     [productName, productCategory, ownerId]
   );
 
@@ -1098,6 +1187,11 @@ app.post("/api/register", async (req, res) => {
 // LOGIN
 app.post("/api/login", async (req, res) => {
   try {
+    // El login siempre debe fluir aunque no exista sesión previa.
+    if (!req.session || !req.session.userId) {
+      req.session = req.session && typeof req.session === "object" ? req.session : {};
+    }
+
     const { email, password } = req.body;
     const cleanEmail = String(email || "").trim().toLowerCase();
 
@@ -1143,6 +1237,8 @@ app.post("/api/login", async (req, res) => {
       return res.status(403).json({ error: "Panel suspendido o inactivo" });
     }
 
+    user.panel_id = panel?.id || null;
+
     const match = await bcrypt.compare(password || "", user.password);
 
     if (!match) {
@@ -1150,6 +1246,10 @@ app.post("/api/login", async (req, res) => {
     }
 
     const token = generateToken(user);
+
+    req.session.userId = user.id;
+    req.session.role = user.role;
+    req.session.panelId = user.panel_id;
 
     res.json({ token });
   } catch (err) {
@@ -1204,11 +1304,284 @@ app.get("/api/me", authMiddleware, async (req, res) => {
   }
 });
 
+// --- ENDPOINT DE BÚSQUEDA EN INVENTARIO (AGREGADO POR TI) ---
+app.get('/api/inventory/search', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ error: 'El correo es requerido' });
+    }
+
+    console.log("Buscando en platform_accounts el correo:", email);
+
+    const query = `
+      SELECT id,
+             account_email,
+             account_password,
+             profile_name,
+             profile_pin,
+             access_url,
+             product_name,
+             platform,
+             status,
+             created_at
+      FROM platform_accounts
+      WHERE account_email ILIKE $1
+      ORDER BY created_at DESC;
+    `;
+    
+    const values = [`%${email}%`];
+    
+    // Usamos pool.query (o la variable global que maneje tu Postgres)
+    const result = await pool.query(query, values); 
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error interno al buscar correo:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// TRAZABILIDAD DE CUENTA POR CORREO (ADMIN)
+app.get('/api/admin/inventory/account-trace', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const rawEmail = String(req.query.email || '').trim();
+    if (!rawEmail) {
+      return res.status(400).json({ error: 'Debes escribir un correo para consultar la trazabilidad.' });
+    }
+
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json({
+        query: rawEmail,
+        first_sale: null,
+        account_movements: [],
+        report_movements: []
+      });
+    }
+
+    const likeEmail = `%${rawEmail}%`;
+
+    const accountsOwnerScope = isMainAdmin
+      ? { clause: '1=1', params: [] }
+      : { clause: 'pa.owner_admin_id = $2', params: [ownerId] };
+
+    const reportsOwnerScope = isMainAdmin
+      ? { clause: '1=1', params: [] }
+      : { clause: 'ar.owner_admin_id = $2', params: [ownerId] };
+
+    const relatedReportsOwnerScope = isMainAdmin
+      ? { clause: '1=1', params: [] }
+      : { clause: 'arx.owner_admin_id = $3', params: [ownerId] };
+
+    const relatedReportsSearchScopeClause = isMainAdmin
+      ? '1=1'
+      : 'arq.owner_admin_id = $3';
+
+    const firstSaleResult = await pool.query(
+      `SELECT
+         pa.id AS account_id,
+         pa.account_email,
+         pa.profile_name,
+         pa.platform,
+         pa.product_name,
+         pa.created_at AS inventory_created_at,
+         pa.official_purchase_date,
+         (COALESCE(pa.official_purchase_date::timestamp, pa.created_at) + INTERVAL '30 days') AS mother_expires_at_30d,
+         COALESCE(NULLIF(pa.manual_replacement_source, ''), 'direct_inventory') AS inventory_entry_source,
+         pa.assigned_order_id AS order_id,
+         o.created_at AS purchased_at,
+         (o.created_at + INTERVAL '28 days') AS seller_expires_at_28d,
+         u.id AS sold_to_user_id,
+         u.name AS sold_to_name,
+         u.email AS sold_to_email
+       FROM platform_accounts pa
+       JOIN orders o ON o.id = pa.assigned_order_id
+       LEFT JOIN users u ON u.id = o.user_id
+       WHERE lower(trim(pa.account_email)) LIKE lower($1)
+         AND ${accountsOwnerScope.clause}
+       ORDER BY o.created_at ASC
+       LIMIT 1`,
+      [likeEmail, ...accountsOwnerScope.params]
+    );
+
+    const accountMovementsResult = await pool.query(
+      `SELECT
+         pa.id AS account_id,
+         pa.account_email,
+         pa.account_password,
+         pa.profile_name,
+         pa.profile_pin,
+         pa.platform,
+         pa.product_name,
+         pa.status,
+         pa.created_at,
+         pa.created_at AS inventory_created_at,
+         pa.official_purchase_date,
+         (COALESCE(pa.official_purchase_date::timestamp, pa.created_at) + INTERVAL '30 days') AS mother_expires_at_30d,
+         COALESCE(NULLIF(pa.manual_replacement_source, ''), 'direct_inventory') AS inventory_entry_source,
+         pa.delivered_at,
+         pa.assigned_order_id AS order_id,
+         o.created_at AS order_created_at,
+         (o.created_at + INTERVAL '28 days') AS seller_expires_at_28d,
+         buyer.id AS sold_to_user_id,
+         buyer.name AS sold_to_name,
+         buyer.email AS sold_to_email,
+         COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, pa.product_name, pa.platform) AS sold_product_name,
+         related_report.report_id AS related_report_id,
+         related_report.report_status AS related_report_status,
+         related_report.report_resolution_type AS related_report_resolution_type,
+         related_report.report_reviewed_at AS related_report_reviewed_at,
+         related_report.failed_email AS related_failed_email,
+         related_report.failed_profile_name AS related_failed_profile_name,
+         related_report.replacement_email AS related_replacement_email,
+         related_report.replacement_profile_name AS related_replacement_profile_name
+       FROM platform_accounts pa
+       LEFT JOIN orders o ON o.id = pa.assigned_order_id
+       LEFT JOIN products p ON p.id = o.product_id
+       LEFT JOIN users buyer ON buyer.id = pa.assigned_user_id
+       LEFT JOIN LATERAL (
+         SELECT
+           arx.id AS report_id,
+           arx.status AS report_status,
+           arx.resolution_type AS report_resolution_type,
+           arx.reviewed_at AS report_reviewed_at,
+           rx.account_email AS replacement_email,
+           rx.profile_name AS replacement_profile_name,
+           fx.account_email AS failed_email,
+           fx.profile_name AS failed_profile_name
+         FROM account_reports arx
+         LEFT JOIN platform_accounts rx ON rx.id = arx.reported_account_id
+         LEFT JOIN LATERAL (
+           SELECT f.id, f.account_email, f.profile_name
+           FROM platform_accounts f
+           WHERE f.assigned_order_id = arx.order_id
+             AND f.status = 'failed'
+           ORDER BY f.id DESC
+           LIMIT 1
+         ) fx ON TRUE
+         WHERE (arx.reported_account_id = pa.id OR fx.id = pa.id)
+           AND ${relatedReportsOwnerScope.clause}
+         ORDER BY COALESCE(arx.reviewed_at, arx.created_at) DESC, arx.id DESC
+         LIMIT 1
+       ) related_report ON TRUE
+       WHERE (
+         lower(trim(pa.account_email)) LIKE lower($1)
+         OR EXISTS (
+           SELECT 1
+           FROM account_reports arq
+           LEFT JOIN platform_accounts rq ON rq.id = arq.reported_account_id
+           LEFT JOIN LATERAL (
+             SELECT fq.id, fq.account_email
+             FROM platform_accounts fq
+             WHERE fq.assigned_order_id = arq.order_id
+               AND fq.status = 'failed'
+             ORDER BY fq.id DESC
+             LIMIT 1
+           ) failed_q ON TRUE
+           WHERE (
+             lower(trim(arq.email)) LIKE lower($1)
+             OR lower(trim(COALESCE(rq.account_email, ''))) LIKE lower($1)
+             OR lower(trim(COALESCE(failed_q.account_email, ''))) LIKE lower($1)
+           )
+             AND ${relatedReportsSearchScopeClause}
+             AND (pa.id = arq.reported_account_id OR pa.id = failed_q.id)
+         )
+       )
+         AND ${accountsOwnerScope.clause}
+       ORDER BY COALESCE(pa.delivered_at, o.created_at, pa.created_at) DESC, pa.id DESC
+       LIMIT 300`,
+      [likeEmail, ...accountsOwnerScope.params, ...relatedReportsOwnerScope.params]
+    );
+
+    const reportMovementsResult = await pool.query(
+      `SELECT
+         ar.id AS report_id,
+         ar.order_id,
+         ar.email AS reported_email,
+         ar.issue_type,
+         ar.description,
+         ar.status AS report_status,
+         ar.resolution_type,
+         ar.refund_amount,
+         ar.created_at AS report_created_at,
+         ar.reviewed_at,
+         ar.reported_platform,
+         ar.reported_account_id,
+         rp.account_email AS report_account_email,
+         rp.profile_name AS report_account_profile,
+         rp.profile_pin AS report_account_pin,
+         rp.created_at AS replacement_inventory_created_at,
+         rp.official_purchase_date AS replacement_official_purchase_date,
+         (COALESCE(rp.official_purchase_date::timestamp, rp.created_at) + INTERVAL '30 days') AS replacement_mother_expires_at_30d,
+         COALESCE(NULLIF(rp.manual_replacement_source, ''), 'direct_inventory') AS replacement_entry_source,
+         o.created_at AS order_created_at,
+         (o.created_at + INTERVAL '28 days') AS seller_expires_at_28d,
+         reporter.id AS reporter_user_id,
+         reporter.name AS reporter_name,
+         reporter.email AS reporter_email,
+         sold_to.id AS sold_to_user_id,
+         sold_to.name AS sold_to_name,
+         sold_to.email AS sold_to_email,
+         failed_account.id AS failed_account_id,
+         failed_account.account_email AS failed_account_email,
+         failed_account.profile_name AS failed_profile_name
+       FROM account_reports ar
+       LEFT JOIN orders o ON o.id = ar.order_id
+       LEFT JOIN users reporter ON reporter.id = ar.user_id
+       LEFT JOIN users sold_to ON sold_to.id = o.user_id
+       LEFT JOIN platform_accounts rp ON rp.id = ar.reported_account_id
+       LEFT JOIN LATERAL (
+         SELECT f.id, f.account_email, f.profile_name
+         FROM platform_accounts f
+         WHERE f.assigned_order_id = ar.order_id
+           AND f.status = 'failed'
+         ORDER BY f.id DESC
+         LIMIT 1
+       ) failed_account ON TRUE
+       WHERE (
+         lower(trim(ar.email)) LIKE lower($1)
+         OR lower(trim(COALESCE(rp.account_email, ''))) LIKE lower($1)
+         OR EXISTS (
+           SELECT 1
+           FROM platform_accounts fa
+           WHERE fa.assigned_order_id = ar.order_id
+             AND fa.status = 'failed'
+             AND lower(trim(COALESCE(fa.account_email, ''))) LIKE lower($1)
+         )
+       )
+         AND ${reportsOwnerScope.clause}
+       ORDER BY COALESCE(ar.reviewed_at, ar.created_at) DESC, ar.id DESC
+       LIMIT 300`,
+      [likeEmail, ...reportsOwnerScope.params]
+    );
+
+    res.json({
+      query: rawEmail,
+      first_sale: firstSaleResult.rows[0] || null,
+      account_movements: accountMovementsResult.rows,
+      report_movements: reportMovementsResult.rows
+    });
+  } catch (error) {
+    console.error('Error consultando trazabilidad por correo:', error.message);
+    res.status(500).json({ error: 'Error consultando trazabilidad de la cuenta' });
+  }
+});
+
+
 // PRODUCTOS ACTIVOS
 app.get("/api/products", authMiddleware, async (req, res) => {
   try {
     const viewer = await getViewerContext(req.user.id);
-    const owner = adminOwnedWhere(viewer, "p");
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    const owner = (String(req.user?.role || "").toLowerCase() === "admin")
+      ? (isMainAdmin
+        ? { clause: "1=1", params: [] }
+        : (ownerId
+          ? { clause: "p.owner_admin_id = $1", params: [ownerId] }
+          : { clause: "1=0", params: [] }))
+      : adminOwnedWhere(viewer, "p");
 
     const result = await pool.query(
       `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
@@ -1268,6 +1641,14 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
       .map(field => normalizeFieldName(field))
       .filter(field => field.length > 0);
 
+    const finalProductType = ['streaming_auto', 'manual', 'combo_auto'].includes(product_type)
+      ? product_type
+      : 'streaming_auto';
+    const parsedStock = Number(stock);
+    const finalStock = Number.isFinite(parsedStock)
+      ? (finalProductType === 'manual' ? parsedStock : Math.max(0, parsedStock))
+      : 0;
+
     await pool.query(
       `INSERT INTO products
        (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id)
@@ -1281,8 +1662,8 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
         stock_enabled ? 1 : 0,
-        Math.max(0, Number(stock || 0)),
-        ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
+        finalStock,
+        finalProductType,
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
         req.isPanelAdmin ? req.user.id : null
@@ -1319,6 +1700,14 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
       .map(field => normalizeFieldName(field))
       .filter(field => field.length > 0);
 
+    const finalProductType = ['streaming_auto', 'manual', 'combo_auto'].includes(product_type)
+      ? product_type
+      : 'streaming_auto';
+    const parsedStock = Number(stock);
+    const finalStock = Number.isFinite(parsedStock)
+      ? (finalProductType === 'manual' ? parsedStock : Math.max(0, parsedStock))
+      : 0;
+
     const result = await pool.query(
       `UPDATE products
        SET name = $1,
@@ -1343,8 +1732,8 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
         stock_enabled ? 1 : 0,
-        Math.max(0, Number(stock || 0)),
-        ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
+        finalStock,
+        finalProductType,
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
         productId,
@@ -1466,12 +1855,47 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       const assignedAccounts = [];
 
       for (const item of comboItems) {
-        const account = await findAvailableAccountForProduct(client, item, userId);
+        const selectedAccountResult = await client.query(
+          `SELECT *
+           FROM platform_accounts
+           WHERE status = 'available'
+             AND ($3::int IS NULL OR owner_admin_id = $3)
+             AND (
+               lower(product_name) = lower($1)
+               OR lower(platform) = lower($1)
+               OR lower(platform) = lower($2)
+             )
+           ORDER BY id ASC
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED`,
+          [String(item.name || '').trim(), String(item.category || '').trim(), item.owner_admin_id || null]
+        );
+
+        const account = selectedAccountResult.rows[0];
         if (!account) {
           await client.query("ROLLBACK");
           return res.status(400).json({ error: `No hay stock completo para este combo. Falta cuenta disponible para: ${item.name}` });
         }
-        assignedAccounts.push(account);
+
+        try {
+          const updateInventoryResult = await client.query(
+            `UPDATE platform_accounts
+             SET status = 'delivered'
+             WHERE id = $1 AND status = 'available'
+             RETURNING *`,
+            [account.id]
+          );
+
+          if (!updateInventoryResult.rows[0]) {
+            throw new Error(`No se pudo bloquear como delivered la cuenta ${account.id}`);
+          }
+
+          assignedAccounts.push(updateInventoryResult.rows[0]);
+        } catch (stockError) {
+          console.error(`Error actualizando stock combo a delivered para cuenta ${account.id}:`, stockError);
+          await client.query("ROLLBACK");
+          return res.status(500).json({ error: "Error bloqueando stock del combo" });
+        }
       }
 
       const deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
@@ -1520,13 +1944,19 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
       await client.query("COMMIT");
 
+      const notificationTarget = await resolvePanelNotificationTarget(viewerContext?.owner_admin_id || null, client);
+
       sendNewOrderEmail({
         orderId: newOrderId,
         customerName: user.name || "Cliente",
         customerEmail: user.email || "Sin correo",
         productName: product.name,
         amount: price,
-        orderData
+        orderData,
+        notifyToOverride: notificationTarget.notifyTo,
+        storeNameOverride: notificationTarget.storeName
+      }).catch((mailError) => {
+        console.error(`Error enviando correo de compra combo #${newOrderId}:`, mailError);
       });
 
       return res.json({
@@ -1563,10 +1993,11 @@ console.log(
     let adminResponse = "";
 
     if (isPlatformProduct) {
-      const availableAccountResult = await client.query(
+      const selectedAccountResult = await client.query(
         `SELECT *
          FROM platform_accounts
          WHERE status = 'available'
+           AND ($3::int IS NULL OR owner_admin_id = $3)
            AND (
              lower(product_name) = lower($1)
              OR lower(platform) = lower($1)
@@ -1575,16 +2006,36 @@ console.log(
          ORDER BY id ASC
          LIMIT 1
          FOR UPDATE SKIP LOCKED`,
-        [productName, productCategory]
+        [productName, productCategory, product.owner_admin_id || null]
       );
 
-      assignedAccount = availableAccountResult.rows[0];
+      assignedAccount = selectedAccountResult.rows[0];
 
       if (!assignedAccount) {
         await client.query("ROLLBACK");
         return res.status(400).json({
           error: "Por el momento no hay cuentas disponibles para esta plataforma. Intenta más tarde."
         });
+      }
+
+      try {
+        const updateInventoryResult = await client.query(
+          `UPDATE platform_accounts
+           SET status = 'delivered'
+           WHERE id = $1 AND status = 'available'
+           RETURNING *`,
+          [assignedAccount.id]
+        );
+
+        if (!updateInventoryResult.rows[0]) {
+          throw new Error(`No se pudo cambiar a delivered la cuenta ${assignedAccount.id}`);
+        }
+
+        assignedAccount = updateInventoryResult.rows[0];
+      } catch (stockError) {
+        console.error(`Error actualizando stock a delivered para cuenta ${assignedAccount.id}:`, stockError);
+        await client.query("ROLLBACK");
+        return res.status(500).json({ error: "Error bloqueando stock de la cuenta" });
       }
 
       deliveredAccountData = buildDeliveredAccountData(
@@ -1633,23 +2084,23 @@ console.log(
 
     const newOrderId = orderInsertResult.rows[0].id;
 
-  if (assignedAccount) {
-
-  if (!assignedAccount.reusable) {
-
-    await client.query(
-      `UPDATE platform_accounts
-       SET status = 'delivered',
-           assigned_order_id = $1,
-           assigned_user_id = $2,
-           delivered_at = NOW()
-       WHERE id = $3`,
-      [newOrderId, userId, assignedAccount.id]
-    );
-
-  }
-
-}
+    if (assignedAccount) {
+      try {
+        await client.query(
+          `UPDATE platform_accounts
+           SET status = 'delivered',
+               assigned_order_id = $1,
+               assigned_user_id = $2,
+               delivered_at = NOW()
+           WHERE id = $3`,
+          [newOrderId, userId, assignedAccount.id]
+        );
+      } catch (stockError) {
+        console.error(`Error finalizando delivered para cuenta ${assignedAccount.id}:`, stockError);
+        await client.query("ROLLBACK");
+        return res.status(500).json({ error: "Error actualizando stock vendido" });
+      }
+    }
 
     if (Number(product.stock_enabled || 0) === 1) {
       await client.query(
@@ -1660,13 +2111,19 @@ console.log(
 
     await client.query("COMMIT");
 
+    const notificationTarget = await resolvePanelNotificationTarget(viewerContext?.owner_admin_id || null, client);
+
     sendNewOrderEmail({
       orderId: newOrderId,
       customerName: user.name || "Cliente",
       customerEmail: user.email || "Sin correo",
       productName: product.name,
       amount: price,
-      orderData
+      orderData,
+      notifyToOverride: notificationTarget.notifyTo,
+      storeNameOverride: notificationTarget.storeName
+    }).catch((mailError) => {
+      console.error(`Error enviando correo de compra #${newOrderId}:`, mailError);
     });
 
     if (assignedAccount) {
@@ -1824,9 +2281,22 @@ app.get("/api/admin/search-email", authMiddleware, adminMiddleware, async (req, 
 // CUENTAS DE PLATAFORMAS - ADMIN
 app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const owner = req.isPanelAdmin
-      ? { clause: "owner_admin_id = $1", params: [req.user.id] }
-      : { clause: "(owner_admin_id IS NULL OR owner_admin_id = 0)", params: [] };
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json({
+        rows: [],
+        page: 1,
+        limit: 50,
+        total: 0,
+        totalPages: 1,
+        summary: { available: 0, total: 0 },
+        productSummary: []
+      });
+    }
+
+    const owner = isMainAdmin
+      ? { clause: "1=1", params: [] }
+      : { clause: "owner_admin_id = $1", params: [ownerId] };
 
     const pageRaw = Number(req.query.page || 1);
     const limitRaw = Number(req.query.limit || 50);
@@ -1916,8 +2386,8 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
     const result = await pool.query(
       // <-- NUEVO: Agregamos la columna official_purchase_date y el valor $12
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)
+       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date, manual_replacement_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,'direct_inventory')
        RETURNING *`,
       [
         platform, 
@@ -2248,8 +2718,13 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
 // ADMIN: USUARIOS
 app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json([]);
+    }
+
     let result;
-    if (req.isPanelAdmin) {
+    if (!isMainAdmin) {
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
                 owner.name AS owner_name,
@@ -2270,7 +2745,7 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
          LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
          WHERE u.owner_user_id = $1
          ORDER BY u.id DESC`,
-        [req.user.id]
+        [ownerId]
       );
     } else {
       result = await pool.query(
@@ -2960,23 +3435,19 @@ app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
 // ADMIN: REPORTES DE CUENTA
 app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json([]);
+    }
+
     const result = await pool.query(
       `SELECT
-        account_reports.id,
-        account_reports.user_id,
-        account_reports.email,
-        account_reports.issue_type,
-        account_reports.description,
-        account_reports.status,
-        account_reports.admin_response,
-        account_reports.created_at,
-        account_reports.reviewed_at,
-        account_reports.order_id,
-        account_reports.reported_account_id,
-        account_reports.refund_amount,
-        account_reports.resolution_type,
-        account_reports.evidence_image, /* <--- CÁMBIALO PARA QUE COINCIDA */
+        account_reports.*,
+        account_reports.id AS report_id,
+        account_reports.status AS report_status,
+        account_reports.created_at AS report_created_at,
         users.name AS customer_name,
+        users.name AS vendedor_name,
         users.email AS customer_email,
         orders.amount AS order_amount,
         orders.created_at AS order_created_at,
@@ -2984,13 +3455,17 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         products.category AS product_category,
         platform_accounts.platform AS platform,
         platform_accounts.product_name AS account_product_name,
+        platform_accounts.profile_name AS profile_name,
+        platform_accounts.profile_pin AS profile_pin,
         platform_accounts.status AS account_status
        FROM account_reports
        JOIN users ON account_reports.user_id = users.id
        LEFT JOIN orders ON orders.id = account_reports.order_id
        LEFT JOIN products ON products.id = orders.product_id
        LEFT JOIN platform_accounts ON platform_accounts.id = account_reports.reported_account_id
-       ORDER BY account_reports.id DESC`
+       WHERE ${isMainAdmin ? "1=1" : "COALESCE(account_reports.owner_admin_id, orders.owner_admin_id, products.owner_admin_id, platform_accounts.owner_admin_id) = $1"}
+       ORDER BY account_reports.id DESC`,
+      isMainAdmin ? [] : [ownerId]
     );
 
     res.json(result.rows);
@@ -3205,8 +3680,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       const insertAccountResult = await client.query(
         `INSERT INTO platform_accounts
          (platform, product_name, account_email, account_password, profile_name, profile_pin,
-          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12)
+          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at, manual_replacement_source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12,'replacement_manual_report')
          RETURNING *`,
         [
           replacementPlatform,
@@ -3257,7 +3732,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
       await client.query(
         `UPDATE platform_accounts
-         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW(), expires_at = $4
+         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW(), expires_at = $4, manual_replacement_source = 'replacement_inventory_report'
          WHERE id = $3`,
         [report.order_id, report.user_id, newAccount.id, expirationDate]
       );
@@ -3449,13 +3924,22 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
     const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
     const offset = (page - 1) * limit;
-    const ownerId = req.isPanelAdmin ? req.user.id : null;
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json({
+        rows: [],
+        page,
+        limit,
+        total: 0,
+        totalPages: 1
+      });
+    }
 
     const totalResult = await pool.query(
       `SELECT COUNT(*)::int AS total
        FROM orders
-       WHERE ($1::int IS NULL OR orders.owner_admin_id = $1)`,
-      [ownerId]
+       WHERE ${isMainAdmin ? "1=1" : "orders.owner_admin_id = $1"}`,
+      isMainAdmin ? [] : [ownerId]
     );
     const total = Number(totalResult.rows[0]?.total || 0);
     const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -3482,10 +3966,10 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
        FROM orders
        JOIN users ON orders.user_id = users.id
        JOIN products ON orders.product_id = products.id
-       WHERE ($1::int IS NULL OR orders.owner_admin_id = $1)
+      WHERE ${isMainAdmin ? "1=1" : "orders.owner_admin_id = $1"}
        ORDER BY orders.id DESC
-       LIMIT $2 OFFSET $3`,
-      [ownerId, limit, offset]
+       LIMIT $${isMainAdmin ? 1 : 2} OFFSET $${isMainAdmin ? 2 : 3}`,
+      isMainAdmin ? [limit, offset] : [ownerId, limit, offset]
     );
 
     res.json({
@@ -3503,17 +3987,37 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
 
 app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const ownerId = req.isPanelAdmin ? req.user.id : null;
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json({
+        users: 0,
+        products: 0,
+        orders: 0,
+        inventory: 0,
+        reportsPending: 0,
+        balancePending: 0
+      });
+    }
 
     const [usersCount, productsCount, ordersCount, inventoryCount, reportsPendingCount, balancePendingCount] = await Promise.all([
-      req.isPanelAdmin
-        ? pool.query(`SELECT COUNT(*)::int AS total FROM users WHERE owner_user_id = $1`, [req.user.id])
-        : pool.query(`SELECT COUNT(*)::int AS total FROM users`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ($1::int IS NULL OR owner_admin_id = $1)`, [ownerId]),
-      pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE status = 'available' AND ($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0) OR owner_admin_id = $1)`, [ownerId]),
-      pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE status = 'pendiente' AND ($1::int IS NULL OR owner_admin_id = $1 OR user_id = $1 OR user_id IN (SELECT id FROM users WHERE owner_user_id = $1))`, [ownerId]),
-      pool.query(`SELECT COUNT(*)::int AS total FROM balance_requests WHERE status = 'pendiente' AND ($1::int IS NULL OR owner_admin_id = $1)`, [ownerId])
+      isMainAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM users`)
+        : pool.query(`SELECT COUNT(*)::int AS total FROM users WHERE owner_user_id = $1`, [ownerId]),
+      isMainAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1`)
+        : pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1 AND owner_admin_id = $1`, [ownerId]),
+      isMainAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM orders`)
+        : pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE owner_admin_id = $1`, [ownerId]),
+      isMainAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE status = 'available'`)
+        : pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE status = 'available' AND owner_admin_id = $1`, [ownerId]),
+      isMainAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE status = 'pendiente'`)
+        : pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE status = 'pendiente' AND owner_admin_id = $1`, [ownerId]),
+      isMainAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM balance_requests WHERE status = 'pendiente'`)
+        : pool.query(`SELECT COUNT(*)::int AS total FROM balance_requests WHERE status = 'pendiente' AND owner_admin_id = $1`, [ownerId])
     ]);
 
     res.json({
@@ -4266,6 +4770,96 @@ function getReportScopeOwnerId(req) {
   }
 }
 
+function getStrictSessionScopeOwnerId(req) {
+  try {
+    const panelId = Number(req?.session?.panelId || 0);
+    if (Number.isInteger(panelId) && panelId > 0) return panelId;
+
+    const userId = Number(req?.session?.userId || 0);
+    if (Number.isInteger(userId) && userId > 0) return userId;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function isSessionMainAdmin(req) {
+  try {
+    const sessionRole = String(req?.session?.role || "").trim().toLowerCase();
+    const sessionPanelId = Number(req?.session?.panelId || 0);
+
+    if (sessionRole === "admin" && !(Number.isInteger(sessionPanelId) && sessionPanelId > 0)) {
+      return true;
+    }
+
+    if (req?.isMainAdmin === true) {
+      return true;
+    }
+
+    const jwtRole = String(req?.user?.role || "").trim().toLowerCase();
+    return jwtRole === "admin" && req?.isPanelAdmin === false;
+  } catch {
+    return false;
+  }
+}
+
+function getSessionPanelScopeOwnerId(req) {
+  try {
+    const sessionPanelId = Number(req?.session?.panelId || 0);
+    if (Number.isInteger(sessionPanelId) && sessionPanelId > 0) return sessionPanelId;
+
+    if (req?.isPanelAdmin === true) {
+      const userId = Number(req?.user?.id || 0);
+      if (Number.isInteger(userId) && userId > 0) return userId;
+    }
+
+    const sessionUserId = Number(req?.session?.userId || 0);
+    if (Number.isInteger(sessionUserId) && sessionUserId > 0) return sessionUserId;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveAdminDataScope(req) {
+  const mainAdmin = isSessionMainAdmin(req);
+  if (mainAdmin) {
+    return { isMainAdmin: true, ownerId: null };
+  }
+
+  return { isMainAdmin: false, ownerId: getSessionPanelScopeOwnerId(req) };
+}
+
+function getAnnouncementPanelScopeId(req) {
+  try {
+    const sessionRole = String(req?.session?.role || "").trim().toLowerCase();
+    const sessionPanelId = Number(req?.session?.panelId || 0);
+    const sessionUserId = Number(req?.session?.userId || 0);
+
+    // Panel rentado: siempre queda amarrado a su panelId de sesión.
+    if (sessionRole === "admin" && Number.isInteger(sessionPanelId) && sessionPanelId > 0) {
+      return sessionPanelId;
+    }
+
+    // Admin principal: usa su ID base para separar su comunicado del resto.
+    if (sessionRole === "admin") {
+      if (Number.isInteger(sessionUserId) && sessionUserId > 0) return sessionUserId;
+      const jwtUserId = Number(req?.user?.id || 0);
+      if (Number.isInteger(jwtUserId) && jwtUserId > 0) return jwtUserId;
+      return 0;
+    }
+
+    // Fallback para usuarios no admin dentro de paneles.
+    if (Number.isInteger(sessionPanelId) && sessionPanelId > 0) return sessionPanelId;
+
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
 function getScopedOrdersCondition() {
   return `($2::int IS NULL OR orders.owner_admin_id = $2 OR orders.user_id = $2 OR orders.user_id IN (SELECT id FROM users WHERE owner_user_id = $2))`;
 }
@@ -4286,9 +4880,19 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     );
 
     const selectedDate = useDate || mexicoTodayResult.rows[0].today;
-    const scopeOwnerId = getReportScopeOwnerId(req);
-    const params = [selectedDate, scopeOwnerId];
-    const scopeCondition = getScopedOrdersCondition();
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json({
+        date: selectedDate,
+        timezone: "America/Mexico_City",
+        summary: { total_orders: 0, total_sales: 0, total_cost: 0, total_profit: 0 },
+        by_user: [],
+        by_product: [],
+        details: []
+      });
+    }
+    const params = [selectedDate, isMainAdmin ? null : ownerId];
+    const scopeCondition = `($2::int IS NULL OR orders.owner_admin_id = $2)`;
 
     const saleProductNameExpr = `
       COALESCE(
@@ -4410,7 +5014,11 @@ app.get("/api/admin/monthly-report", authMiddleware, adminMiddleware, async (req
     if (!/^\d{4}-\d{2}$/.test(month)) {
       return res.status(400).json({ error: "Mes inválido. Usa YYYY-MM" });
     }
-    const scopeOwnerId = getReportScopeOwnerId(req);
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json([]);
+    }
+    const scopeOwnerId = isMainAdmin ? null : ownerId;
     const startDate = `${month}-01`;
     const result = await pool.query(
       `SELECT
@@ -4591,6 +5199,59 @@ app.get("/api/announcements", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando comunicados" });
+  }
+});
+
+// COMUNICADO INDEPENDIENTE POR PANEL (listón superior)
+app.get("/api/announcement", authMiddleware, async (req, res) => {
+  try {
+    const panelId = getAnnouncementPanelScopeId(req);
+    const fallback = "¡Bienvenidos a la plataforma de servicios digitales!";
+    const result = await pool.query(
+      `SELECT message
+       FROM panel_announcements
+       WHERE panel_id = $1
+       LIMIT 1`,
+      [panelId]
+    );
+
+    const hasRecord = !!result.rows[0];
+    const message = hasRecord
+      ? String(result.rows[0].message ?? "")
+      : fallback;
+
+    res.json({
+      panel_id: panelId,
+      message,
+      has_record: hasRecord
+    });
+  } catch (err) {
+    console.error("Error cargando comunicado independiente:", err.message);
+    res.status(500).json({ error: "Error cargando comunicado" });
+  }
+});
+
+app.post("/api/announcement", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const panelId = getAnnouncementPanelScopeId(req);
+    const message = String(req.body?.message ?? "").trim();
+
+    const result = await pool.query(
+      `INSERT INTO panel_announcements (panel_id, message, updated_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (panel_id)
+       DO UPDATE SET message = EXCLUDED.message, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+       RETURNING panel_id, message, updated_at`,
+      [panelId, message, req.user.id]
+    );
+
+    res.json({
+      message: "Comunicado guardado correctamente",
+      announcement: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Error guardando comunicado independiente:", err.message);
+    res.status(500).json({ error: "Error guardando comunicado" });
   }
 });
 
@@ -4962,29 +5623,71 @@ app.post("/api/user/change-password", authMiddleware, async (req, res) => {
 // ==========================================
 // BOTÓN DE PÁNICO (RESETEO A 123456 POR CORREO)
 // ==========================================
-app.post("/api/admin/panic-reset", authMiddleware, adminMiddleware, async (req, res) => {
+async function handlePanicReset(req, res) {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "Ingresa el correo del usuario." });
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: "Ingresa el correo del vendedor." });
+    }
 
-    // Generamos la contraseña temporal universal: 123456
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    const sessionPanelId = Number(req?.session?.panelId || 0);
+    const scopedOwnerUserId = req?.isPanelAdmin === true
+      ? Number(req?.user?.id || 0)
+      : Number(ownerId || 0);
+
+    if (!isMainAdmin && !scopedOwnerUserId) {
+      return res.status(403).json({ error: "No tienes panel válido para resetear vendedores." });
+    }
+
     const hashedPass = await bcrypt.hash("123456", 10);
-    
-    // Buscamos al usuario y le aplicamos el castigo/reinicio
+    const params = isMainAdmin
+      ? [hashedPass, email]
+      : (req?.isPanelAdmin === true && Number.isInteger(sessionPanelId) && sessionPanelId > 0)
+        ? [hashedPass, email, scopedOwnerUserId, sessionPanelId]
+        : [hashedPass, email, scopedOwnerUserId];
+
+    const scopeWhere = isMainAdmin
+      ? "1=1"
+      : (req?.isPanelAdmin === true && Number.isInteger(sessionPanelId) && sessionPanelId > 0)
+        ? `users.owner_user_id = $3
+           AND EXISTS (
+             SELECT 1
+             FROM users owner_u
+             JOIN admin_panels ap ON lower(ap.email) = lower(owner_u.email)
+             WHERE owner_u.id = $3 AND ap.id = $4
+           )`
+        : "users.owner_user_id = $3";
+
     const result = await pool.query(
-      "UPDATE users SET password = $1 WHERE lower(email) = $2 RETURNING email, name", 
-      [hashedPass, email.trim().toLowerCase()]
+      `UPDATE users
+       SET password = $1
+       WHERE lower(users.email) = $2
+         AND users.role <> 'admin'
+         AND ${scopeWhere}
+       RETURNING users.id, users.email, users.name`,
+      params
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: "No se encontró ninguna cuenta con el correo: " + email });
+      return res.status(404).json({ error: "No se encontró vendedor con ese correo dentro de tu panel." });
     }
 
-    res.json({ success: true, message: `La contraseña de ${result.rows[0].email} ahora es: 123456` });
+    return res.json({
+      success: true,
+      message: "Contraseña reseteada a: 123456",
+      user: result.rows[0]
+    });
   } catch (err) {
     console.error("Error en botón de pánico:", err.message);
-    res.status(500).json({ error: "Error interno al intentar resetear la clave." });
+    return res.status(500).json({ error: "Error interno al intentar resetear la clave." });
   }
+}
+
+app.post("/api/panic-reset", authMiddleware, adminMiddleware, handlePanicReset);
+
+app.post("/api/admin/panic-reset", authMiddleware, adminMiddleware, async (req, res) => {
+  return handlePanicReset(req, res);
 });
 // ==========================================
 // RUTA DE RECUPERACIÓN DE CUENTAS (CUARENTENA)
@@ -5005,6 +5708,11 @@ app.post("/api/admin/system/check-expirations", authMiddleware, adminMiddleware,
 
 app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json([]);
+    }
+
     const result = await pool.query(`
       SELECT 
         id, platform, account_email, account_password, profile_name, profile_pin,
@@ -5012,8 +5720,9 @@ app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async
   (official_purchase_date + INTERVAL '35 days' - CURRENT_TIMESTAMP) as dias_restantes
 FROM platform_accounts
 WHERE status = 'recovery_pending'
+  AND ${isMainAdmin ? "1=1" : "owner_admin_id = $1"}
       ORDER BY expires_at DESC
-    `);
+    `, isMainAdmin ? [] : [ownerId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: "Error listando cuarentena." });
@@ -5048,7 +5757,7 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     }
 
     // 3. AHORA SÍ: Liberamos la cuenta para el siguiente ciclo
-    await pool.query(`
+    const updateResult = await pool.query(`
       UPDATE platform_accounts
       SET status = 'available', 
           account_password = $1, 
@@ -5058,11 +5767,15 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
           expires_at = NULL
       WHERE id = $2 AND status = 'recovery_pending'
     `, [new_password, accountId]);
+
+    if (updateResult.rowCount === 0) {
+      return res.status(404).json({ success: false, error: "Cuenta no encontrada o ya no está en cuarentena." });
+    }
     
-    res.json({ message: "Cuenta liberada. Historial archivado correctamente." });
+    res.json({ success: true, message: "Cuenta liberada. Historial archivado correctamente." });
   } catch (err) {
     console.error("Error al liberar cuenta:", err);
-    res.status(500).json({ error: "Error al archivar y liberar la cuenta." });
+    res.status(500).json({ success: false, error: "Error al archivar y liberar la cuenta." });
   }
 });
 
@@ -5080,12 +5793,18 @@ initDatabase()
 
 app.get("/api/admin/recovery-history", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { isMainAdmin, ownerId } = resolveAdminDataScope(req);
+    if (!isMainAdmin && !ownerId) {
+      return res.json([]);
+    }
+
     const result = await pool.query(`
       SELECT l.recovered_at, pa.platform, pa.account_email, l.order_id 
       FROM account_recovery_log l
       JOIN platform_accounts pa ON l.account_id = pa.id
+      WHERE ${isMainAdmin ? "1=1" : "pa.owner_admin_id = $1"}
       ORDER BY l.recovered_at DESC LIMIT 50
-    `);
+    `, isMainAdmin ? [] : [ownerId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: "Error al obtener historial" });
@@ -5100,15 +5819,19 @@ app.post("/api/admin/accounts/:id/discard", authMiddleware, adminMiddleware, asy
     const accountId = req.params.id;
     
     // Cambiamos el estado a 'discarded' para que ya no aparezca en el sistema de cuarentena
-    await pool.query(
+    const result = await pool.query(
       "UPDATE platform_accounts SET status = 'discarded' WHERE id = $1", 
       [accountId]
     );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, error: "Cuenta no encontrada." });
+    }
     
-    res.json({ message: "Cuenta desechada correctamente." });
+    res.json({ success: true, message: "Cuenta desechada correctamente." });
   } catch (err) {
     console.error("Error al desechar cuenta:", err);
-    res.status(500).json({ error: "Error al desechar la cuenta." });
+    res.status(500).json({ success: false, error: "Error al desechar la cuenta." });
   }
 });
 
