@@ -275,6 +275,32 @@ const pool = new Pool({
 
 console.log("DATABASE_URL existe:", !!process.env.DATABASE_URL);
 
+async function markAccountAsSold(client, accountId, orderId, userId) {
+    try {
+        console.log(`[INVENTARIO] Intentando descontar cuenta ${accountId} para pedido ${orderId}`);
+        
+        const result = await client.query(`
+            UPDATE platform_accounts 
+            SET status = 'delivered', 
+                assigned_order_id = $1, 
+                assigned_user_id = $2, 
+                delivered_at = NOW() 
+            WHERE id = $3 AND status = 'available'
+            RETURNING id;
+        `, [orderId, userId, accountId]);
+
+        if (result.rowCount === 0) {
+            throw new Error(`La cuenta ${accountId} ya no está disponible o no existe.`);
+        }
+        
+        console.log(`[INVENTARIO] Éxito: Cuenta ${accountId} marcada como entregada.`);
+        return true;
+    } catch (error) {
+        console.error(`[INVENTARIO] ERROR CRÍTICO: ${error.message}`);
+        throw error; // Esto disparará el ROLLBACK de la transacción principal
+    }
+}
+
 function safeJsonArray(value) {
   try {
     if (Array.isArray(value)) return value;
@@ -899,6 +925,44 @@ function isPdfOrCourseProduct(productName = "", productCategory = "", productTyp
   return hasPdfOrCourseWord || hasPdfUrl;
 }
 
+async function addTraceEvent(client, {
+    accountId,
+    eventType,
+    userId = null,
+    orderId = null,
+    reportId = null,
+    description = "",
+    metadata = {}
+}) {
+
+    await client.query(
+        `INSERT INTO account_traceability
+        (
+            platform_account_id,
+            event_type,
+            user_id,
+            order_id,
+            report_id,
+            description,
+            metadata
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+            accountId,
+            eventType,
+            userId,
+            orderId,
+            reportId,
+            description,
+            JSON.stringify(metadata)
+        ]
+    );
+
+}
+
+
+
+
 // AÑADIMOS EL PARÁMETRO "originalDate = null"
 function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "", originalDate = null, productType = "") {
   // Si nos mandan una fecha vieja (reemplazo), usamos esa. Si no (venta nueva), usamos la de hoy.
@@ -1394,6 +1458,10 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const orderData = safeJsonObject(req.body.order_data);
 
     await client.query("BEGIN");
+    console.log("--- INICIO DE COMPRA ---");
+console.log("Producto ID:", productId, "Usuario ID:", userId);
+// Agrega esto para ver qué cuenta está seleccionando
+console.log("Buscando cuenta para:", productName, productCategory);
 
     const viewerContext = await getViewerContext(userId, client);
     const ownerFilter = adminOwnedWhere(viewerContext, "p");
@@ -1633,65 +1701,60 @@ console.log(
 
     const newOrderId = orderInsertResult.rows[0].id;
 
-  if (assignedAccount) {
-
-  if (!assignedAccount.reusable) {
-
+if (assignedAccount) {
+    // LLAMAMOS A LA FUNCIÓN NUEVA
+    await markAccountAsSold(client, assignedAccount.id, newOrderId, userId);
+    
+    // Si la función de arriba falla, el código salta al catch y hace ROLLBACK
+    // por lo tanto, aquí ya puedes estar seguro de que la cuenta está entregada.
+} else {
+    // Si no hay cuenta, cancelamos la compra
+    await client.query("ROLLBACK");
+    return res.status(400).json({ error: "No se pudo asignar cuenta." });
+}
+if (Number(product.stock_enabled || 0) === 1) {
     await client.query(
-      `UPDATE platform_accounts
-       SET status = 'delivered',
-           assigned_order_id = $1,
-           assigned_user_id = $2,
-           delivered_at = NOW()
-       WHERE id = $3`,
-      [newOrderId, userId, assignedAccount.id]
+        `UPDATE products
+         SET stock = stock - 1
+         WHERE id = $1 AND stock > 0`,
+        [productId]
     );
+}
 
-  }
+await client.query("COMMIT");
+
+sendNewOrderEmail({
+    orderId: newOrderId,
+    customerName: user.name || "Cliente",
+    customerEmail: user.email || "Sin correo",
+    productName: product.name,
+    amount: price,
+    orderData
+});
+
+return res.json({
+    message: assignedAccount
+        ? "Cuenta entregada correctamente."
+        : "Pedido enviado correctamente.",
+    delivered_account_data: deliveredAccountData
+});
+
+} catch (err) {
+
+    await client.query("ROLLBACK");
+
+    console.error(err);
+
+    return res.status(500).json({
+        error: "Error procesando la compra."
+    });
+
+} finally {
+
+    client.release();
 
 }
 
-    if (Number(product.stock_enabled || 0) === 1) {
-      await client.query(
-        `UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`,
-        [productId]
-      );
-    }
-
-    await client.query("COMMIT");
-
-    sendNewOrderEmail({
-      orderId: newOrderId,
-      customerName: user.name || "Cliente",
-      customerEmail: user.email || "Sin correo",
-      productName: product.name,
-      amount: price,
-      orderData
-    });
-
-    if (assignedAccount) {
-      return res.json({
-        message: "Compra realizada correctamente. Tu cuenta fue entregada automáticamente en Mis pedidos.",
-        delivered_account_data: deliveredAccountData
-      });
-    }
-
-    if (charged === 1) {
-      return res.json({
-        message: `Compra realizada correctamente. Se descontaron $${price.toFixed(2)} de tu saldo.`
-      });
-    }
-
-    return res.json({
-      message: "Pedido creado correctamente. El saldo se descontará cuando el admin marque Éxito."
-    });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err.message);
-    res.status(500).json({ error: "Error creando pedido" });
-  } finally {
-    client.release();
-  }
 });
 
 app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
@@ -2170,26 +2233,44 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     let successCount = 0;
     for (const item of preparedRows) {
       try {
-        await pool.query(
-          `INSERT INTO platform_accounts
-           (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)`,
-          [
-            item.platform,
-            item.product_name,
-            item.account_email,
-            item.account_password,
-            item.profile_name,
-            item.profile_pin,
-            item.extra_data,
-            item.terms_conditions,
-            item.access_url,
-            item.owner_admin_id,
-            item.reusable,
-            item.official_purchase_date
-          ]
-        );
-        successCount++;
+        const insertResult = await pool.query(
+  `INSERT INTO platform_accounts
+   (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)
+   RETURNING id`,
+  [
+    item.platform,
+    item.product_name,
+    item.account_email,
+    item.account_password,
+    item.profile_name,
+    item.profile_pin,
+    item.extra_data,
+    item.terms_conditions,
+    item.access_url,
+    item.owner_admin_id,
+    item.reusable,
+    item.official_purchase_date
+  ]
+);
+
+const accountId = insertResult.rows[0].id;
+
+await addTraceEvent(pool, {
+    accountId,
+    eventType: "ACCOUNT_CREATED",
+    userId: req.user.id,
+    description: "Cuenta agregada al inventario",
+    metadata: {
+        platform: item.platform,
+        product: item.product_name,
+        email: item.account_email,
+        profile: item.profile_name,
+        purchase_date: item.official_purchase_date
+    }
+});
+
+successCount++;
       } catch (insertErr) {
         errors.push(`Fila ${item.rowNumber}: ${insertErr.message || "Error al insertar en base de datos."}`);
       }
@@ -3411,6 +3492,81 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
   }
 });
 
+// ADMIN: REEMBOLSO COMPLETO (monto total pagado)
+app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    const reportId = req.params.reportId;
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const reportResult = await client.query(
+      `SELECT ar.*, o.amount, o.created_at AS order_created_at, o.refunded
+       FROM account_reports ar
+       JOIN orders o ON o.id = ar.order_id
+       WHERE ar.id = $1
+       FOR UPDATE`,
+      [reportId]
+    );
+
+    const report = reportResult.rows[0];
+
+    if (!report) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    if (!report.order_id || !report.reported_account_id) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este reporte no está ligado a un pedido entregado automáticamente" });
+    }
+
+    if (Number(report.refund_amount || 0) > 0 || String(report.resolution_type || "") === "reembolso" || Number(report.refunded || 0) === 1) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Este reporte o pedido ya tiene reembolso aplicado" });
+    }
+
+    const amountPaid = Number(report.amount || 0);
+    if (amountPaid <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Monto inválido para reembolso" });
+    }
+
+    // Aplicar reembolso completo
+    await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [amountPaid, report.user_id]);
+
+    await client.query(`UPDATE orders SET refunded = 1 WHERE id = $1`, [report.order_id]);
+
+    await client.query(`UPDATE platform_accounts SET status = 'failed' WHERE id = $1`, [report.reported_account_id]);
+
+    await client.query(
+      `UPDATE account_reports
+       SET status = 'reembolso',
+           resolution_type = 'reembolso',
+           refund_amount = $1,
+           admin_response = $2,
+           reviewed_at = NOW()
+       WHERE id = $3`,
+      [amountPaid, `Reembolso completo aplicado: $${amountPaid.toFixed(2)}`, reportId]
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    res.json({ message: `Reembolso completo aplicado por $${amountPaid.toFixed(2)}`, refund_amount: amountPaid });
+  } catch (err) {
+    if (transactionStarted) {
+      try { await client.query("ROLLBACK"); } catch (_) {}
+    }
+    console.error("Error aplicando reembolso completo:", err.message);
+    res.status(500).json({ error: "Error aplicando reembolso completo" });
+  } finally {
+    client.release();
+  }
+});
+
 // ADMIN: DAR VEREDICTO A REPORTE DE CUENTA
 app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -4399,7 +4555,59 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 });
 
 
+// ==========================================
+// RUTA PARA EL HISTORIAL DE INVENTARIO
+// ==========================================
+app.get('/api/admin/inventory-history', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const search = String(req.query.q || '').trim();
+        if (!search) {
+            return res.status(400).json({ error: 'Se requiere q=texto de búsqueda' });
+        }
+        const lowerSearch = search.toLowerCase();
 
+        const query = `
+            SELECT 
+                pa.id AS perfil_id,
+                pa.platform,
+                pa.product_name,
+                pa.account_email AS cuenta_madre,
+                pa.account_password AS contrasena,
+                pa.profile_name,
+                pa.profile_pin,
+                pa.status,
+                pa.created_at AS fecha_ingreso,
+                pa.official_purchase_date AS fecha_compra,
+                pa.delivered_at AS fecha_entrega,
+                pa.assigned_order_id,
+                pa.assigned_user_id,
+                COALESCE(u.name, '') AS comprador_nombre,
+                COALESCE(u.email, '') AS comprador_email,
+                COALESCE(u.role, '') AS comprador_rol,
+                o.id AS orden_id,
+                o.status AS orden_status,
+                o.created_at AS orden_creada,
+                o.amount AS orden_amount
+            FROM platform_accounts pa
+            LEFT JOIN orders o ON pa.assigned_order_id = o.id
+            LEFT JOIN users u ON pa.assigned_user_id = u.id
+            WHERE lower(pa.account_email) = $1
+               OR lower(pa.profile_name) = $1
+               OR lower(pa.profile_pin) = $1
+               OR pa.assigned_order_id::text = $2
+               OR o.id::text = $2
+            ORDER BY pa.created_at ASC, pa.delivered_at ASC;
+        `;
+
+        const result = await pool.query(query, [lowerSearch, search]);
+        const rows = result.rows || [];
+
+        res.json({ events: rows });
+    } catch (error) {
+        console.error('Error en historial de inventario:', error.message);
+        res.status(500).json({ error: 'Error interno obteniendo el historial de inventario.' });
+    }
+});
 
 
 

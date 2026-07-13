@@ -90,6 +90,7 @@ function openProductsFromDashboard(){
   }
 }
 
+
 function openOrdersFromDashboard(){
   if(currentUser?.role==='admin'){
     showSection('admin');
@@ -116,8 +117,8 @@ async function loadApp() {
   if (!token) return;
   try {
     currentUser = await api('/api/me');
-    authSection.classList.remove('hidden'); // Ajusta esto según tu lógica
-    appSection.classList.remove('hidden');
+    document.getElementById('authSection')?.classList.add('hidden');
+    document.getElementById('appSection')?.classList.remove('hidden');
 
     userName.textContent = currentUser.name;
     userEmail.textContent = currentUser.email;
@@ -125,7 +126,7 @@ async function loadApp() {
     userBalance.textContent = formatMoney(currentUser.balance);
     sideEmail.textContent = currentUser.email;
     topUserName.textContent = currentUser.name;
-    statBalance.textContent = formatMoney(currentUser.balance);
+    topUserBalance.textContent = formatMoney(currentUser.balance);
     statUsers.textContent = '0';
     
     const btnHistorial = document.getElementById('btnHistorialId');
@@ -292,7 +293,10 @@ async function buyProduct(productId) {
     
     showMessage(data.message || 'Compra realizada');
     if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
-    await loadApp();
+    await Promise.allSettled([
+      loadMyOrders(),
+      loadProducts()
+    ]);
     showSection('orders');
     
   } catch (e) {
@@ -547,12 +551,7 @@ async function updateBalanceRequestStatus(requestId,status){
       })
     });
     showMessage(data.message||'Solicitud de saldo actualizada');
-    await 
-
-
-
-
-// loadApp automático movido al final seguro
+    await loadBalanceRequests();
     showSection('admin');
     setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),120);
   }catch(e){
@@ -1296,8 +1295,6 @@ function calculateReportRefundInfo(report){
 }
 
 async function loadAccountReports(){
-alert('LOAD ACCOUNT REPORTS NUEVO');
-
   if(currentUser?.role!=='admin')return;
   try{
     const reports = await api('/api/admin/account-reports');
@@ -1332,8 +1329,12 @@ alert('LOAD ACCOUNT REPORTS NUEVO');
       <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
-        <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
+        <button class="green-btn" onclick="replaceReportedAccountAuto(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazo (inventario)</button>
+        <button class="outline-btn" onclick="replaceReportedAccountManual(${r.id})" ${canAct?'':'disabled'}>✍️ Reemplazo manual</button>
+      </div>
+      <div class="two-row" style="margin-top:10px">
         <button class="danger-btn" onclick="refundReportedAccount(${r.id}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+        <button class="danger-btn" style="background:#b91c1c" onclick="refundFullReportedAccount(${r.id})" ${canAct?'':'disabled'}>💸 Reembolso completo</button>
       </div>
       <div class="two-row" style="margin-top:10px">
         <select id="reportStatus-${r.id}">
@@ -1347,7 +1348,75 @@ alert('LOAD ACCOUNT REPORTS NUEVO');
       <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
     </div>`;
   }).join(''):'Sin reportes de falla.';
-}catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
+  }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
+}
+
+// Reemplazo automático desde inventario
+async function replaceReportedAccountAuto(reportId){
+  try{
+    if(!confirm('¿Reemplazar esta cuenta usando una cuenta disponible del inventario automático?')) return;
+    const data = await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Cuenta reemplazada desde inventario');
+    await loadAccountReports();
+    if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error reemplazando cuenta','error')}
+}
+
+// Reemplazo manual con formulario modal
+function replaceReportedAccountManual(reportId){
+  const old = document.getElementById('replaceManualModal'); if(old) old.remove();
+  const html = `
+    <div id="replaceManualModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:720px;">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h3>Reemplazo manual</h3><button class="modal-close-btn" onclick="document.getElementById('replaceManualModal')?.remove()">×</button></div>
+        <p class="small-text">Ingresa los datos de la cuenta que vas a usar como reemplazo. La fecha de compra debe reflejar la fecha original cuando corresponde.</p>
+        <label class="field-label">Correo</label><input id="rm_email" />
+        <label class="field-label">Contraseña</label><input id="rm_password" />
+        <label class="field-label">Perfil (opcional)</label><input id="rm_profile" />
+        <label class="field-label">PIN (opcional)</label><input id="rm_pin" />
+        <label class="field-label">Fecha de compra oficial (YYYY-MM-DD)</label><input id="rm_purchase_date" placeholder="2026-06-01" />
+        <label class="field-label">URL / Nota (opcional)</label><input id="rm_url" />
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="green-btn" onclick="submitReplaceManual(${reportId})">Aplicar reemplazo</button>
+          <button class="outline-btn" onclick="document.getElementById('replaceManualModal')?.remove()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function submitReplaceManual(reportId){
+  try{
+    const account_email = (document.getElementById('rm_email')?.value||'').trim();
+    const account_password = (document.getElementById('rm_password')?.value||'').trim();
+    const profile_name = (document.getElementById('rm_profile')?.value||'').trim();
+    const profile_pin = (document.getElementById('rm_pin')?.value||'').trim();
+    const official_purchase_date = (document.getElementById('rm_purchase_date')?.value||'').trim();
+    const access_url = (document.getElementById('rm_url')?.value||'').trim();
+
+    if(!account_email || !account_password) return alert('Correo y contraseña son obligatorios para reemplazo manual');
+
+    const body = { manual:true, account_email, account_password, profile_name, profile_pin, access_url, official_purchase_date };
+    const data = await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify(body)});
+    showMessage(data.message||'Reemplazo manual aplicado');
+    document.getElementById('replaceManualModal')?.remove();
+    await loadAccountReports();
+    if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
+  }catch(e){showMessage(e.message||'Error en reemplazo manual','error')}
+}
+
+// Reembolso completo: aplica el monto total pagado por el vendedor
+async function refundFullReportedAccount(reportId){
+  try{
+    if(!reportId) throw new Error('ID de reporte inválido');
+    if(!confirm('¿Aplicar reembolso completo por el monto total pagado al vendedor?')) return;
+    const endpoint = `/api/admin/account-reports/${encodeURIComponent(reportId)}/refund-full`;
+    const data = await api(endpoint,{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Reembolso completo aplicado');
+    await loadAccountReports();
+    await loadUsers();
+  }catch(e){showMessage(e.message||'Error aplicando reembolso completo','error')}
 }
 
 async function updateAccountReportStatus(reportId){
@@ -1546,6 +1615,13 @@ function setHiddenSafe(id, hidden){
 
 function syncAdminVisibilitySafe(){
   const isAdmin=isAdminUserSafe();
+  const esPanelPropietario =
+    currentUser?.is_panel_admin === true ||
+    currentUser?.is_panel_admin === 1 ||
+    currentUser?.is_panel_admin === 'true' ||
+    currentUser?.account_type === 'panel_propietario';
+  const showTraceability = isAdmin || esPanelPropietario;
+
   setHiddenSafe('adminMenuBtn', true);
   setHiddenSafe('adminSalesMenuBtn', true);
   setHiddenSafe('dashInventoryCard', !isAdmin);
@@ -1562,11 +1638,6 @@ function syncAdminVisibilitySafe(){
 
   // CONTROL DE BARRA LATERAL Y BOTONES APP
   const sidebar = document.getElementById('sidebar');
-  const esPanelPropietario =
-  currentUser?.is_panel_admin === true ||
-  currentUser?.is_panel_admin === 1 ||
-  currentUser?.is_panel_admin === 'true' ||
-  currentUser?.account_type === 'panel_propietario';
 
 if (!isAdmin && !esPanelPropietario) {
   if (sidebar) sidebar.style.display = 'none';
@@ -1631,23 +1702,34 @@ showSection = function(name){
   }
 };
 
-function scrollToAdmin(id){
+async function scrollToAdmin(id){
   if(!isAdminUserSafe()) return showSection('dashboard');
   showSection('admin');
+
+  if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') await loadAdminOrders(1);
+  if(id==='adminBalanceRequestsPanel' && typeof loadBalanceRequests==='function') await loadBalanceRequests();
+  if(id==='adminAccountReportsPanel' && typeof loadAccountReports==='function') await loadAccountReports();
+  if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') await loadPlatformInventory(1);
+
   setTimeout(()=>{
     const el=document.getElementById(id);
     if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
-    if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') loadAdminOrders(1);
-    if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') loadPlatformInventory(1);
   },120);
 }
 
-function openUsersFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminUsersPanel') : showSection('account'); }
-function openProductsFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminProductsPanel') : showSection('shop'); }
-function openInventoryFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminPlatformAccountsPanel') : showSection('shop'); }
-function openOrdersFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminOrdersPanel') : showSection('orders'); }
-function openBalanceRequests(){ isAdminUserSafe() ? scrollToAdmin('adminBalanceRequestsPanel') : showSection('balance'); }
-function openAccountReportsFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminAccountReportsPanel') : showSection('reports'); }
+function openUsersFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminUsersPanel'); else showSection('account'); }
+function openProductsFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminProductsPanel'); else showSection('shop'); }
+function openInventoryFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminPlatformAccountsPanel'); else showSection('shop'); }
+function openOrdersFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminOrdersPanel'); else showSection('orders'); }
+function openBalanceRequests(){ if(isAdminUserSafe()) scrollToAdmin('adminBalanceRequestsPanel'); else showSection('balance'); }
+function openAccountReportsFromDashboard(){
+  if(isAdminUserSafe()){
+    scrollToAdmin('adminAccountReportsPanel');
+  } else {
+    showSection('reports');
+    if(typeof loadMyReports === 'function') loadMyReports();
+  }
+}
 function openSalesReport(){ if(isAdminUserSafe()) scrollToAdmin('adminSalesReportPanel'); }
 
 const __baseLoadPlatformInventorySafe = typeof loadPlatformInventory === 'function' ? loadPlatformInventory : null;
@@ -1675,13 +1757,13 @@ loadApp = async function(){
   document.getElementById('authSection')?.classList.add('hidden');
   document.getElementById('appSection')?.classList.remove('hidden');
   const set=(id,val)=>{const el=document.getElementById(id); if(el) el.textContent=val;};
-  set('userName', currentUser.name||'');
-  set('userEmail', currentUser.email||'');
-  set('userRole', currentUser.role||'user');
-  set('userBalance', formatMoney(currentUser.balance));
-  set('sideEmail', currentUser.email||'');
-  set('topUserName', currentUser.name||'Usuario');
-  set('statBalance', formatMoney(currentUser.balance));
+  set('userName', currentUser?.name||'');
+  set('userEmail', currentUser?.email||'');
+  set('userRole', currentUser?.role||'user');
+  set('userBalance', formatMoney(currentUser?.balance));
+  set('sideEmail', currentUser?.email||'');
+  set('topUserName', currentUser?.name||'Usuario');
+  set('topUserBalance', formatMoney(currentUser?.balance));
 
   syncAdminVisibilitySafe();
 
@@ -1716,10 +1798,10 @@ loadApp = async function(){
     ]);
   }
 
-  set('topUserBalance', formatMoney(currentUser.balance));
+  set('topUserBalance', formatMoney(currentUser?.balance));
   if(typeof loadMyReports==='function') loadMyReports();
 
- if(currentUser.role === 'admin' || (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')) {
+ if(currentUser?.role === 'admin' || (currentUser?.is_subadmin === true || currentUser?.is_subadmin === 1 || currentUser?.is_subadmin === 'true')) {
     showSection('dashboard');
   } else {
     // ESTO DEJA ENTRAR A LOS VENDEDORES AL PANEL CENTRAL
@@ -1960,6 +2042,225 @@ function renderMyOrders(){
   }).join('')||'No hay pedidos con esos filtros.';
 }
 
+function openInventoryHistory() {
+  showSection('inventory-history');
+
+  const input = document.getElementById('inventorySearchInput');
+  const summary = document.getElementById('inventoryHistorySummary');
+  const timelinePanel = document.getElementById('inventoryHistoryTimeline');
+  const timelineItems = document.getElementById('inventoryTimelineItems');
+
+  if (input) input.value = '';
+  if (summary) summary.classList.add('hidden');
+  if (timelinePanel) timelinePanel.classList.add('hidden');
+  if (timelineItems) timelineItems.innerHTML = 'Sin información.';
+  setTimeout(() => document.getElementById('section-inventory-history')?.scrollIntoView({behavior:'smooth', block:'start'}), 100);
+}
+
+async function searchInventoryHistory() {
+  const input = document.getElementById('inventorySearchInput');
+  const query = String(input?.value || '').trim();
+  const timelineItems = document.getElementById('inventoryTimelineItems');
+  const summary = document.getElementById('inventoryHistorySummary');
+  const timelinePanel = document.getElementById('inventoryHistoryTimeline');
+
+  if (!query) {
+    alert('Por favor ingresa un correo madre, perfil, PIN o pedido para buscar la historia de inventario.');
+    return;
+  }
+
+  if (timelineItems) timelineItems.innerHTML = '<p>Buscando historial...</p>';
+  if (summary) summary.classList.add('hidden');
+  if (timelinePanel) timelinePanel.classList.add('hidden');
+
+  try {
+    const response = await api(`/api/admin/inventory-history?q=${encodeURIComponent(query)}`);
+
+    if (!response.events || response.events.length === 0) {
+      if (timelineItems) timelineItems.innerHTML = '<p>No se encontraron registros para esta cuenta madre.</p>';
+      if (timelinePanel) timelinePanel.classList.remove('hidden');
+      return;
+    }
+
+    renderInventoryHistorySummary(response.events);
+    renderInventoryHistoryTimeline(response.events);
+    renderInventoryHistoryModal(response.events);
+    openInventoryHistoryModal();
+    if (summary) summary.classList.remove('hidden');
+    if (timelinePanel) timelinePanel.classList.remove('hidden');
+  } catch (error) {
+    if (timelineItems) timelineItems.innerHTML = `<p style="color:red;">Error: ${safeText(error.message)}</p>`;
+    if (timelinePanel) timelinePanel.classList.remove('hidden');
+  }
+}
+
+function renderInventoryHistorySummary(events) {
+  const firstEvent = events[0] || {};
+  const lastEvent = events[events.length - 1] || firstEvent;
+  const fechaIngreso = firstEvent.fecha_ingreso ? new Date(firstEvent.fecha_ingreso) : null;
+  const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
+  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+  const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
+  const estado = lastEvent.status === 'failed' || lastEvent.orden_status === 'failed'
+    ? 'Reemplazo / Falla'
+    : lastEvent.orden_id
+      ? 'Venta normal'
+      : 'En inventario';
+
+  document.getElementById('inventoryEmail').textContent = firstEvent.cuenta_madre || '-';
+  document.getElementById('inventoryProfile').textContent = firstEvent.profile_name || '-';
+  document.getElementById('inventoryPlatform').textContent = firstEvent.platform || firstEvent.product_name || '-';
+  document.getElementById('inventoryStatus').textContent = estado;
+  document.getElementById('inventoryEntered').textContent = fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-';
+  document.getElementById('inventoryExpire').textContent = fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : '-';
+  document.getElementById('inventoryLifeDays').textContent = String(diasRestantes);
+  document.getElementById('inventoryEventsCount').textContent = String(events.length);
+}
+
+function renderInventoryHistoryTimeline(eventos) {
+  const timelineItems = document.getElementById('inventoryTimelineItems');
+  if (!timelineItems) return;
+
+  timelineItems.innerHTML = eventos.map(evento => {
+    const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
+    const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
+    const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
+    const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
+    if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+    const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
+    const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
+    const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
+    const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Sin perfil';
+    const pedido = evento.orden_id ? `Pedido #${safeText(evento.orden_id)} (${safeText(evento.orden_status || 'sin estado')})` : 'No vendido aún';
+
+    return `
+      <div class="timeline-event">
+        <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleDateString('es-MX')} ${fechaIngreso.toLocaleTimeString('es-MX')}` : 'Fecha no disponible'}</div>
+        <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')}</div>
+        <div class="timeline-details">
+          <p><strong>Tipo de evento:</strong> ${safeText(eventoTipo)}</p>
+          <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')}</p>
+          <p><strong>Perfil vendido:</strong> ${perfil}</p>
+          <p><strong>Vendedor:</strong> ${vendedor}</p>
+          <p><strong>${pedido}</strong></p>
+          ${ordenCreada ? `<p><strong>Fecha de venta:</strong> ${ordenCreada.toLocaleDateString('es-MX')}</p>` : ''}
+          ${fechaEntrega ? `<p><strong>Entrega registrada:</strong> ${fechaEntrega.toLocaleDateString('es-MX')}</p>` : ''}
+          <p><strong>Estado actual:</strong> ${safeText(evento.status || evento.orden_status || 'Disponible')}</p>
+          <p><strong>Vence:</strong> ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No aplica'}</p>
+          <p><strong>Días restantes:</strong> ${safeText(String(diasRestantes))}</p>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+
+
+
+function renderInventoryHistoryModal(eventos) {
+  const summaryModal = document.getElementById('inventoryHistoryModalSummary');
+  const timelineModalItems = document.getElementById('inventoryTimelineModalItems');
+  if (!summaryModal || !timelineModalItems) return;
+
+  const firstEvent = eventos[0] || {};
+  const lastEvent = eventos[eventos.length - 1] || firstEvent;
+  const fechaIngreso = firstEvent.fecha_ingreso ? new Date(firstEvent.fecha_ingreso) : null;
+  const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
+  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+  const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
+  const estado = lastEvent.status === 'failed' || lastEvent.orden_status === 'failed'
+    ? 'Reemplazo / Falla'
+    : lastEvent.orden_id
+      ? 'Venta normal'
+      : 'En inventario';
+
+  summaryModal.innerHTML = `
+    <div><strong>Cuenta madre</strong><div>${safeText(firstEvent.cuenta_madre || '-')}</div></div>
+    <div><strong>Perfil</strong><div>${safeText(firstEvent.profile_name || '-')}</div></div>
+    <div><strong>Plataforma / Producto</strong><div>${safeText(firstEvent.platform || firstEvent.product_name || '-')}</div></div>
+    <div><strong>Estado</strong><div>${safeText(estado)}</div></div>
+    <div><strong>Ingreso</strong><div>${fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-'}</div></div>
+    <div><strong>Vence</strong><div>${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : '-'}</div></div>
+    <div><strong>Días restantes</strong><div>${safeText(String(diasRestantes))}</div></div>
+    <div><strong>Eventos totales</strong><div>${eventos.length}</div></div>
+  `;
+
+  timelineModalItems.innerHTML = eventos.map(evento => {
+    const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
+    const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
+    const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
+    const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
+    if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+    const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
+    const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
+    const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
+    const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Sin perfil';
+    const pedido = evento.orden_id ? `Pedido #${safeText(evento.orden_id)} (${safeText(evento.orden_status || 'sin estado')})` : 'No vendido aún';
+
+    return `
+      <div class="timeline-event">
+        <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleDateString('es-MX')} ${fechaIngreso.toLocaleTimeString('es-MX')}` : 'Fecha no disponible'}</div>
+        <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')}</div>
+        <div class="timeline-details">
+          <p><strong>Tipo de evento:</strong> ${safeText(eventoTipo)}</p>
+          <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')}</p>
+          <p><strong>Perfil vendido:</strong> ${perfil}</p>
+          <p><strong>Vendedor:</strong> ${vendedor}</p>
+          <p><strong>${pedido}</strong></p>
+          ${ordenCreada ? `<p><strong>Fecha de venta:</strong> ${ordenCreada.toLocaleDateString('es-MX')}</p>` : ''}
+          ${fechaEntrega ? `<p><strong>Entrega registrada:</strong> ${fechaEntrega.toLocaleDateString('es-MX')}</p>` : ''}
+          <p><strong>Estado actual:</strong> ${safeText(evento.status || evento.orden_status || 'Disponible')}</p>
+          <p><strong>Vence:</strong> ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No aplica'}</p>
+          <p><strong>Días restantes:</strong> ${safeText(String(diasRestantes))}</p>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openInventoryHistoryModal() {
+  const modal = document.getElementById('inventoryHistoryModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeInventoryHistoryModal() {
+  const modal = document.getElementById('inventoryHistoryModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+}
+
+function initInventoryHistoryModalBehavior() {
+  const modal = document.getElementById('inventoryHistoryModal');
+  if (!modal) return;
+  modal.onclick = (event) => {
+    if (event.target === modal) {
+      closeInventoryHistoryModal();
+    }
+  };
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+      closeInventoryHistoryModal();
+    }
+  });
+}
+
+// El botón de historial de inventario abre la sección fija.
+function initInventoryHistoryDashboardButton() {
+  const card = document.getElementById('dashInventoryHistoryCard');
+  if (card) {
+    card.onclick = openInventoryHistory;
+  }
+}
+
+setTimeout(() => {
+  initInventoryHistoryDashboardButton();
+  initInventoryHistoryModalBehavior();
+}, 100);
 
 // ===============================
 // INDICADOR: PRODUCTOS SIN STOCK
@@ -2616,8 +2917,12 @@ function renderAdminReportCompactFinal(r){
 <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
-        <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
+        <button class="green-btn" onclick="replaceReportedAccountAuto(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazo (inventario)</button>
+        <button class="outline-btn" onclick="replaceReportedAccountManual(${r.id})" ${canAct?'':'disabled'}>✍️ Reemplazo manual</button>
+      </div>
+      <div class="two-row" style="margin-top:10px">
         <button class="danger-btn" onclick="refundReportedAccount(${r.id}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
+        <button class="danger-btn" style="background:#b91c1c" onclick="refundFullReportedAccount(${r.id})" ${canAct?'':'disabled'}>💸 Reembolso completo</button>
       </div>
       <div class="two-row" style="margin-top:10px">
         <select id="reportStatus-${r.id}"><option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option><option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option></select>
@@ -2953,11 +3258,13 @@ async function updateOrderStatus(id){
 
     const data=await api('/api/admin/orders/'+id+'/status',{method:'PATCH',body:JSON.stringify(payload)});
     showMessage(data.message||'Pedido actualizado');
-    await loadAdminOrders();
-    await loadMyOrders();
-    await loadUsers();
-    await loadPlatformInventory();
-    await loadSalesReport();
+    await Promise.allSettled([
+      loadAdminOrders(),
+      loadMyOrders(),
+      loadUsers(),
+      loadPlatformInventory(),
+      loadSalesReport()
+    ]);
   }catch(e){showMessage(e.message||'Error actualizando pedido','error')}
 }
 
@@ -5551,7 +5858,12 @@ async function checkQuarantineAccounts() {
 }
 
 function openQuarantineFromDashboard() {
-  if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) return;
+  console.log('openQuarantineFromDashboard invoked, currentUser:', currentUser);
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) {
+    console.warn('Acceso a cuarentena denegado: usuario no autenticado o sin permisos');
+    showMessage('No autorizado para abrir cuarentena', 'error');
+    return;
+  }
 
   fetch('/api/admin/accounts/quarantine', {
     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
@@ -5569,57 +5881,88 @@ function openQuarantineFromDashboard() {
 }
 
 function showQuarantineModal(list) {
+  console.log('showQuarantineModal called, list length:', Array.isArray(list)?list.length:0);
   const old = document.getElementById('quarantineModal');
   if (old) old.remove();
 
-  const html = `
-  <div id="quarantineModal" class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
-    <div class="modal-box" style="background:#1e1e2f; padding:25px; border-radius:12px; width:90%; max-width:600px; color:white; max-height: 85vh; overflow-y: auto;">
-      <h2 style="color:#ef4444; margin-top:0; border-bottom:1px solid #ef4444; padding-bottom:10px;">🚨 Cuentas en Cuarentena</h2>
-      <p style="font-size:14px; color:#cbd5e1; line-height:1.5;">Estas cuentas ya cumplieron sus días de garantía. <b>Pasos:</b><br>1. Entra a la plataforma oficial.<br>2. Cambia la contraseña para sacar al cliente anterior.<br>3. Escribe la nueva clave aquí y presiona Liberar.</p>
-      
-      <div style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
-        ${list.map(c => {
-  // Calculamos los días de forma sencilla desde el resultado de la DB
-  // Si dias_restantes viene como un string, extraemos los días
-  const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
-  const color = dias < 5 ? "#ef4444" : "#10b981"; // Rojo si le quedan menos de 5 días
+  const container = document.createElement('div');
+  container.id = 'quarantineModal';
+  container.className = 'modal-overlay';
+  container.style.zIndex = '99999';
+  container.style.display = 'flex';
 
-  
-  return `
-    <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid ${color}; margin-bottom: 10px;">
-<p style="margin:5px 0;">👤 Perfil a cerrar: <b>${c.profile_name || 'Principal'}</b></p>
-<p style="margin:5px 0;">🔢 PIN actual: <b>${c.profile_pin || 'No tiene'}</b></p>
-      <p style="margin:0; font-size:16px;"><b>${c.platform}</b></p>
-      <p style="margin:5px 0; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
-      <p style="margin:5px 0; font-size:14px; color: ${color};">
-        <b>⏳ Vida restante cuenta madre: ${dias > 0 ? dias + ' días' : '¡Vencida!'}</b>
-      </p>
+  const card = document.createElement('div');
+  card.className = 'modal-card';
+  card.style.maxWidth = '920px';
+  card.style.width = '90%';
+  card.style.background = '#0f172a';
 
-<div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
-      <input id="new-pass-${c.id}" placeholder="Nueva contraseña" style="padding:10px; border-radius:6px; border:none; background:#1e1e2f; color:white;">
-      <input id="new-pin-${c.id}" placeholder="Nuevo PIN" style="padding:10px; border-radius:6px; border:none; background:#1e1e2f; color:white;">
-      
-      <div style="display:flex; gap:10px;">
-        <button onclick="liberarCuentaDeCuarentena(${c.id})" style="flex:1; background:#10b981; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar</button>
-        <button onclick="desecharCuenta(${c.id})" style="flex:1; background:#4b5563; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Desechar</button>
-      </div>
+  card.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <h2 style="color:#ef4444; margin:0;">🚨 Cuentas en Cuarentena</h2>
+      <button class="modal-close-btn" onclick="document.getElementById('quarantineModal')?.remove()">×</button>
     </div>
-  </div>
-  `;
-}).join('')}
-      </div>
-      <button onclick="document.getElementById('quarantineModal').remove()" style="margin-top:25px; background:#4b5563; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; width:100%; font-weight:bold;">Cerrar Ventana</button>
+    <p class="small-text" style="margin-top:10px; color:#cbd5e1;">Estas cuentas requieren atención. Puedes cambiar la contraseña, cambiar el PIN del perfil, o desechar permanentemente la cuenta.</p>
+    <div id="quarantineListContainer" style="margin-top:18px; display:flex; flex-direction:column; gap:12px;">
+      ${list.map(c => {
+        const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
+        const estadoVida = dias > 0 ? `${dias} días` : '¡Vencida!';
+        const borde = dias < 5 ? 'style="border-left:4px solid #ef4444;"' : '';
+
+        return `
+          <div class="quarantine-item" data-id="${c.id}" ${borde}>
+            <div class="quarantine-row">
+              <div class="quarantine-meta">
+                <div class="quarantine-platform">${safeText(c.platform || '')}</div>
+                <div class="quarantine-email">📧 ${safeText(c.account_email || '-')}</div>
+                <div class="quarantine-profile">👤 ${safeText(c.profile_name || 'Principal')} | PIN: ${safeText(c.profile_pin || '—')}</div>
+                <div class="quarantine-life">⏳ Vida restante: <strong>${estadoVida}</strong></div>
+              </div>
+              <div class="quarantine-actions">
+                <label class="field-label" style="margin-bottom:6px">Nueva contraseña</label>
+                <input id="new-pass-${c.id}" placeholder="Nueva contraseña" class="form-control" />
+                <label class="field-label" style="margin-top:8px; margin-bottom:6px">Nuevo PIN (opcional)</label>
+                <input id="new-pin-${c.id}" placeholder="Nuevo PIN" class="form-control" />
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                  <button class="green-btn" onclick="liberarCuentaDeCuarentena(${c.id})">Recuperar</button>
+                  <button class="outline-btn" onclick="desecharCuenta(${c.id})">Desechar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
     </div>
-  </div>
+    <div style="margin-top:16px; display:flex; gap:8px;">
+      <button class="outline-btn" onclick="document.getElementById('quarantineModal')?.remove()">Cerrar</button>
+      <button class="outline-btn" onclick="checkQuarantineAccounts()">Refrescar lista</button>
+    </div>
   `;
-  document.body.insertAdjacentHTML('beforeend', html);
+
+  container.appendChild(card);
+  document.body.appendChild(container);
+  console.log('quarantineModal appended to body');
 }
 
 async function liberarCuentaDeCuarentena(id) {
-  const newPass = document.getElementById('new-pass-' + id).value.trim();
-  if (!newPass) return alert("⚠️ Debes escribir la NUEVA contraseña para poder liberar la cuenta.");
-  if (!confirm("¿Confirma que ya cambiaste esta contraseña en la página oficial?")) return;
+  const passEl = document.getElementById('new-pass-' + id);
+  const pinEl = document.getElementById('new-pin-' + id);
+  const newPass = passEl ? passEl.value.trim() : '';
+  const newPin = pinEl ? pinEl.value.trim() : '';
+
+  if (!newPass && !newPin) return alert("⚠️ Debes ingresar al menos una nueva contraseña o un nuevo PIN para recuperar la cuenta.");
+  if (!confirm("¿Confirma que ya actualizaste los datos en la plataforma oficial y desea marcar esta cuenta como disponible?")) return;
+
+  // Eliminación optimista del ítem en la UI
+  const item = document.querySelector(`.quarantine-item[data-id="${id}"]`);
+  const nextItem = item ? item.nextElementSibling : null;
+  if (item) item.remove();
+  const container = document.getElementById('quarantineListContainer');
+  if (container && container.children.length === 0) {
+    document.getElementById('quarantineModal')?.remove();
+  } else if (nextItem) {
+    nextItem.scrollIntoView({behavior:'smooth', block:'center'});
+  }
 
   try {
     const res = await fetch('/api/admin/accounts/' + id + '/release', {
@@ -5628,22 +5971,32 @@ async function liberarCuentaDeCuarentena(id) {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + localStorage.getItem('token')
       },
-      body: JSON.stringify({ new_password: newPass })
+      body: JSON.stringify({ new_password: newPass || undefined, new_pin: newPin || undefined })
     });
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    
-    alert("✅ " + data.message);
-    document.getElementById('quarantineModal').remove();
-    checkQuarantineAccounts(); // Volver a revisar y actualizar la lista
-    if(typeof loadPlatformInventory === 'function') loadPlatformInventory(); // Refrescar inventario si está abierto
+    if (!res.ok) throw new Error(data.error || 'Error en servidor');
+    showMessage(data.message || 'Cuenta liberada');
+    checkQuarantineAccounts();
+    if (typeof loadPlatformInventory === 'function') loadPlatformInventory();
   } catch (err) {
-    alert("❌ Error: " + err.message);
+    showMessage(err.message || 'Error liberando cuenta', 'error');
+    checkQuarantineAccounts();
   }
 }
 
 async function desecharCuenta(id) {
   if (!confirm("¿Deseas enviar esta cuenta a desecho permanente?")) return;
+
+  // Eliminación optimista
+  const item = document.querySelector(`.quarantine-item[data-id="${id}"]`);
+  const nextItem = item ? item.nextElementSibling : null;
+  if (item) item.remove();
+  const container = document.getElementById('quarantineListContainer');
+  if (container && container.children.length === 0) {
+    document.getElementById('quarantineModal')?.remove();
+  } else if (nextItem) {
+    nextItem.scrollIntoView({behavior:'smooth', block:'center'});
+  }
 
   try {
     const res = await fetch(`/api/admin/accounts/${id}/discard`, {
@@ -5657,17 +6010,14 @@ async function desecharCuenta(id) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Error al desechar");
 
-    alert("✅ " + data.message);
-    
-    // Recargar la lista para que la cuenta desaparezca del modal
-    checkQuarantineAccounts(); 
-    
-    // Refrescar inventario si está abierto
+    showMessage(data.message || 'Cuenta desechada');
+    checkQuarantineAccounts();
     if(typeof loadPlatformInventory === 'function') loadPlatformInventory();
-    
+
   } catch (err) {
-    alert("❌ Error: " + err.message);
+    showMessage(err.message || 'Error al desechar', 'error');
     console.error(err);
+    checkQuarantineAccounts();
   }
 }
 
@@ -5843,6 +6193,38 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// DELEGATED FIX: parche seguro para clicks muertos en la tarjeta de cuarentena
+// Si por alguna razón el onclick/handler original falla (caching o override),
+// este listener captura el click y abre el modal usando la misma lógica.
+document.addEventListener('click', (ev) => {
+  try {
+    const target = ev.target && ev.target.closest ? ev.target.closest('#dashQuarantineCard') : null;
+    if (!target) return;
+    console.log('DELEGATED FIX: dashQuarantineCard clicked, attempting to open quarantine modal');
+
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) {
+      console.warn('DELEGATED FIX: acceso denegado a cuarentena');
+      showMessage('No autorizado para abrir cuarentena', 'error');
+      return;
+    }
+
+    // Ejecutar la misma petición que openQuarantineFromDashboard
+    fetch('/api/admin/accounts/quarantine', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } })
+      .then(r => r.json())
+      .then(list => {
+        const quarantineList = Array.isArray(list) ? list : [];
+        const stat = document.getElementById('statExpiring');
+        if (stat) stat.textContent = String(quarantineList.length);
+        try { showQuarantineModal(quarantineList); }
+        catch(e){ console.error('DELEGATED FIX: error mostrando modal de cuarentena', e); }
+      })
+      .catch(err => console.error('DELEGATED FIX: error fetching quarantine list', err));
+
+  } catch (e) {
+    console.error('DELEGATED FIX: fallo al procesar click delegado', e);
+  }
+});
+
 
 // ESTA ES LA PARTE QUE MANTIENE TU PANEL SEGURO AL CARGAR
 document.addEventListener('DOMContentLoaded', () => {
@@ -5988,6 +6370,34 @@ function toggleCardByInnerId(innerId, hidden){
   const card=valueEl ? valueEl.closest('.dash-card') : null;
   if(card) card.classList.toggle('hidden', !!hidden);
 }
+
+// DEBUG: asegurar que la función sea accesible globalmente y escuchar clicks en el card
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    if (typeof openQuarantineFromDashboard === 'function') {
+      window.openQuarantineFromDashboard = openQuarantineFromDashboard;
+    }
+  } catch (e) { console.warn('No se pudo enlazar openQuarantineFromDashboard globalmente', e); }
+
+  const dashCard = document.getElementById('dashQuarantineCard');
+  if (dashCard) {
+    dashCard.addEventListener('click', (ev) => {
+      console.log('DEBUG: dashQuarantineCard click received', ev);
+      console.log('DEBUG: invoking openQuarantineFromDashboard from listener');
+      try {
+        if (typeof openQuarantineFromDashboard === 'function') {
+          openQuarantineFromDashboard();
+        } else {
+          console.warn('openQuarantineFromDashboard no está definida en el scope global');
+        }
+      } catch (e) {
+        console.error('Error al ejecutar openQuarantineFromDashboard desde listener', e);
+      }
+    });
+  } else {
+    console.log('DEBUG: dashQuarantineCard no existe en DOM al cargar');
+  }
+});
 
 function applyDashboardRoleVisibilityMatrix(){
   if(!currentUser) return;

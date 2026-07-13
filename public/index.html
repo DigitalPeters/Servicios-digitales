@@ -43,6 +43,7 @@
         <button class="topbar-home-btn" onclick="cambiarSeccion('dashboard')">
             🏠 Inicio
         </button>
+        <span id="topUserName" class="topbar-user">Usuario</span>
     </div>
 
     <div class="top-actions">
@@ -81,8 +82,7 @@
     <div class="dash-icon">👤</div>
     <div>
       <div class="dash-label">Mi Perfil</div>
-      <div class="small-text">Contraseña y datos</div>
-    </div>
+        </div>
   </div>
 
   <div class="dash-card clickable" onclick="showSection('shop')">
@@ -92,7 +92,7 @@
           </div>
   </div>
 
-  <div class="dash-card clickable" onclick="document.getElementById('btn-top-reporte-ventas').click()">
+  <div class="dash-card clickable" onclick="openSalesReport()">
     <div class="dash-icon">📈</div>
     <div>
       <div class="dash-label">Reporte de Ventas</div>
@@ -106,8 +106,7 @@
     <div class="dash-icon">👤</div>
     <div>
       <div class="dash-label">Mi Perfil</div>
-      <div class="small-text">Contraseña y datos</div>
-    </div>
+          </div>
   </div>
 
   <div class="dash-card clickable" onclick="showSection('shop')">
@@ -151,6 +150,13 @@
           <div id="dashProductsCard" class="dash-card clickable" onclick="openProductsFromDashboard()"><div class="dash-icon">📦</div><div><div class="dash-label">Productos</div><div id="count-productos" class="dash-value"><span id="statProducts">0</span></div></div></div>
           <div id="dashOutOfStockCard" class="dash-card clickable hidden" onclick="openOutOfStockFromDashboard()"><div class="dash-icon">🚫</div><div><div class="dash-label">Sin stock</div><div id="count-stock_bajo" class="dash-value"><span id="statOutOfStock">0</span></div></div></div>
           <div id="dashInventoryCard" class="dash-card clickable hidden" onclick="openInventoryFromDashboard()"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="count-inventario" class="dash-value"><span id="statInventory">0</span></div></div></div>
+          <div id="dashInventoryHistoryCard" class="dash-card clickable" onclick="openInventoryHistory()">
+    <div class="dash-icon">🧬</div>
+    <div>
+        <div class="dash-label">Historial Inventario</div>
+        <div class="small-text">Cuenta madre y ventas</div>
+    </div>
+</div>
           <div id="dashCsvUploadCard" class="dash-card clickable hidden" onclick="document.getElementById('csv-upload-input')?.click()"><div class="dash-icon">📊</div><div><div class="dash-label">CSV Inventario</div><div class="small-text">📊 Cargar Cuentas desde CSV</div></div></div>
           <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="count-pedidos" class="dash-value"><span id="statOrders">0</span></div></div></div>
           <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="count-fallas_reportadas" class="dash-value"><span id="statReports">0</span></div></div></div>
@@ -373,29 +379,49 @@
       </section>
 
       
-      <section id="section-ownerAnnouncements" class="section">
-        <h1 class="section-title">Comunicados</h1>
+      <section id="section-inventory-history" class="section">
+
+        <h1 class="section-title">🧬 Historial de inventario - Cuenta madre</h1>
+
         <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Comunicados para mis vendedores</h2>
-              <p class="small-text">Estos avisos solo aparecerán para los vendedores de tu panel propietario. No se mezclan con los comunicados del admin global.</p>
-            </div>
-            <button class="outline-btn" style="width:auto" onclick="loadOwnerAnnouncements()">Actualizar</button>
+          <div class="trace-search">
+            <input id="inventorySearchInput" type="text" placeholder="Buscar por cuenta madre, perfil, PIN o pedido" />
+            <button class="primary-btn" onclick="searchInventoryHistory()">🔍 Buscar</button>
           </div>
-          <div class="row">
-            <div>
-              <label class="field-label">Nuevo comunicado</label>
-              <textarea id="ownerAnnouncementText" placeholder="Ejemplo: Servicio con demora, favor de avisar a sus clientes."></textarea>
-              <button class="primary-btn" onclick="createOwnerAnnouncement()">Publicar comunicado</button>
-            </div>
-            <div>
-              <h3>Comunicados publicados</h3>
-              <div id="ownerAnnouncementsList" class="announcement-admin-list">Sin comunicados.</div>
-            </div>
+          <p class="small-text">Busca la cuenta madre en inventario para ver ingreso, ventas, reemplazos por falla, vida útil de 30 días y vendedores con fecha, correo y perfil.</p>
+        </div>
+
+        <div id="inventoryHistorySummary" class="panel hidden">
+          <h2>Resumen de la cuenta madre</h2>
+          <div class="trace-grid">
+            <div><strong>Cuenta madre</strong><div id="inventoryEmail">-</div></div>
+            <div><strong>Perfil</strong><div id="inventoryProfile">-</div></div>
+            <div><strong>Plataforma / Producto</strong><div id="inventoryPlatform">-</div></div>
+            <div><strong>Estado</strong><div id="inventoryStatus">-</div></div>
+            <div><strong>Ingreso al inventario</strong><div id="inventoryEntered">-</div></div>
+            <div><strong>Vence</strong><div id="inventoryExpire">-</div></div>
+            <div><strong>Días restantes</strong><div id="inventoryLifeDays">-</div></div>
+            <div><strong>Eventos totales</strong><div id="inventoryEventsCount">-</div></div>
           </div>
         </div>
+
+        <div id="inventoryHistoryTimeline" class="panel hidden">
+          <h2>Línea del tiempo del inventario</h2>
+          <div id="inventoryTimelineItems">Sin información.</div>
+        </div>
       </section>
+
+      <div id="inventoryHistoryModal" class="modal-overlay hidden" aria-hidden="true">
+        <div class="modal-card inventory-history-modal-card">
+          <button class="modal-close-btn" onclick="closeInventoryHistoryModal()" aria-label="Cerrar modal">×</button>
+          <div class="modal-head">
+            <h2>Historial de inventario</h2>
+            <p class="small-text">Detalle de la cuenta madre, eventos y fechas clave.</p>
+          </div>
+          <div id="inventoryHistoryModalSummary" class="trace-grid modal-summary"></div>
+          <div id="inventoryTimelineModalItems" class="timeline modal-timeline"></div>
+        </div>
+      </div>
 
       <section id="section-admin" class="section">
         <h1 class="section-title">Panel admin</h1>
@@ -579,7 +605,7 @@
   <div id="adminOrdersList"></div>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 
   <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
     <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>
@@ -611,6 +637,9 @@
       <button id="csvStatusCloseBtn" class="modal-status-csv-close" type="button" onclick="closeModalStatusCSV()">Entendido / Cerrar</button>
     </div>
   </div>
+
+  </div>
+</div>
 
 </body>
 </html>
