@@ -898,12 +898,12 @@
   position:relative;
   width:min(920px, 100%);
   max-height:min(90vh, 950px);
-  background:#0f172a;
-  border:1px solid rgba(148,163,184,0.2);
+  background:#ffffff;
+  border:1px solid #e5e7eb;
   border-radius:20px;
-  box-shadow:0 28px 60px rgba(15,23,42,0.35);
+  box-shadow:0 28px 60px rgba(15,23,42,0.12);
   padding:24px;
-  color:#e2e8f0;
+  color:#111827;
   overflow:auto;
 }
 
@@ -919,6 +919,39 @@
   padding:20px;
   color:#e2e8f0;
   overflow:auto;
+}
+
+/* Inventory history modal white theme */
+#inventoryHistoryModal .modal-head h2 {
+  color:#111827;
+}
+
+#inventoryHistoryModal .modal-head .small-text {
+  color:#4b5563;
+}
+
+#inventoryHistoryModal .modal-summary div {
+  background:#f8fafc;
+  border:1px solid #e5e7eb;
+  color:#111827;
+}
+
+#inventoryHistoryModal .modal-summary div strong,
+#inventoryHistoryModal .modal-summary div div,
+#inventoryHistoryModal .timeline-event,
+#inventoryHistoryModal .modal-timeline .timeline-details p,
+#inventoryHistoryModal .timeline-date,
+#inventoryHistoryModal .timeline-title {
+  color:#111827;
+}
+
+#inventoryHistoryModal .modal-timeline .timeline-event {
+  background:#ffffff;
+  border:1px solid #e5e7eb;
+}
+
+#inventoryHistoryModal .timeline-date {
+  color:#6b7280;
 }
 
 /* Contenedor de lista con scroll interno para modales largos */

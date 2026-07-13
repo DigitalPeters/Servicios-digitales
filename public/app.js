@@ -2174,13 +2174,29 @@ function renderInventoryHistoryModal(eventos) {
       ? 'Venta normal'
       : 'En inventario';
 
+  // Contar perfiles únicos asociados al mismo correo (sin repetir)
+  const targetEmail = String(firstEvent.cuenta_madre || '').toLowerCase();
+  const uniqueProfiles = new Set();
+  eventos.forEach(ev => {
+    try {
+      if (!targetEmail) return;
+      if (String(ev.cuenta_madre || '').toLowerCase() !== targetEmail) return;
+      const profile = String(ev.profile_name || '').trim();
+      const pin = String(ev.profile_pin || '').trim();
+      if (profile || pin) uniqueProfiles.add(`${profile}||${pin}`);
+    } catch (e) { /* ignore malformed rows */ }
+  });
+  const perfilesCount = uniqueProfiles.size;
+  const perfilDisplay = perfilesCount ? `${perfilesCount} perfiles` : (firstEvent.profile_name ? safeText(firstEvent.profile_name) : '-');
+
   summaryModal.innerHTML = `
-    <div><strong>Cuenta madre</strong><div>${safeText(firstEvent.cuenta_madre || '-')}</div></div>
-    <div><strong>Perfil</strong><div>${safeText(firstEvent.profile_name || '-')}</div></div>
-    <div><strong>Plataforma / Producto</strong><div>${safeText(firstEvent.platform || firstEvent.product_name || '-')}</div></div>
-    <div><strong>Estado</strong><div>${safeText(estado)}</div></div>
+    <div><strong>Correo</strong><div>${safeText(firstEvent.cuenta_madre || '-')}</div></div>
+    <div><strong>Contraseña</strong><div>${safeText(firstEvent.contrasena || '-')}</div></div>
     <div><strong>Ingreso</strong><div>${fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-'}</div></div>
     <div><strong>Vence</strong><div>${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : '-'}</div></div>
+    <div><strong>Estado</strong><div>${safeText(estado)}</div></div>
+    <div><strong>Perfil</strong><div>${safeText(perfilDisplay)}</div></div>
+    <div><strong>Plataforma / Producto</strong><div>${safeText(firstEvent.platform || firstEvent.product_name || '-')}</div></div>
     <div><strong>Días restantes</strong><div>${safeText(String(diasRestantes))}</div></div>
     <div><strong>Eventos totales</strong><div>${eventos.length}</div></div>
   `;
