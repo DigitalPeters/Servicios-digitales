@@ -1,47 +1,11 @@
-function openTopbarAnnouncements(){
-  const modal = document.getElementById('modal-anuncios');
-  if (!modal) return;
-
-  modal.style.display = 'flex';
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-
-  if (typeof fillAnnouncementModalFields === 'function') {
-    fillAnnouncementModalFields('Cargando anuncio activo...');
-  }
-}
-
-async function loadTopbarAnnouncements(){
-  if (typeof syncAnnouncementControlAccess === 'function') {
-    syncAnnouncementControlAccess();
-  }
-  if (typeof loadPanelAnnouncementText === 'function') {
-    await loadPanelAnnouncementText();
-  }
-}
-
-window.abrirModalAnuncios = async function(){
-  openTopbarAnnouncements();
-  await loadTopbarAnnouncements();
-};
-
-window.cerrarModalAnuncios = function() {
-  const modal = document.getElementById('modal-anuncios');
-  if (!modal) return;
-  modal.style.display = 'none';
-  modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden', 'true');
-};
-
 let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
 let currentInventoryPage = 1;
 let currentOrdersPage = 1;
 
-function showAuth(type){const isLogin=type==='login';document.getElementById('loginForm')?.classList.toggle('hidden',!isLogin);document.getElementById('registerForm')?.classList.toggle('hidden',isLogin);document.getElementById('loginTab')?.classList.toggle('active',isLogin);document.getElementById('registerTab')?.classList.toggle('active',!isLogin)}
+function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
 
 function showSection(name) {
-  activarHistorialCelular();
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
 
   const sec = document.getElementById('section-' + name);
@@ -135,50 +99,6 @@ function openOrdersFromDashboard(){
   }
 }
 function showMessage(text,type='success'){document.getElementById('message').innerHTML=`<p class="${type}">${safeText(text)}</p>`;setTimeout(()=>{document.getElementById('message').innerHTML=''},4500)}
-function showMicroIndicator(text, type = 'success') {
-  let box = document.getElementById('micro-indicator');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'micro-indicator';
-    box.style.position = 'fixed';
-    box.style.right = '16px';
-    box.style.bottom = '16px';
-    box.style.zIndex = '100000';
-    box.style.padding = '10px 12px';
-    box.style.borderRadius = '10px';
-    box.style.fontSize = '13px';
-    box.style.fontWeight = '700';
-    box.style.boxShadow = '0 8px 24px rgba(0,0,0,0.35)';
-    box.style.transition = 'opacity .22s ease, transform .22s ease';
-    box.style.opacity = '0';
-    box.style.transform = 'translateY(8px)';
-    box.style.maxWidth = '280px';
-    box.style.pointerEvents = 'none';
-    document.body.appendChild(box);
-  }
-
-  box.textContent = String(text || 'Actualizado');
-  if (type === 'error') {
-    box.style.background = '#7f1d1d';
-    box.style.color = '#fee2e2';
-    box.style.border = '1px solid #ef4444';
-  } else {
-    box.style.background = '#064e3b';
-    box.style.color = '#d1fae5';
-    box.style.border = '1px solid #10b981';
-  }
-
-  box.style.opacity = '1';
-  box.style.transform = 'translateY(0)';
-  clearTimeout(window.__microIndicatorTimer);
-  window.__microIndicatorTimer = setTimeout(() => {
-    if (!box) return;
-    box.style.opacity = '0';
-    box.style.transform = 'translateY(8px)';
-  }, 1800);
-}
-function resolveWelcomeName(loginData){const fromApi=String(loginData?.user?.name||loginData?.name||'').trim();if(fromApi)return fromApi;const fromMe=String(currentUser?.name||'').trim();if(fromMe)return fromMe;const fromInput=String(document.getElementById('loginEmail')?.value||'').trim();return fromInput?fromInput.split('@')[0]:'Usuario'}
-function paintDashboardWelcomeBanner(name){const el=document.getElementById('dashboardWelcomeBanner');if(!el)return;const finalName=String(name||'Usuario').trim()||'Usuario';el.textContent=`¡Bienvenido, ${finalName}!`;el.classList.remove('hidden');clearTimeout(window.__welcomeBannerTimer);window.__welcomeBannerTimer=setTimeout(()=>el.classList.add('hidden'),7000)}
 function safeText(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function parseJsonArray(v){try{if(Array.isArray(v))return v;const p=JSON.parse(v||'[]');return Array.isArray(p)?p:[]}catch{return[]}}
 function parseJsonObject(v){try{if(typeof v==='object'&&v!==null)return v;const p=JSON.parse(v||'{}');return typeof p==='object'&&p!==null?p:{}}catch{return{}}}
@@ -189,267 +109,8 @@ function getStatusText(s){return({accion_en_espera:'Acción en espera',en_proces
 function formatMoney(v){return Number(v||0).toFixed(2)}
 async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.Authorization='Bearer '+token;if(!(opt.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok){const detailed=(Array.isArray(d.errors)&&d.errors.length?d.errors.join(' | '):'')||(typeof d.error==='string'&&d.error)||`Error HTTP ${r.status}`;throw new Error(detailed)}return d}
 async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
-async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);const welcomeName=resolveWelcomeName(data);window.__pendingWelcomeName=welcomeName;showMessage(`¡Bienvenido, ${welcomeName}!`);await loadApp()}catch(e){showMessage(e.message,'error')}}
-window.register = register;
-window.login = login;
+async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
 function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-
-document.addEventListener('click', async function(e) {
-  const btnTopReporteVentas = e.target.closest('#btn-top-reporte-ventas');
-  if (btnTopReporteVentas) {
-    e.preventDefault();
-    if (typeof openSalesReport === 'function') {
-      openSalesReport();
-    } else if (typeof scrollToAdmin === 'function') {
-      showSection('admin');
-      setTimeout(() => scrollToAdmin('adminSalesReportPanel'), 80);
-    } else {
-      showSection('admin');
-    }
-
-    if (typeof loadSalesReport === 'function') {
-      await loadSalesReport(true);
-    }
-    return;
-  }
-
-   // --- BLOQUE ANUNCIOS INTEGRADO Y BLINDADO POR TI ---
-  const abrirAnuncios = e.target.closest('#btn-anuncios') || e.target.closest('#btn-comunicados');
-  if (abrirAnuncios) {
-    e.preventDefault();
-    console.log("¡El botón de comunicados fue detectado al primer clic!");
-
-    const modal = document.getElementById('modal-anuncios') || document.getElementById('modal-comunicados');
-    if (modal) {
-      // 💥 LA BALA DE PLATA: Arrancamos el modal de cualquier contenedor oculto de Copilot
-      // y lo movemos directamente al cuerpo principal de la página en tiempo real
-      document.body.appendChild(modal);
-
-      // Ahora sí, lo forzamos a mostrarse visualmente
-      modal.style.setProperty('display', 'flex', 'important');
-      modal.classList.remove('hidden');
-      modal.setAttribute('aria-hidden', 'false');
-    } else {
-      console.log("Error: No se encontró ningún modal con ID modal-anuncios o modal-comunicados");
-    }
-
-    // ⏳ Retrasamos la carga de datos 50 milisegundos para que primero se pinte el modal
-    // y no congele la animación visual de la pantalla
-    setTimeout(() => {
-      try {
-        if (typeof loadTopbarAnnouncements === 'function') {
-          loadTopbarAnnouncements();
-        } else if (typeof cargarAnuncioActual === 'function') {
-          cargarAnuncioActual();
-        }
-      } catch (err) {
-        console.log("Error secundario al cargar datos:", err);
-      }
-    }, 50);
-
-    return;
-  }
-
-  // --- BLOQUE DE CIERRE Y ACCIONES BLINDADO POR TI ---
-  const cerrarAnuncios = e.target.closest('#btn-cerrar-anuncios, #btn-cerrar-anuncios-x');
-  if (cerrarAnuncios) {
-    e.preventDefault();
-    const modal = document.getElementById('modal-anuncios') || document.getElementById('modal-comunicados');
-    if (modal) {
-      // Forzamos el ocultado inmediato anulando el flex anterior
-      modal.style.setProperty('display', 'none', 'important');
-    }
-    if (typeof window.cerrarModalAnuncios === 'function') {
-      window.cerrarModalAnuncios();
-    }
-    return;
-  }
-
-  const activarAnuncio = e.target.closest('#btn-activar-anuncios');
-  if (activarAnuncio) {
-    e.preventDefault();
-    await applyAnnouncementFromModal();
-    const modal = document.getElementById('modal-anuncios') || document.getElementById('modal-comunicados');
-    if (modal) modal.style.setProperty('display', 'none', 'important');
-    if (typeof window.cerrarModalAnuncios === 'function') window.cerrarModalAnuncios();
-    return;
-  }
-
-  const ocultarAnuncio = e.target.closest('#btn-ocultar-anuncios');
-  if (ocultarAnuncio) {
-    e.preventDefault();
-    await clearAnnouncementFromModal();
-    const modal = document.getElementById('modal-anuncios') || document.getElementById('modal-comunicados');
-    if (modal) modal.style.setProperty('display', 'none', 'important');
-    if (typeof window.cerrarModalAnuncios === 'function') window.cerrarModalAnuncios();
-    return;
-  }
-
-  const eliminarAnuncio = e.target.closest('#btn-eliminar-anuncios');
-  if (eliminarAnuncio) {
-    e.preventDefault();
-    await deleteAnnouncementFromModal();
-    const modal = document.getElementById('modal-anuncios') || document.getElementById('modal-comunicados');
-    if (modal) modal.style.setProperty('display', 'none', 'important');
-    if (typeof window.cerrarModalAnuncios === 'function') window.cerrarModalAnuncios();
-    return;
-  }
-
-  const btnBuscar = e.target.closest('#btn-ejecutar-busqueda');
-  if (btnBuscar) {
-    e.preventDefault();
-    const emailInput = document.getElementById('input-busqueda-email')?.value.trim();
-    if (!emailInput) return alert('Escribe un correo para buscar');
-
-    console.log('Buscando el correo:', emailInput);
-
-    try {
-      const response = await fetch(`/api/inventory/search?email=${encodeURIComponent(emailInput)}`);
-      const payload = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(payload.error || 'No se pudo completar la búsqueda');
-      }
-
-      const cuentas = Array.isArray(payload) ? payload : [];
-      console.log('Cuentas encontradas desde el servidor:', cuentas);
-      showMessage(`Búsqueda completada: ${cuentas.length} resultado(s).`);
-
-      const listBox = document.getElementById('platformAccountsList') || document.getElementById('adminPlatformAccountsList');
-      const countEl = document.getElementById('adminPlatformAccountsCount');
-      const info = document.getElementById('inv-page-info');
-      const prevBtn = document.getElementById('inv-prev-btn');
-      const nextBtn = document.getElementById('inv-next-btn');
-
-      if (listBox) {
-        listBox.innerHTML = renderPlatformAccountsTable(
-          cuentas,
-          `No se encontraron cuentas para ${safeText(emailInput)}.`
-        );
-      }
-
-      if (countEl) countEl.textContent = String(cuentas.length);
-      if (info) info.textContent = `Búsqueda: ${cuentas.length} resultado(s)`;
-      if (prevBtn) prevBtn.disabled = true;
-      if (nextBtn) nextBtn.disabled = true;
-
-      // NOTA DE CONTROL: Aquí debes pasarle el arreglo 'cuentas' a la función
-      // que use tu sistema para dibujar las filas del inventario en pantalla.
-      // Ejemplo: renderInventoryTable(cuentas);
-    } catch (err) {
-      console.error('Error al ejecutar búsqueda:', err);
-      showMessage(err.message || 'Error al ejecutar búsqueda', 'error');
-    }
-
-    return;
-  }
-
-  const btnLimpiarBuscar = e.target.closest('#btn-limpiar-busqueda');
-  if (btnLimpiarBuscar) {
-    e.preventDefault();
-    const inputBusqueda = document.getElementById('input-busqueda-email');
-    if (inputBusqueda) inputBusqueda.value = '';
-    if (typeof loadPlatformInventory === 'function') {
-      await loadPlatformInventory();
-    }
-    return;
-  }
-
-  const quarantineAction = e.target.closest('[data-quarantine-action]');
-  if (quarantineAction) {
-    e.preventDefault();
-
-    const action = String(quarantineAction.dataset.quarantineAction || '').toLowerCase();
-    const accountId = Number(quarantineAction.dataset.accountId || 0);
-    if (!Number.isInteger(accountId) || accountId <= 0) {
-      showMicroIndicator('Cuenta inválida para esta acción.', 'error');
-      return;
-    }
-
-    try {
-      if (action === 'release') {
-        const passInput = document.getElementById(`new-pass-${accountId}`);
-        const newPass = String(passInput?.value || '').trim();
-        if (!newPass) {
-          showMicroIndicator('Escribe la nueva contraseña para liberar.', 'error');
-          return;
-        }
-        if (!confirm('¿Confirma que ya cambiaste esta contraseña en la página oficial?')) {
-          return;
-        }
-
-        const response = await fetch(`/api/admin/accounts/${accountId}/release`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + localStorage.getItem('token')
-          },
-          body: JSON.stringify({ new_password: newPass })
-        });
-        const data = await response.json().catch(() => ({}));
-
-        if (response.ok) {
-          const fila = e.target.closest('[data-quarantine-row="1"]');
-          if (fila) fila.remove();
-
-          showMicroIndicator(data.message || 'Cuenta liberada correctamente.', 'success');
-
-          const stat = document.getElementById('statExpiring');
-          const leftRows = document.querySelectorAll('#quarantineModal [data-quarantine-row="1"]').length;
-          if (stat) stat.textContent = String(leftRows);
-
-          if (typeof checkQuarantineAccounts === 'function') checkQuarantineAccounts();
-          if (typeof loadPlatformInventory === 'function') loadPlatformInventory();
-          return;
-        }
-
-        throw new Error(data.error || 'Error liberando cuenta.');
-      }
-
-      if (action === 'discard') {
-        if (!confirm('¿Deseas enviar esta cuenta a desecho permanente?')) {
-          return;
-        }
-
-        const response = await fetch(`/api/admin/accounts/${accountId}/discard`, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + localStorage.getItem('token'),
-            'Content-Type': 'application/json'
-          }
-        });
-        const data = await response.json().catch(() => ({}));
-
-        if (response.ok) {
-          const fila = e.target.closest('[data-quarantine-row="1"]');
-          if (fila) fila.remove();
-
-          showMicroIndicator(data.message || 'Cuenta desechada correctamente.', 'success');
-
-          const stat = document.getElementById('statExpiring');
-          const leftRows = document.querySelectorAll('#quarantineModal [data-quarantine-row="1"]').length;
-          if (stat) stat.textContent = String(leftRows);
-
-          if (typeof checkQuarantineAccounts === 'function') checkQuarantineAccounts();
-          if (typeof loadPlatformInventory === 'function') loadPlatformInventory();
-          return;
-        }
-
-        throw new Error(data.error || 'Error al desechar cuenta.');
-      }
-    } catch (err) {
-      showMicroIndicator('Error: ' + err.message, 'error');
-      console.error(err);
-    }
-    return;
-  }
-
-  const backdropAnuncios = e.target.closest('#backdrop-anuncios');
-  if (backdropAnuncios) {
-    window.cerrarModalAnuncios();
-    return;
-  }
-});
 
 async function loadApp() {
   if (!token) return;
@@ -491,7 +152,6 @@ async function loadApp() {
       await loadAccountReports();
     }
     showSection('dashboard');
-    activarHistorialCelular();
     
   } catch (e) {
     console.error("Error en loadApp:", e);
@@ -630,13 +290,10 @@ async function buyProduct(productId) {
       })
     });
     
-    const deliveredNow = String(data.delivered_account_data || '').trim();
     showMessage(data.message || 'Compra realizada');
+    if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
     await loadApp();
     showSection('orders');
-    if (deliveredNow) {
-      openModalEntregaInmediata(deliveredNow);
-    }
     
   } catch (e) {
     showMessage(e.message, 'error');
@@ -954,7 +611,6 @@ function copyAccountDataFromOrder(orderId,source='my'){
 }
 
 function openModalEntregaInmediata(text){
-  if (String(currentUser?.role || '').toLowerCase() === 'admin') return;
   const modal=document.getElementById('modalEntregaInmediata');
   const box=document.getElementById('modalEntregaInmediataText');
   if(!modal || !box) return;
@@ -1494,7 +1150,9 @@ window.loadPlatformInventory = async function(page = currentInventoryPage) {
 
     // --- LISTA COMPLETA ---
     if(listBox) {
-      listBox.innerHTML = renderPlatformAccountsTable(accounts, 'Sin cuentas.');
+      listBox.innerHTML = accounts.length 
+        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>` 
+        : 'Sin cuentas.';
     }
   } catch(e) {
     showMessage(e.message || 'Error cargando inventario', 'error');
@@ -1521,13 +1179,6 @@ function renderPlatformAccountRow(a){
     <td><select id="pa-status-${a.id}">${statuses.map(st=>`<option value="${st}" ${a.status===st?'selected':''}>${st}</option>`).join('')}</select></td>
     <td><button class="primary-btn" style="width:auto;margin-bottom:6px" onclick="updatePlatformAccount(${a.id}, '${safeText(a.product_name||a.platform||'')}')">Guardar</button><br><button class="muted-btn" style="width:auto" onclick="markPlatformAccountSoldOutside(${a.id})">Vendido por fuera</button></td>
   </tr>`;
-}
-
-function renderPlatformAccountsTable(accounts, emptyMessage = 'Sin cuentas.') {
-  const rows = Array.isArray(accounts) ? accounts : [];
-  return rows.length
-    ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${rows.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>`
-    : emptyMessage;
 }
 
 // Nota: Esta función la dejamos casi intacta, solo le inyectamos la variable "currentInventoryPage" 
@@ -1898,7 +1549,6 @@ function syncAdminVisibilitySafe(){
   setHiddenSafe('adminMenuBtn', true);
   setHiddenSafe('adminSalesMenuBtn', true);
   setHiddenSafe('dashInventoryCard', !isAdmin);
-  setHiddenSafe('dashAccountTraceCard', !isAdmin);
   setHiddenSafe('dashSalesTodayCard', !isAdmin);
   setHiddenSafe('dashboardChartsPanel', !isAdmin);
   setHiddenSafe('dashBalanceCard', isAdmin);
@@ -1995,11 +1645,6 @@ function scrollToAdmin(id){
 function openUsersFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminUsersPanel') : showSection('account'); }
 function openProductsFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminProductsPanel') : showSection('shop'); }
 function openInventoryFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminPlatformAccountsPanel') : showSection('shop'); }
-function openInventoryTraceFromDashboard(){
-  if (!isAdminUserSafe()) return showSection('shop');
-  scrollToAdmin('adminPlatformAccountsPanel');
-  setTimeout(()=>document.getElementById('traceEmailInput')?.focus(), 180);
-}
 function openOrdersFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminOrdersPanel') : showSection('orders'); }
 function openBalanceRequests(){ isAdminUserSafe() ? scrollToAdmin('adminBalanceRequestsPanel') : showSection('balance'); }
 function openAccountReportsFromDashboard(){ isAdminUserSafe() ? scrollToAdmin('adminAccountReportsPanel') : showSection('reports'); }
@@ -2116,7 +1761,6 @@ function toggleComboCreateBox() {
   const box = document.getElementById("createComboBox");
   if (box) box.classList.toggle("hidden", !isCombo);
   if (isCombo) renderComboOptions("productComboItemsBox", [], "create");
-  syncCreateStockMode();
 }
 
 function toggleComboEditBox(id) {
@@ -2127,34 +1771,10 @@ function toggleComboEditBox(id) {
     const product = (allProducts || []).find(p => Number(p.id) === Number(id));
     renderComboOptions(`editComboItemsBox-${id}`, parseJsonArray(product?.combo_items), `edit-${id}`, id);
   }
-  syncEditStockMode(id);
-}
-
-function syncCreateStockMode() {
-  const type = document.getElementById("productType")?.value || "streaming_auto";
-  const stockInput = document.getElementById("productStock");
-  if (!stockInput) return;
-
-  const isManual = type === "manual";
-  stockInput.disabled = !isManual;
-  stockInput.min = isManual ? "-999999" : "0";
-}
-
-function syncEditStockMode(id) {
-  const type = document.getElementById(`editProductType-${id}`)?.value || "streaming_auto";
-  const stockInput = document.getElementById(`editStock-${id}`);
-  if (!stockInput) return;
-
-  const isManual = type === "manual";
-  stockInput.disabled = !isManual;
-  stockInput.min = isManual ? "-999999" : "0";
 }
 
 async function createProduct(){
   try{
-    syncCreateStockMode();
-    const currentType=document.getElementById('productType')?.value || 'streaming_auto';
-    const stockValue=currentType==='manual' ? (productStock.value || 0) : 0;
     const data=await api('/api/admin/create-product',{
       method:'POST',
       body:JSON.stringify({
@@ -2166,8 +1786,8 @@ async function createProduct(){
         required_fields:getRequiredFieldsFromInput('productRequiredFields'),
         charge_mode:productChargeMode.value,
         stock_enabled:productStockEnabled.checked,
-        stock:stockValue,
-        product_type:currentType,
+        stock:productStock.value,
+        product_type:document.getElementById('productType')?.value || 'streaming_auto',
         combo_items:getSelectedComboItems('create'),
         combo_discount:document.getElementById('productComboDiscount')?.value || 0
       })
@@ -2180,7 +1800,6 @@ async function createProduct(){
     toggleComboCreateBox();
     productStock.value='0';
     productStockEnabled.checked=false;
-    syncCreateStockMode();
     await loadProducts();
     await loadAdminProducts();
   }catch(e){showMessage(e.message,'error')}
@@ -2209,7 +1828,7 @@ async function loadAdminProducts(){
         <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
         <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
         <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
-        <label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="${type==='manual' ? '-999999' : '0'}" value="${Number(p.stock||0)}" ${type==='manual' ? '' : 'disabled'} />
+        <label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>
         <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div>
       </div>
     </div>`
@@ -2218,20 +1837,12 @@ async function loadAdminProducts(){
     if(String(p.product_type||'')==='combo_auto'){
       renderComboOptions(`editComboItemsBox-${p.id}`, parseJsonArray(p.combo_items), `edit-${p.id}`, p.id);
     }
-    syncEditStockMode(p.id);
   });
-
-  syncCreateStockMode();
 }
 
 async function updateProduct(id){
   try{
-    syncEditStockMode(id);
     const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);
-    const currentType=document.getElementById(`editProductType-${id}`)?.value || 'streaming_auto';
-    const stockValue=currentType==='manual'
-      ? (document.getElementById('editStock-'+id).value || 0)
-      : 0;
     const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({
       name:document.getElementById('editName-'+id).value,
       description:document.getElementById('editDescription-'+id).value,
@@ -2241,8 +1852,8 @@ async function updateProduct(id){
       required_fields,
       charge_mode:document.getElementById('editChargeMode-'+id).value,
       stock_enabled:document.getElementById('editStockEnabled-'+id).checked,
-      stock:stockValue,
-      product_type:currentType,
+      stock:document.getElementById('editStock-'+id).value,
+      product_type:document.getElementById(`editProductType-${id}`)?.value || 'streaming_auto',
       combo_items:getSelectedComboItems(`edit-${id}`),
       combo_discount:document.getElementById(`editComboDiscount-${id}`)?.value || 0
     })});
@@ -2600,12 +2211,13 @@ async function loadAnnouncements(){
     const ticker = document.getElementById('announcementTicker');
     const marquee = document.getElementById('announcementMarquee');
     if(!ticker || !marquee) return;
-    const html = Array.isArray(list) && list.length
-      ? list.map(a=>`<span>${safeText(a.message || a.text || '')}</span>`).join('')
-      : '';
-    marquee.innerHTML = html;
+    if(!Array.isArray(list) || !list.length){
+      ticker.classList.remove('show');
+      marquee.innerHTML = '';
+      return;
+    }
+    marquee.innerHTML = list.map(a=>`<span>${safeText(a.message || a.text || '')}</span>`).join('');
     ticker.classList.add('show');
-    ticker.style.display = 'flex';
   }catch(e){
     console.warn('No se pudieron cargar comunicados', e);
   }
@@ -2842,9 +2454,9 @@ async function loadGlobalAnnouncementsFinal(){
     const label=document.getElementById('importantAnnouncementsLabel');
     if(!ticker || !marquee) return;
     const active=(Array.isArray(list)?list:[]).filter(a=>String(a.message||'').trim());
-    marquee.innerHTML=active.length ? active.map(a=>`<span>${safeText(a.message)}</span>`).join('') : '';
+    if(!active.length){ticker.classList.remove('show'); if(label)label.classList.remove('show'); marquee.innerHTML='';return;}
+    marquee.innerHTML=active.map(a=>`<span>${safeText(a.message)}</span>`).join('');
     ticker.classList.add('show');
-    ticker.style.display='flex';
     if(label)label.classList.add('show');
   }catch(e){console.warn('No se pudieron cargar comunicados globales',e)}
 }
@@ -2985,46 +2597,33 @@ function renderAdminOrdersManualPendingOnly(){
 }
 
 function renderAdminReportCompactFinal(r){
-  const reportId = Number(r.report_id || r.id || 0);
-  const reportStatus = String(r.report_status || r.status || 'pendiente').toLowerCase();
-  const reportEmail = r.email || r.reported_mother_email || '';
-  const reportProduct = r.product_name || r.account_product_name || r.reported_platform || r.platform || '';
-  const reportProfile = r.profile_name || r.affected_profile || 'No aplica';
-  const reportPin = r.profile_pin || 'No aplica';
-  const reportDate = r.report_created_at || r.created_at || r.order_created_at || null;
-  const info=calculateReportRefundInfo({ ...r, id: reportId, status: reportStatus });
-  const canAct=reportStatus==='pendiente';
-  const itemId=`admin-report-compact-${reportId}`;
+  const info=calculateReportRefundInfo(r);
+  const canAct=String(r.status||'').toLowerCase()==='pendiente';
+  const itemId=`admin-report-compact-${r.id}`;
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
-      <div class="compact-title">Reporte #${reportId}</div>
-      <div class="compact-meta">${safeText(r.vendedor_name||r.customer_name||'Vendedor')} · ${safeText(reportEmail||'correo reportado')} · ${safeText(reportStatus||'pendiente')}</div>
+      <div class="compact-title">Reporte #${r.id}</div>
+      <div class="compact-meta">${safeText(r.customer_name||'Cliente')} · ${safeText(r.email||'correo reportado')} · ${safeText(r.status||'pendiente')}</div>
     </div>
     <div class="compact-details">
-      <p><b>Reporte:</b> #${reportId} <span class="status">${safeText(reportStatus||'pendiente')}</span></p>
-      <p><b>Vendedor:</b> ${safeText(r.vendedor_name||r.customer_name||'Vendedor')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
-      <p><b>Correo reportado:</b> ${safeText(reportEmail)}</p>
-      <p><b>Producto:</b> ${safeText(reportProduct)} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
-      <p><b>Perfil:</b> ${safeText(reportProfile)} &nbsp; <b>PIN:</b> ${safeText(reportPin)}</p>
-      <p><b>Fecha:</b> ${safeText(reportDate ? new Date(reportDate).toLocaleString() : '')}</p>
+      <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
+      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
+      <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+      <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
       <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
       ${r.evidence_image ? `<div class="order-proof-row"><p style="margin:5px 0"><b>Evidencia adjunta:</b></p>${renderAttachmentButtons(r.evidence_image)}<div class="proof-preview"><img src="${safeText(r.evidence_image)}" alt="Evidencia"></div></div>` : ''}
 <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
-        <button class="green-btn" onclick="replaceReportedAccount(${reportId})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
-        <button class="danger-btn" data-id="${reportId}" onclick="refundReportedAccount(${reportId}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso Parcial</button>
+        <button class="green-btn" onclick="replaceReportedAccount(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazar cuenta</button>
+        <button class="danger-btn" onclick="refundReportedAccount(${r.id}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
       </div>
       <div class="two-row" style="margin-top:10px">
-        <button class="danger-btn" data-id="${reportId}" onclick="refundOrderByType(${Number(r.order_id||0)}, 'completo')" ${canAct?'':'disabled'}>🛑 Reembolso Completo</button>
-        <button class="outline-btn" data-id="${reportId}" onclick="loadAccountReports()">Actualizar</button>
+        <select id="reportStatus-${r.id}"><option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option><option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option></select>
+        <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
       </div>
-      <div class="two-row" style="margin-top:10px">
-        <select id="reportStatus-${reportId}"><option value="pendiente" ${reportStatus==='pendiente'?'selected':''}>Pendiente</option><option value="resuelto" ${reportStatus==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${reportStatus==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${reportStatus==='reembolso'?'selected':''}>Reembolso</option></select>
-        <input id="reportResponse-${reportId}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
-      </div>
-      <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${reportId})">Guardar veredicto</button>
+      <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
     </div>
   </div>`;
 }
@@ -3036,39 +2635,18 @@ async function loadAccountReports() {
 
   try {
     const reports = await api('/api/admin/account-reports');
-    const rows = Array.isArray(reports) ? reports : [];
-    const pending = rows.filter(r => String(r.report_status || r.status || '').toLowerCase() === 'pendiente');
+    const pending = reports.filter(r => String(r.status || '').toLowerCase() === 'pendiente');
     
     const stat = document.getElementById('statReports');
     if (stat) stat.textContent = pending.length;
     
     const box = document.getElementById('adminAccountReportsList');
     if (box) {
-      box.innerHTML = '';
-      box.innerHTML = rows.length ? rows.map(renderAdminReportCompactFinal).join('') : 'Sin reportes de falla.';
-    }
-
-    const refreshBtn = document.querySelector('#adminAccountReportsPanel .panel-head .outline-btn');
-    if (refreshBtn) {
-      refreshBtn.onclick = function(){ loadAccountReports(); };
+      box.innerHTML = reports.length ? reports.map(renderAdminReportCompactFinal).join('') : 'Sin reportes de falla.';
     }
   } catch (e) {
     console.warn('Error cargando reportes:', e);
   }
-}
-
-function refundOrderByType(orderId, refundType){
-  const id = Number(orderId || 0);
-  const type = String(refundType || '').toLowerCase();
-  if(!id){
-    showMessage('ID de pedido inválido para reembolso.', 'error');
-    return;
-  }
-  if(type !== 'completo'){
-    showMessage('Tipo de reembolso no válido.', 'error');
-    return;
-  }
-  showMessage(`Reembolso completo preparado para validación. Pedido #${id}.`);
 }
 
 // Inicialización limpia de comunicados
@@ -3207,60 +2785,63 @@ setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal(
 
 
 // ===============================
-// FIX DEFINITIVO: mantener visible la tira de Comunicados
+// FIX DEFINITIVO: usar SOLO la tira nueva de Comunicados
+// Oculta y elimina la tira antigua (#announcementTicker) para evitar doble cinta.
 // ===============================
 (function(){
-  function keepAnnouncementTickerVisible(){
+  const styleId='singleAnnouncementTickerFixStyle';
+  if(!document.getElementById(styleId)){
+    const st=document.createElement('style');
+    st.id=styleId;
+    st.textContent='#announcementTicker{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;box-shadow:none!important}';
+    document.head.appendChild(st);
+  }
+
+  function removeLegacyAnnouncementTicker(){
     const old=document.getElementById('announcementTicker');
-    if(old){
-      old.classList.add('show');
-      old.style.display='flex';
-      old.style.height='auto';
-      old.style.minHeight='48px';
-      old.style.margin='0 0 18px';
-      old.style.padding='0';
-      old.style.overflow='hidden';
-      old.style.boxShadow='var(--shadow)';
-    }
+    if(old) old.remove();
+    const oldAdmin=document.getElementById('adminAnnouncementsPanel');
+    if(oldAdmin) oldAdmin.remove();
   }
 
   const originalEnsureGlobalAnnouncementsUIFinal = typeof ensureGlobalAnnouncementsUIFinal === 'function' ? ensureGlobalAnnouncementsUIFinal : null;
   const originalLoadGlobalAnnouncementsFinal = typeof loadGlobalAnnouncementsFinal === 'function' ? loadGlobalAnnouncementsFinal : null;
 
-  // Reemplaza la función vieja que creaba/ocultaba #announcementTicker.
+  // Reemplaza la función vieja que creaba #announcementTicker.
   ensureAnnouncementsUI = function(){
-    keepAnnouncementTickerVisible();
+    removeLegacyAnnouncementTicker();
     if(originalEnsureGlobalAnnouncementsUIFinal) originalEnsureGlobalAnnouncementsUIFinal();
-    keepAnnouncementTickerVisible();
+    removeLegacyAnnouncementTicker();
   };
 
-  // Auto-refresh viejo llama loadAnnouncements(); lo mantenemos visible.
+  // Auto-refresh viejo llama loadAnnouncements(); lo redirigimos a la tira nueva.
   loadAnnouncements = async function(){
-    keepAnnouncementTickerVisible();
+    removeLegacyAnnouncementTicker();
     if(originalLoadGlobalAnnouncementsFinal) await originalLoadGlobalAnnouncementsFinal();
-    keepAnnouncementTickerVisible();
+    removeLegacyAnnouncementTicker();
   };
 
-  // Refuerza la función nueva para dejar visible la tira antes/después.
+  // Refuerza la función nueva para limpiar cualquier legacy antes/después.
   if(originalEnsureGlobalAnnouncementsUIFinal){
     ensureGlobalAnnouncementsUIFinal = function(){
-      keepAnnouncementTickerVisible();
+      removeLegacyAnnouncementTicker();
       originalEnsureGlobalAnnouncementsUIFinal();
-      keepAnnouncementTickerVisible();
+      removeLegacyAnnouncementTicker();
     };
   }
 
   if(originalLoadGlobalAnnouncementsFinal){
     loadGlobalAnnouncementsFinal = async function(){
-      keepAnnouncementTickerVisible();
+      removeLegacyAnnouncementTicker();
       await originalLoadGlobalAnnouncementsFinal();
-      keepAnnouncementTickerVisible();
+      removeLegacyAnnouncementTicker();
     };
   }
 
-  setTimeout(keepAnnouncementTickerVisible, 50);
-  setTimeout(keepAnnouncementTickerVisible, 500);
-  setTimeout(keepAnnouncementTickerVisible, 1500);
+  // setInterval(removeLegacyAnnouncementTicker, 1000);
+  setTimeout(removeLegacyAnnouncementTicker, 50);
+  setTimeout(removeLegacyAnnouncementTicker, 500);
+  setTimeout(removeLegacyAnnouncementTicker, 1500);
 })();
 
 
@@ -3464,17 +3045,8 @@ function ensureReportMenuFinal(){
   }
 }
 
-async function openReportFaultFormFinal(){
-  const box=document.getElementById('myReportsList');
-  if(box) box.innerHTML='';
+function openReportFaultFormFinal(){
   showSection('reports');
-  if(box) box.innerHTML='Cargando reportes...';
-  try{
-    await loadMyReports();
-  }catch(error){
-    console.error(error);
-    if(box) box.innerHTML='No se pudieron cargar los reportes.';
-  }
 }
 
 function openFailureResponsesFinal(){
@@ -4777,13 +4349,10 @@ window.buyProduct = async function(productId){
       body:JSON.stringify({ order_data, quantity: 1 })
     });
 
-    const deliveredNow = String(data.delivered_account_data || '').trim();
     showMessage(data.message || 'Compra realizada');
+    if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
     await loadApp();
     showSection('orders');
-    if (deliveredNow) {
-      openModalEntregaInmediata(deliveredNow);
-    }
   } catch(e) {
     showMessage(e.message || 'Error comprando producto','error');
   }
@@ -5762,69 +5331,90 @@ async function cambiarContrasena() {
   }
 
 }
-function getAnunciosModal(){
-  return document.getElementById('modal-anuncios');
-}
+// ==========================================
+// BOTÓN DE PÁNICO: INTERFAZ DE ADMINISTRADOR DEFINITIVA
+// ==========================================
+async function botonDePanico() {
+  const email = prompt("🚨 BOTÓN DE PÁNICO (Admin) 🚨\n\nIngresa el CORREO EXACTO del cliente al que le vas a resetear la contraseña:");
+  if (!email) return;
 
-function getPanicoModal(){
-  return document.getElementById('modal-panico');
-}
+  const confirmacion = confirm(`¿Estás seguro de resetear la cuenta de:\n${email}?\n\nSu nueva contraseña será temporalmente: 123456`);
+  if (!confirmacion) return;
 
-function showFloatingModal(modal){
-  if (!modal) return;
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-  modal.style.display = 'flex';
-  modal.style.position = 'fixed';
-  modal.style.inset = '0';
-  modal.style.zIndex = '9999';
-  modal.style.alignItems = 'center';
-  modal.style.justifyContent = 'center';
-  if (!modal.style.background) {
-    modal.style.background = 'rgba(0,0,0,0.5)';
-  }
-}
-
-function hideFloatingModal(modal){
-  if (!modal) return;
-  modal.style.display = 'none';
-  modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden', 'true');
-}
-
-function openPanicResetModal(){
-  showFloatingModal(getPanicoModal());
-}
-
-function closePanicResetModal(){
-  hideFloatingModal(getPanicoModal());
-}
-
-async function submitPanicReset(){
   try {
-    if (!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin') {
-      throw new Error('Solo administradores pueden forzar reseteos.');
-    }
-
-    const input = document.getElementById('panicResetEmail');
-    const email = String(input?.value || '').trim().toLowerCase();
-    if (!email) {
-      throw new Error('Ingresa el correo del vendedor.');
-    }
-
-    const data = await api('/api/panic-reset', {
+    const token = localStorage.getItem('token'); 
+    const res = await fetch('/api/admin/panic-reset', {
       method: 'POST',
-      body: JSON.stringify({ email })
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ email: email })
     });
-
-    if (input) input.value = '';
-    closePanicResetModal();
-    showMessage(data?.message || 'Contraseña reseteada a: 123456');
-    alert('¡Contraseña restablecida con éxito a 123456!');
+    
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ ¡ÉXITO!\n\n${data.message}\n\nDile a tu cliente que inicie sesión con 123456 y que la cambie desde su cuenta.`);
+    } else {
+      alert("❌ Error: " + data.error);
+    }
   } catch (err) {
-    showMessage(err.message || 'No se pudo forzar el reset', 'error');
+    alert("❌ Error de red: " + err.message);
   }
 }
+
+// Guardias de control de sesión en segundo plano
+let statusVerificado = false;
+let esAdministrador = false;
+
+// Bucle inteligente: Controla visualmente quién ve el botón en tiempo real
+setInterval(async () => {
+  const token = localStorage.getItem('token');
+  
+  // Si no hay token de sesión (pantalla de login o se cerró sesión)
+  if (!token) {
+    statusVerificado = false;
+    esAdministrador = false;
+    const btnExistente = document.getElementById('btn-panico-admin');
+    if (btnExistente) btnExistente.remove();
+    return;
+  }
+
+  // Si hay sesión iniciada pero aún no hemos verificado el rango del usuario
+  if (!statusVerificado) {
+    statusVerificado = true; // Bloqueamos para hacer una única consulta segura
+    try {
+      const res = await fetch('/api/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const usuario = await res.json();
+        // Verificamos si es Admin, Dueño de Panel o Subadmin
+        if (usuario.role === 'admin' || usuario.is_panel_admin || usuario.is_subadmin) {
+          esAdministrador = true;
+        }
+      } else {
+        statusVerificado = false; // Si hubo un fallo de conexión, reintentamos después
+      }
+    } catch (err) {
+      statusVerificado = false;
+    }
+  }
+
+  // Si el bucle ya confirmó que SÍ eres administrador, te dibuja el botón seguro
+  if (esAdministrador) {
+    const menu = document.querySelector('.menu');
+    if (menu && !document.getElementById('btn-panico-admin')) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-panico-admin';
+      btn.className = 'menu-btn'; 
+      btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
+      btn.innerHTML = '🚨 Resetear Clave';
+      btn.onclick = botonDePanico;
+      menu.appendChild(btn);
+    }
+  }
+}, 1000);
 // ==========================================
 // INICIO DE GRÁFICAS (PROTEGIDO)
 // ==========================================
@@ -5982,81 +5572,43 @@ function showQuarantineModal(list) {
   const old = document.getElementById('quarantineModal');
   if (old) old.remove();
 
-  const isMobile = window.matchMedia('(max-width: 820px)').matches;
-
-  const renderDesktopRows = () => list.map(c => {
-    const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
-    const color = dias < 5 ? '#ef4444' : '#10b981';
-
-    return `
-    <tr data-quarantine-row="1" data-account-id="${c.id}" style="border-bottom:1px solid #2f3648;">
-      <td style="padding:10px; vertical-align:top;"><b>${c.platform}</b></td>
-      <td style="padding:10px; vertical-align:top; word-break:break-word;"><span style="color:#60a5fa">${c.account_email}</span></td>
-      <td style="padding:10px;">
-        <div>👤 ${c.profile_name || 'Principal'}</div>
-        <div>🔢 ${c.profile_pin || 'No tiene'}</div>
-      </td>
-      <td style="padding:10px; color:${color}; vertical-align:top;"><b>${dias > 0 ? dias + ' días' : '¡Vencida!'}</b></td>
-      <td style="padding:10px; vertical-align:top;">
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <input id="new-pass-${c.id}" placeholder="Nueva contraseña" style="width:100%; box-sizing:border-box; padding:9px; border-radius:6px; border:none; background:#111827; color:white;">
-          <div style="display:flex; gap:8px;">
-            <button data-quarantine-action="release" data-account-id="${c.id}" style="flex:1; background:#10b981; color:white; border:none; padding:8px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar</button>
-            <button data-quarantine-action="discard" data-account-id="${c.id}" style="flex:1; background:#4b5563; color:white; border:none; padding:8px; border-radius:6px; cursor:pointer; font-weight:bold;">Desechar</button>
-          </div>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-
-  const renderMobileCards = () => list.map(c => {
-    const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
-    const color = dias < 5 ? '#ef4444' : '#10b981';
-
-    return `
-    <div data-quarantine-row="1" data-account-id="${c.id}" style="background:#111827; border:1px solid #374151; border-left:4px solid ${color}; border-radius:10px; padding:10px; margin-bottom:10px;">
-      <div style="display:grid; gap:6px; font-size:13px;">
-        <div><b>Plataforma:</b> ${c.platform}</div>
-        <div style="word-break:break-word;"><b>Correo:</b> <span style="color:#60a5fa">${c.account_email}</span></div>
-        <div><b>Perfil:</b> ${c.profile_name || 'Principal'} · <b>PIN:</b> ${c.profile_pin || 'No tiene'}</div>
-        <div style="color:${color};"><b>Vida restante:</b> ${dias > 0 ? dias + ' días' : '¡Vencida!'}</div>
-      </div>
-      <input id="new-pass-${c.id}" placeholder="Nueva contraseña" style="margin-top:10px; width:100%; box-sizing:border-box; padding:10px; border-radius:6px; border:none; background:#0f172a; color:white;">
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-        <button data-quarantine-action="release" data-account-id="${c.id}" style="background:#10b981; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar</button>
-        <button data-quarantine-action="discard" data-account-id="${c.id}" style="background:#4b5563; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Desechar</button>
-      </div>
-    </div>`;
-  }).join('');
-
   const html = `
   <div id="quarantineModal" class="modal-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
-    <div class="modal-box" style="background:#1e1e2f; padding:${isMobile ? '14px' : '20px'}; border-radius:12px; width:min(96vw,980px); color:white; max-height: 88vh; overflow-y: auto; box-sizing:border-box;">
+    <div class="modal-box" style="background:#1e1e2f; padding:25px; border-radius:12px; width:90%; max-width:600px; color:white; max-height: 85vh; overflow-y: auto;">
       <h2 style="color:#ef4444; margin-top:0; border-bottom:1px solid #ef4444; padding-bottom:10px;">🚨 Cuentas en Cuarentena</h2>
       <p style="font-size:14px; color:#cbd5e1; line-height:1.5;">Estas cuentas ya cumplieron sus días de garantía. <b>Pasos:</b><br>1. Entra a la plataforma oficial.<br>2. Cambia la contraseña para sacar al cliente anterior.<br>3. Escribe la nueva clave aquí y presiona Liberar.</p>
+      
+      <div style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
+        ${list.map(c => {
+  // Calculamos los días de forma sencilla desde el resultado de la DB
+  // Si dias_restantes viene como un string, extraemos los días
+  const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
+  const color = dias < 5 ? "#ef4444" : "#10b981"; // Rojo si le quedan menos de 5 días
 
-      ${isMobile ? `
-      <div id="quarantineCardsBody" style="margin-top:14px;">
-        ${renderMobileCards()}
+  
+  return `
+    <div style="background:#2a2a3c; padding:15px; border-radius:8px; border-left:5px solid ${color}; margin-bottom: 10px;">
+<p style="margin:5px 0;">👤 Perfil a cerrar: <b>${c.profile_name || 'Principal'}</b></p>
+<p style="margin:5px 0;">🔢 PIN actual: <b>${c.profile_pin || 'No tiene'}</b></p>
+      <p style="margin:0; font-size:16px;"><b>${c.platform}</b></p>
+      <p style="margin:5px 0; font-size:14px;">📧 Correo: <span style="color:#60a5fa">${c.account_email}</span></p>
+      <p style="margin:5px 0; font-size:14px; color: ${color};">
+        <b>⏳ Vida restante cuenta madre: ${dias > 0 ? dias + ' días' : '¡Vencida!'}</b>
+      </p>
+
+<div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+      <input id="new-pass-${c.id}" placeholder="Nueva contraseña" style="padding:10px; border-radius:6px; border:none; background:#1e1e2f; color:white;">
+      <input id="new-pin-${c.id}" placeholder="Nuevo PIN" style="padding:10px; border-radius:6px; border:none; background:#1e1e2f; color:white;">
+      
+      <div style="display:flex; gap:10px;">
+        <button onclick="liberarCuentaDeCuarentena(${c.id})" style="flex:1; background:#10b981; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Liberar</button>
+        <button onclick="desecharCuenta(${c.id})" style="flex:1; background:#4b5563; color:white; border:none; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">Desechar</button>
       </div>
-      ` : `
-      <div style="margin-top:16px; border:1px solid #374151; border-radius:8px; overflow:hidden;">
-        <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
-          <thead>
-            <tr style="background:#111827; color:#93c5fd; text-align:left;">
-              <th style="padding:10px; border-bottom:1px solid #374151; width:14%;">Plataforma</th>
-              <th style="padding:10px; border-bottom:1px solid #374151; width:24%;">Correo</th>
-              <th style="padding:10px; border-bottom:1px solid #374151; width:16%;">Perfil / PIN</th>
-              <th style="padding:10px; border-bottom:1px solid #374151; width:14%;">Vida restante</th>
-              <th style="padding:10px; border-bottom:1px solid #374151; width:32%;">Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="quarantineTableBody">
-            ${renderDesktopRows()}
-          </tbody>
-        </table>
+    </div>
+  </div>
+  `;
+}).join('')}
       </div>
-      `}
       <button onclick="document.getElementById('quarantineModal').remove()" style="margin-top:25px; background:#4b5563; color:white; border:none; padding:12px 20px; border-radius:6px; cursor:pointer; width:100%; font-weight:bold;">Cerrar Ventana</button>
     </div>
   </div>
@@ -6065,15 +5617,58 @@ function showQuarantineModal(list) {
 }
 
 async function liberarCuentaDeCuarentena(id) {
-  const btn = document.querySelector(`[data-quarantine-action="release"][data-account-id="${Number(id)}"]`);
-  if (!btn) return;
-  btn.click();
+  const newPass = document.getElementById('new-pass-' + id).value.trim();
+  if (!newPass) return alert("⚠️ Debes escribir la NUEVA contraseña para poder liberar la cuenta.");
+  if (!confirm("¿Confirma que ya cambiaste esta contraseña en la página oficial?")) return;
+
+  try {
+    const res = await fetch('/api/admin/accounts/' + id + '/release', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + localStorage.getItem('token')
+      },
+      body: JSON.stringify({ new_password: newPass })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    
+    alert("✅ " + data.message);
+    document.getElementById('quarantineModal').remove();
+    checkQuarantineAccounts(); // Volver a revisar y actualizar la lista
+    if(typeof loadPlatformInventory === 'function') loadPlatformInventory(); // Refrescar inventario si está abierto
+  } catch (err) {
+    alert("❌ Error: " + err.message);
+  }
 }
 
 async function desecharCuenta(id) {
-  const btn = document.querySelector(`[data-quarantine-action="discard"][data-account-id="${Number(id)}"]`);
-  if (!btn) return;
-  btn.click();
+  if (!confirm("¿Deseas enviar esta cuenta a desecho permanente?")) return;
+
+  try {
+    const res = await fetch(`/api/admin/accounts/${id}/discard`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': 'Bearer ' + localStorage.getItem('token'),
+        'Content-Type': 'application/json' 
+      }
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Error al desechar");
+
+    alert("✅ " + data.message);
+    
+    // Recargar la lista para que la cuenta desaparezca del modal
+    checkQuarantineAccounts(); 
+    
+    // Refrescar inventario si está abierto
+    if(typeof loadPlatformInventory === 'function') loadPlatformInventory();
+    
+  } catch (err) {
+    alert("❌ Error: " + err.message);
+    console.error(err);
+  }
 }
 
 async function abrirModalHistorial() {
@@ -6138,37 +5733,23 @@ function ocultarBotonRegresar() {
     const btn = document.getElementById('btn-volver-universal');
   if (btn) btn.remove();
 }
-function isAppSessionActiveForBackGuard() {
-  const appSection = document.getElementById('appSection');
-  return Boolean(token && appSection && !appSection.classList.contains('hidden'));
-}
-
-function activarHistorialCelular() {
-  if (!isAppSessionActiveForBackGuard()) return;
-  const state = history.state || {};
-  if (state.__mobileAppGuard === true) return;
-  history.pushState({ ...state, __mobileAppGuard: true }, '', window.location.href);
-}
-
 // Hack para atrapar el botón físico de retroceso en celulares
 window.addEventListener('popstate', function(event) {
-  if (!isAppSessionActiveForBackGuard()) return;
-
-  // Cierra modales si hay alguno abierto
-  const modalesAbiertos = document.querySelectorAll('.modal-overlay');
-  modalesAbiertos.forEach(modal => modal.remove());
-
-  // Regresa al inicio de forma suave
-  if (typeof showSection === 'function') {
-    showSection('dashboard');
-  } else {
-    window.location.reload();
-    return;
-  }
-
-  // Vuelve a insertar una entrada para evitar salir de la app por error
-  history.pushState({ __mobileAppGuard: true }, '', window.location.href);
+    // Cierra modales si hay alguno abierto
+    const modalesAbiertos = document.querySelectorAll('.modal-overlay');
+    modalesAbiertos.forEach(modal => modal.remove());
+    
+    // Regresa al inicio de forma suave
+    if (typeof showSection === 'function') {
+        showSection('dashboard');
+    } else {
+        window.location.reload();
+    }
 });
+
+function activarHistorialCelular() {
+    history.pushState({ panel: "abierto" }, '', '#opcion');
+}
 
 // FORZAR APARICIÓN DEL BOTÓN A LOS 2 SEGUNDOS DE ENTRAR
 setTimeout(() => {
@@ -6474,10 +6055,6 @@ function applyDashboardRoleVisibilityMatrix(){
     hardHide('section-admin', false);
 
     adminCards.forEach(id=>hardHide(id,false));
-    // En paneles rentados, el módulo de cuarentena debe quedar limpio/oculto.
-    if(isPanelAdmin){
-      hardHide('dashQuarantineCard', true);
-    }
     hardHide('dashCsvUploadCard', true);
     hardHide('dashDailyCutCard', true);
     hardHide('dashMonthlyReportCard', true);
@@ -6625,26 +6202,13 @@ function actualizarConteosDashboard(){
 }
 
 const __showSectionBeforeRoleMatrix = typeof showSection === 'function' ? showSection : null;
-let __shopTransitionLockUntil = 0;
 if(__showSectionBeforeRoleMatrix){
   showSection = function(name){
-    const target = String(name || '');
-    const now = Date.now();
-
-    // Evita el cierre inmediato de tienda por dobles redirecciones en el primer click.
-    if (now < __shopTransitionLockUntil && target !== 'shop') {
-      return;
-    }
-
-    if (target === 'shop') {
-      __shopTransitionLockUntil = now + 700;
-    }
-
     __showSectionBeforeRoleMatrix(name);
-    if(target==='dashboard') resetScrollToTop();
+    if(name==='dashboard') resetScrollToTop();
     applyDashboardRoleVisibilityMatrix();
     actualizarConteosDashboard();
-    if(target==='dashboard' && currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
+    if(name==='dashboard' && currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
       loadExpiringCount();
     }
   };
@@ -6656,13 +6220,6 @@ if(__loadAppBeforeRoleMatrix){
     await __loadAppBeforeRoleMatrix();
     applyDashboardRoleVisibilityMatrix();
     actualizarConteosDashboard();
-    const pendingName = String(window.__pendingWelcomeName || '').trim();
-    if(pendingName){
-      paintDashboardWelcomeBanner(pendingName);
-      window.__pendingWelcomeName='';
-    }else if(currentUser?.name){
-      paintDashboardWelcomeBanner(currentUser.name);
-    }
   };
 }
 
@@ -6679,7 +6236,6 @@ openUsersFromDashboard = function(){
 
 openProductsFromDashboard = function(){
   if(isGlobalAdminForDashboard() || isPanelAdminForDashboard()) return scrollToAdmin('adminProductsPanel');
-  __shopTransitionLockUntil = Date.now() + 700;
   return showSection('shop');
 };
 
@@ -6959,325 +6515,3 @@ setInterval(setupExpiringCardAction, 3000);
 setInterval(()=>{
   if(currentUser && String(currentUser.role || '').toLowerCase()==='admin') loadExpiringCount();
 }, 30000);
-
-const PANEL_ANNOUNCEMENT_DEFAULT = '¡Bienvenidos a la plataforma de servicios digitales!';
-let __currentPanelAnnouncementText = PANEL_ANNOUNCEMENT_DEFAULT;
-
-function ensureSingleAnnouncementRibbonOriginal(){
-  if (typeof ensureAnnouncementsUI === 'function') {
-    try { ensureAnnouncementsUI(); } catch (_) {}
-  }
-
-  const duplicateTicker = document.getElementById('globalAnnouncementTicker');
-  if (duplicateTicker) {
-    duplicateTicker.classList.add('show');
-    duplicateTicker.style.display = 'flex';
-  }
-
-  const duplicateLabel = document.getElementById('importantAnnouncementsLabel');
-  if (duplicateLabel) duplicateLabel.classList.add('show');
-
-  const announcementsMenuBtn = document.getElementById('announcementsMenuBtn');
-  if (announcementsMenuBtn) announcementsMenuBtn.remove();
-
-  const announcementsSection = document.getElementById('section-comunicados');
-  if (announcementsSection) announcementsSection.remove();
-
-  const adminAnnouncementsPanel = document.getElementById('adminAnnouncementsPanel');
-  if (adminAnnouncementsPanel) adminAnnouncementsPanel.remove();
-}
-
-function applyPanelAnnouncementText(text){
-  const finalText = String(text ?? '').trim();
-  __currentPanelAnnouncementText = finalText;
-
-  ensureSingleAnnouncementRibbonOriginal();
-
-  const announcementTicker = document.getElementById('announcementTicker');
-  const announcementMarquee = document.getElementById('announcementMarquee');
-  if (announcementTicker) {
-    announcementTicker.classList.add('show');
-    announcementTicker.style.display = 'flex';
-  }
-  const globalTicker = document.getElementById('globalAnnouncementTicker');
-  if (globalTicker) {
-    globalTicker.classList.add('show');
-    globalTicker.style.display = 'flex';
-  }
-  const globalLabel = document.getElementById('importantAnnouncementsLabel');
-  if (globalLabel) globalLabel.classList.add('show');
-  if (announcementMarquee) {
-    announcementMarquee.innerHTML = finalText ? `<span>${safeText(finalText)}</span>` : '';
-  }
-}
-
-function syncAnnouncementControlAccess(){
-  const openBtn = document.getElementById('btn-anuncios');
-  const salesReportBtn = document.getElementById('btn-top-reporte-ventas');
-  const modalInput = document.getElementById('announcementNewText');
-  const applyBtn = document.getElementById('btn-activar-anuncios');
-  const clearBtn = document.getElementById('btn-ocultar-anuncios');
-  const deleteBtn = document.getElementById('btn-eliminar-anuncios');
-  const role = String(currentUser?.role || '').toLowerCase();
-  const accountType = String(currentUser?.account_type || '').toLowerCase();
-  const isPanelAdmin = currentUser?.is_panel_admin === true || currentUser?.is_panel_admin === 1 || currentUser?.is_panel_admin === 'true';
-  const canManageAnnouncements = role === 'admin' || isPanelAdmin || ['panel_propietario', 'panel_admin', 'admin_panel'].includes(accountType);
-
-  if (openBtn) openBtn.classList.toggle('hidden', !canManageAnnouncements);
-  if (salesReportBtn) salesReportBtn.classList.toggle('hidden', !canManageAnnouncements);
-  if (modalInput) modalInput.disabled = !canManageAnnouncements;
-  if (applyBtn) applyBtn.disabled = !canManageAnnouncements;
-  if (clearBtn) clearBtn.disabled = !canManageAnnouncements;
-  if (deleteBtn) deleteBtn.disabled = !canManageAnnouncements;
-}
-
-function fillAnnouncementModalFields(message){
-  const activeBox = document.getElementById('anuncio-activo-txt');
-  const input = document.getElementById('announcementNewText');
-  const finalText = String(message ?? '').trim();
-
-  if (activeBox) {
-    activeBox.textContent = finalText || '(Sin anuncio activo)';
-  }
-  if (input) {
-    input.value = finalText;
-  }
-}
-
-async function loadPanelAnnouncementText(){
-  if (!token) token = localStorage.getItem('token');
-  if (!token) {
-    fillAnnouncementModalFields('(Sin sesión activa)');
-    return;
-  }
-  try {
-    const payload = await api('/api/announcement');
-    const message = String(
-      payload?.text ??
-      payload?.texto ??
-      payload?.comunicado ??
-      payload?.message ??
-      payload?.announcement?.message ??
-      ''
-    ).trim();
-    applyPanelAnnouncementText(message);
-    fillAnnouncementModalFields(message);
-    syncAnnouncementControlAccess();
-  } catch (e) {
-    fillAnnouncementModalFields(__currentPanelAnnouncementText);
-    syncAnnouncementControlAccess();
-    console.warn('No se pudo cargar el anuncio del panel', e);
-  }
-}
-
-async function updateDashboardAnnouncement(){
-  try {
-    const input = document.getElementById('announcementNewText');
-    const text = String(input?.value || '').trim() || PANEL_ANNOUNCEMENT_DEFAULT;
-    const data = await api('/api/announcement', {
-      method: 'POST',
-      body: JSON.stringify({ message: text })
-    });
-
-    const savedMessage = String(data?.announcement?.message || text || PANEL_ANNOUNCEMENT_DEFAULT);
-    applyPanelAnnouncementText(savedMessage);
-    fillAnnouncementModalFields(savedMessage);
-    showMessage(data?.message || 'Anuncio actualizado correctamente');
-  } catch (e) {
-    showMessage(e.message || 'Error actualizando anuncio', 'error');
-  }
-}
-
-async function applyAnnouncementFromModal(){
-  await updateDashboardAnnouncement();
-}
-
-async function clearAnnouncementFromModal(){
-  try {
-    const data = await api('/api/announcement', {
-      method: 'POST',
-      body: JSON.stringify({ message: '' })
-    });
-
-    applyPanelAnnouncementText('');
-    fillAnnouncementModalFields('');
-    showMessage(data?.message || 'Anuncio ocultado correctamente');
-  } catch (e) {
-    showMessage(e.message || 'Error ocultando anuncio', 'error');
-  }
-}
-
-async function deleteAnnouncementFromModal(){
-  try {
-    const data = await api('/api/announcement', {
-      method: 'POST',
-      body: JSON.stringify({ message: '' })
-    });
-
-    applyPanelAnnouncementText('');
-    fillAnnouncementModalFields('');
-    const input = document.getElementById('announcementNewText');
-    if (input) input.value = '';
-    showMessage(data?.message || 'Anuncio eliminado correctamente');
-  } catch (e) {
-    showMessage(e.message || 'Error eliminando anuncio', 'error');
-  }
-}
-
-function openAnnouncementModal(){
-  const modal = getAnunciosModal();
-  if (!modal) return;
-  ensureSingleAnnouncementRibbonOriginal();
-  showFloatingModal(modal);
-  fillAnnouncementModalFields('Cargando anuncio activo...');
-  syncAnnouncementControlAccess();
-  loadPanelAnnouncementText();
-}
-
-function closeAnnouncementModal(){
-  hideFloatingModal(getAnunciosModal());
-}
-
-window.updateDashboardAnnouncement = updateDashboardAnnouncement;
-window.applyAnnouncementFromModal = applyAnnouncementFromModal;
-window.clearAnnouncementFromModal = clearAnnouncementFromModal;
-window.deleteAnnouncementFromModal = deleteAnnouncementFromModal;
-window.openAnnouncementModal = openAnnouncementModal;
-window.closeAnnouncementModal = closeAnnouncementModal;
-window.openPanicResetModal = openPanicResetModal;
-window.closePanicResetModal = closePanicResetModal;
-window.submitPanicReset = submitPanicReset;
-window.savePanelAnnouncementText = updateDashboardAnnouncement;
-
-const __loadAppBeforePanelAnnouncement = typeof loadApp === 'function' ? loadApp : null;
-if (__loadAppBeforePanelAnnouncement) {
-  loadApp = async function(){
-    await __loadAppBeforePanelAnnouncement();
-    await loadPanelAnnouncementText();
-  };
-}
-
-const __showSectionBeforePanelAnnouncement = typeof showSection === 'function' ? showSection : null;
-if (__showSectionBeforePanelAnnouncement) {
-  showSection = function(name){
-    const result = __showSectionBeforePanelAnnouncement(name);
-    if (name === 'dashboard' || name === 'admin') {
-      loadPanelAnnouncementText();
-    }
-    return result;
-  };
-}
-
-setTimeout(loadPanelAnnouncementText, 1000);
-setInterval(ensureSingleAnnouncementRibbonOriginal, 3000);
-
-function initTopbarAnnouncementsTopbar(){
-  const anunciosBtn = document.getElementById('btn-anuncios');
-  const salesReportBtn = document.getElementById('btn-top-reporte-ventas');
-  const modalAnuncios = document.getElementById('modal-anuncios');
-
-  if (anunciosBtn) anunciosBtn.dataset.ready = '1';
-  if (salesReportBtn) salesReportBtn.dataset.ready = '1';
-  if (modalAnuncios) modalAnuncios.dataset.ready = '1';
-
-  syncAnnouncementControlAccess();
-  loadPanelAnnouncementText();
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initTopbarAnnouncementsTopbar);
-} else {
-  initTopbarAnnouncementsTopbar();
-}
-
-window.clearAccountTraceByEmail = function(){
-  const input = document.getElementById('traceEmailInput');
-  const box = document.getElementById('inventoryTraceResult');
-  if (input) input.value = '';
-  if (box) box.innerHTML = 'Ingresa un correo para ver su historial.';
-};
-
-function formatTraceDate(value){
-  if(!value) return 'Sin fecha';
-  const d = new Date(value);
-  if(Number.isNaN(d.getTime())) return safeText(String(value));
-  return d.toLocaleString('es-MX');
-}
-
-function getTraceTime(value){
-  const d = new Date(value || '');
-  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
-}
-
-function traceSourceLabel(source){
-  const key = String(source || '').trim().toLowerCase();
-  if (key === 'replacement_manual_report') return 'Reemplazo manual desde reporte de fallas';
-  if (key === 'replacement_inventory_report') return 'Reemplazo desde inventario por reporte de fallas';
-  if (key === 'direct_inventory') return 'Ingreso directo a inventario';
-  if (!key) return 'Ingreso directo a inventario';
-  return key;
-}
-
-window.loadAccountTraceByEmail = async function(){
-  try{
-    if(currentUser?.role !== 'admin') return;
-
-    const input = document.getElementById('traceEmailInput');
-    const box = document.getElementById('inventoryTraceResult');
-    const email = String(input?.value || '').trim();
-
-    if(!email){
-      showMessage('Escribe un correo para consultar.', 'error');
-      return;
-    }
-
-    if(box) box.innerHTML = '<p class="small-text">Consultando trazabilidad...</p>';
-
-    const data = await api('/api/admin/inventory/account-trace?email=' + encodeURIComponent(email));
-    const first = data?.first_sale || null;
-    const accountMovements = Array.isArray(data?.account_movements) ? data.account_movements : [];
-    const reportMovements = Array.isArray(data?.report_movements) ? data.report_movements : [];
-
-    const timeline = [];
-
-    if (first) {
-      timeline.push({
-        type: 'first_sale',
-        timestamp: getTraceTime(first.purchased_at),
-        html: `<article class="trace-card trace-first-sale"><div class="trace-head"><span class="trace-badge">Primera venta</span><span class="trace-date">${safeText(formatTraceDate(first.purchased_at))}</span></div><h4 class="trace-title">Pedido #${first.order_id || 'N/A'} vendido por primera vez</h4><p class="trace-line"><b>Vendedor/cliente:</b> ${safeText(first.sold_to_name || 'N/A')} (${safeText(first.sold_to_email || 'N/A')})</p><p class="trace-line"><b>Cuenta:</b> ${safeText(first.account_email || email)} | <b>Perfil:</b> ${safeText(first.profile_name || 'Sin perfil')}</p><p class="trace-line"><b>Plataforma:</b> ${safeText(first.platform || first.product_name || 'Sin plataforma')}</p><p class="trace-line"><b>Ingreso a inventario (admin):</b> ${safeText(formatTraceDate(first.inventory_created_at))}</p><p class="trace-line"><b>Origen de ingreso:</b> ${safeText(traceSourceLabel(first.inventory_entry_source))}</p><p class="trace-line"><b>Vence cuenta madre (30 días):</b> ${safeText(formatTraceDate(first.mother_expires_at_30d))}</p><p class="trace-line"><b>Vence vendedor (28 días desde compra):</b> ${safeText(formatTraceDate(first.seller_expires_at_28d))}</p></article>`
-      });
-    }
-
-    accountMovements.forEach((m) => {
-      const eventDate = m.inventory_created_at || m.created_at || m.delivered_at || m.order_created_at;
-      timeline.push({
-        type: 'account',
-        timestamp: getTraceTime(eventDate),
-        html: `<article class="trace-card"><div class="trace-head"><span class="trace-badge">Inventario</span><span class="trace-date">${safeText(formatTraceDate(eventDate))}</span></div><h4 class="trace-title">Ingreso/movimiento de cuenta #${m.account_id || 'N/A'}</h4><p class="trace-line"><b>Estado:</b> ${safeText(m.status || 'N/A')}</p><p class="trace-line"><b>Correo:</b> ${safeText(m.account_email || '')}</p><p class="trace-line"><b>Perfil:</b> ${safeText(m.profile_name || 'N/A')} ${m.profile_pin ? `| <b>PIN:</b> ${safeText(m.profile_pin)}` : ''}</p><p class="trace-line"><b>Plataforma:</b> ${safeText(m.platform || m.product_name || m.sold_product_name || 'Sin plataforma')}</p><p class="trace-line"><b>Ingreso a inventario (admin):</b> ${safeText(formatTraceDate(m.inventory_created_at || m.created_at))}</p><p class="trace-line"><b>Origen de ingreso:</b> ${safeText(traceSourceLabel(m.inventory_entry_source))}</p><p class="trace-line"><b>Vence cuenta madre (30 días):</b> ${safeText(formatTraceDate(m.mother_expires_at_30d))}</p><p class="trace-line"><b>Pedido:</b> #${m.order_id || 'N/A'} | <b>Vendedor:</b> ${safeText(m.sold_to_name || 'Sin asignar')} (${safeText(m.sold_to_email || 'N/A')})</p><p class="trace-line"><b>Vence vendedor (28 días desde compra):</b> ${safeText(formatTraceDate(m.seller_expires_at_28d))}</p></article>`
-      });
-    });
-
-    reportMovements.forEach((r) => {
-      const eventDate = r.reviewed_at || r.report_created_at || r.order_created_at;
-      timeline.push({
-        type: 'report',
-        timestamp: getTraceTime(eventDate),
-        html: `<article class="trace-card trace-report"><div class="trace-head"><span class="trace-badge">Reporte / reemplazo</span><span class="trace-date">${safeText(formatTraceDate(eventDate))}</span></div><h4 class="trace-title">Reporte #${r.report_id || 'N/A'} en pedido #${r.order_id || 'N/A'}</h4><p class="trace-line"><b>Tipo:</b> ${safeText(r.issue_type || 'N/A')} | <b>Estado:</b> ${safeText(r.report_status || 'N/A')}</p><p class="trace-line"><b>Resolución:</b> ${safeText(r.resolution_type || 'Sin resolución')}</p><p class="trace-line"><b>Correo reportado:</b> ${safeText(r.reported_email || 'N/A')}</p><p class="trace-line"><b>Perfil reemplazado:</b> ${safeText(r.failed_profile_name || 'No identificado')}</p><p class="trace-line"><b>Cuenta nueva:</b> ${safeText(r.report_account_email || 'No identificado')} | <b>Perfil nuevo:</b> ${safeText(r.report_account_profile || 'No identificado')}</p><p class="trace-line"><b>Ingreso inventario cuenta nueva:</b> ${safeText(formatTraceDate(r.replacement_inventory_created_at))}</p><p class="trace-line"><b>Origen de ingreso cuenta nueva:</b> ${safeText(traceSourceLabel(r.replacement_entry_source))}</p><p class="trace-line"><b>Vence cuenta madre nueva (30 días):</b> ${safeText(formatTraceDate(r.replacement_mother_expires_at_30d))}</p><p class="trace-line"><b>Vendedor asociado:</b> ${safeText(r.sold_to_name || r.reporter_name || 'N/A')} (${safeText(r.sold_to_email || r.reporter_email || 'N/A')})</p><p class="trace-line"><b>Vence vendedor (28 días desde compra):</b> ${safeText(formatTraceDate(r.seller_expires_at_28d))}</p></article>`
-      });
-    });
-
-    timeline.sort((a, b) => a.timestamp - b.timestamp);
-
-    if(box){
-      box.innerHTML = timeline.length
-        ? `<div class="trace-summary"><b>Correo consultado:</b> ${safeText(email)}<br><span class="small-text">Eventos detectados: ${timeline.length} | Inventario: ${accountMovements.length} | Reportes: ${reportMovements.length}</span></div><div class="trace-timeline">${timeline.map(item => item.html).join('')}</div>`
-        : '<p class="small-text">No se encontraron movimientos para ese correo dentro del alcance de este panel.</p>';
-    }
-
-    showMessage(`Trazabilidad cargada: ${accountMovements.length} movimiento(s) de inventario y ${reportMovements.length} reporte(s).`);
-  }catch(e){
-    showMessage(e.message || 'Error consultando trazabilidad', 'error');
-    const box = document.getElementById('inventoryTraceResult');
-    if (box) box.innerHTML = '<p class="small-text error">No se pudo cargar la trazabilidad.</p>';
-  }
-};
