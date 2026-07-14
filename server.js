@@ -421,7 +421,7 @@ async function distributorMiddleware(req, res, next) {
 
     const user = result.rows[0];
 
-    if (!user || (user.role !== "admin" && user.is_subadmin !== true)) {
+    if (!user || user.is_subadmin !== true) {
       return res.status(403).json({ error: "Distribuidor requerido" });
     }
 
@@ -430,6 +430,27 @@ async function distributorMiddleware(req, res, next) {
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error validando distribuidor" });
+  }
+}
+
+async function inventoryHistoryAccessMiddleware(req, res, next) {
+  try {
+    const result = await pool.query(
+      `SELECT id, role, COALESCE(is_subadmin, false) AS is_subadmin FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+
+    const user = result.rows[0];
+
+    if (!user || (user.role !== 'admin' && user.is_subadmin !== true)) {
+      return res.status(403).json({ error: 'Acceso restringido al historial de inventario' });
+    }
+
+    req.inventoryHistoryUser = user;
+    next();
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Error validando acceso al historial de inventario' });
   }
 }
 
@@ -4876,7 +4897,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
 // ==========================================
 // RUTA PARA EL HISTORIAL DE INVENTARIO
 // ==========================================
-app.get('/api/admin/inventory-history', authMiddleware, adminMiddleware, async (req, res) => {
+app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMiddleware, async (req, res) => {
     try {
         const search = String(req.query.q || '').trim();
         if (!search) {

@@ -2,6 +2,15 @@ let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];
 let currentInventoryPage = 1;
 let currentOrdersPage = 1;
 
+function canAccessInventoryHistory(){
+  return !!currentUser && (
+    currentUser.role === 'admin' ||
+    currentUser.is_subadmin === true ||
+    currentUser.is_subadmin === 1 ||
+    currentUser.is_subadmin === 'true'
+  );
+}
+
 function showSection(name) {
   const targetName = String(name || '').trim();
   if (!targetName) return;
@@ -19,6 +28,14 @@ function showSection(name) {
     sec = document.getElementById('section-' + normalizedName);
   }
   if (!sec) return;
+
+  if (normalizedName === 'inventory-history' && !canAccessInventoryHistory()) {
+    if (typeof showMessage === 'function') showMessage('Solo el distribuidor puede acceder al historial de inventario', 'error');
+    if (typeof __showSectionBeforeRoleMatrix === 'function') {
+      __showSectionBeforeRoleMatrix('dashboard');
+    }
+    return;
+  }
 
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   sec.classList.add('active');
@@ -582,6 +599,10 @@ function renderMyOrders(){
 }
 
 function openInventoryHistory() {
+  if (!canAccessInventoryHistory()) {
+    if (typeof showMessage === 'function') showMessage('Solo el distribuidor puede ver el historial de inventario', 'error');
+    return;
+  }
   showSection('inventory-history');
 
   const input = document.getElementById('inventorySearchInput');
@@ -829,6 +850,7 @@ function initInventoryHistoryModalBehavior() {
 function initInventoryHistoryDashboardButton() {
   const card = document.getElementById('dashInventoryHistoryCard');
   if (card) {
+    card.classList.toggle('hidden', !canAccessInventoryHistory());
     card.onclick = openInventoryHistory;
   }
 }
@@ -4233,6 +4255,7 @@ function applyDashboardRoleVisibilityMatrix(){
     'dashProductsCard',
     'dashOutOfStockCard',
     'dashInventoryCard',
+    'dashInventoryHistoryCard',
     'dashOrdersCard',
     'dashReportsCard',
     'dashBalanceRequestsCard',
@@ -4266,6 +4289,7 @@ function applyDashboardRoleVisibilityMatrix(){
     // Oculta infraestructura global para panel admin independiente.
     hardHide('adminMenuBtn', true);
     hardHide('adminSalesMenuBtn', true);
+    hardHide('dashInventoryHistoryCard', !(isDistributor || isAdminGlobal));
     globalInfraIds.forEach(id=>hardHide(id, isPanelAdmin));
     hardHide('btnHistorialId', true);
 
