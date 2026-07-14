@@ -1038,9 +1038,8 @@ function renderAdminReportCompactFinal(r){
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
       <div class="compact-title">Reporte #${r.id}</div>
-      <div class="compact-meta">${safeText(r.customer_name||'Cliente')} · ${safeText(r.email||'correo reportado')} · ${safeText(r.status||'pendiente')}</div>
     </div>
-    <div class="compact-details">
+    <div class="compact-details" style="display:none">
       <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
       <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
       <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
