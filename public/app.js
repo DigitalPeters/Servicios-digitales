@@ -2471,6 +2471,7 @@ window.buyProduct = async function(productId){
       body:JSON.stringify({ order_data, quantity: 1 })
     });
 
+    if (typeof closeProductModal === 'function') closeProductModal();
     showMessage(data.message || 'Compra realizada');
     if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
     await loadApp();
