@@ -38,7 +38,7 @@ function showSection(name) {
   if (normalizedName === 'orders') loadMyOrders();
 
   if (normalizedName === 'admin' && currentUser?.role === 'admin') {
-    loadUsers();
+    if (typeof loadUsers === 'function') loadUsers();
     loadAdminProducts();
     loadAdminOrders();
     loadSalesReport();
@@ -53,6 +53,48 @@ function showSection(name) {
     loadExpiringCount();
   }
 } // <--- Esta es la ÚNICA llave que cierra toda la función
+
+async function loadUsers(){
+  const box = document.getElementById('usersList');
+  try{
+    const users = await api('/api/admin/users');
+    allUsers = Array.isArray(users) ? users : [];
+
+    const statUsersEl = document.getElementById('statUsers');
+    if(statUsersEl) statUsersEl.textContent = String(allUsers.length);
+    const adminUsersCountEl = document.getElementById('adminUsersCount');
+    if(adminUsersCountEl) adminUsersCountEl.textContent = String(allUsers.length);
+
+    const balanceUserSelect = document.getElementById('balanceUserSelect');
+    const balanceUserId = document.getElementById('balanceUserId');
+    if(balanceUserSelect){
+      balanceUserSelect.innerHTML = '<option value="">Selecciona usuario</option>' + allUsers.map(u => `<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)}) - $${formatMoney(u.balance)}</option>`).join('');
+      balanceUserSelect.onchange = () => {
+        if(balanceUserId) balanceUserId.value = balanceUserSelect.value;
+      };
+    }
+
+    if(box){
+      box.innerHTML = allUsers.length ? allUsers.map(u => {
+        const isPanelOwner = u.is_panel_admin === true || u.is_panel_admin === 1 || u.is_panel_admin === 'true';
+        const isDistributor = !isPanelOwner && (u.is_subadmin === true || u.is_subadmin === 1 || u.is_subadmin === 'true');
+        const enabled = !(u.is_enabled === false || u.is_enabled === 0 || u.is_enabled === 'false');
+        const roleLabel = isPanelOwner ? 'Panel propietario' : (isDistributor ? 'Admin distribuidor' : 'Usuario');
+        const statusChip = enabled
+          ? '<span class="chip" style="background:#dcfce7;color:#166534">Activo</span>'
+          : '<span class="chip" style="background:#fee2e2;color:#991b1b">Deshabilitado</span>';
+        const canManage = Number(u.id) !== Number(currentUser?.id) && !isPanelOwner && u.role !== 'admin';
+        const manageButtons = canManage
+          ? `<div class="tools" style="margin-bottom:0"><button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${isDistributor ? 'false' : 'true'})">${isDistributor ? 'Quitar admin distribuidor' : 'Convertir en admin distribuidor'}</button><button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button></div>`
+          : '';
+        return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)} <span class="chip">${safeText(roleLabel)}</span></p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Último movimiento:</b> ${u.last_activity_at ? safeText(String(u.last_activity_at).replace('T', ' ').slice(0, 19)) : 'Sin movimientos registrados'}</p><p><b>Movimientos 2 meses:</b> ${Number(u.movements_2m || 0)}</p>${manageButtons}</div>`;
+      }).join('') : 'No hay usuarios.';
+    }
+  }catch(e){
+    console.warn('Error cargando usuarios del panel admin', e);
+    if(box) box.textContent = 'No se pudieron cargar los usuarios.';
+  }
+}
 
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
 // Después de que el código termine de pintar las tablas (innerHTML = ...), agrega esto:
@@ -606,6 +648,27 @@ function renderInventoryHistorySummary(events) {
 
   document.getElementById('inventoryEmail').textContent = firstEvent.cuenta_madre || '-';
   document.getElementById('inventoryProfile').textContent = firstEvent.profile_name || '-';
+  const __finalShowSectionBase = typeof showSection === 'function' ? showSection : null;
+  if(__finalShowSectionBase){
+    let __showSectionLock = false;
+    let __lastSectionName = '';
+    showSection = function(name){
+      const sectionName = String(name || '').trim();
+      if(!sectionName) return;
+      if(__showSectionLock && sectionName === __lastSectionName) return;
+      __lastSectionName = sectionName;
+      __showSectionLock = true;
+      try{
+        __finalShowSectionBase(sectionName);
+      } finally {
+        setTimeout(()=>{ __showSectionLock = false; }, 120);
+      }
+      if(sectionName === 'admin'){
+        setTimeout(()=>{ if(typeof window.loadAdminUsersPanelFinal === 'function') window.loadAdminUsersPanelFinal(); }, 60);
+        setTimeout(()=>{ if(typeof window.loadAdminUsersPanelFinal === 'function') window.loadAdminUsersPanelFinal(); }, 320);
+      }
+    };
+  }
   document.getElementById('inventoryPlatform').textContent = firstEvent.platform || firstEvent.product_name || '-';
   document.getElementById('inventoryStatus').textContent = estado;
   document.getElementById('inventoryEntered').textContent = fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-';
@@ -907,7 +970,14 @@ function isAdminUserSafe(){
 }
 
 function toggleCompactItemFinal(id){
-  document.getElementById(id)?.classList.toggle('open');
+  const node=document.getElementById(id);
+  if(!node) return;
+  node.classList.toggle('open');
+  const details=node.querySelector('.compact-details');
+  if(details){
+    const isOpen=node.classList.contains('open');
+    details.style.display=isOpen?'block':'none';
+  }
 }
 
 
@@ -1048,9 +1118,9 @@ function renderAdminOrderCompactFinal(o){
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
       <div class="compact-title">Pedido #${o.id}</div>
-      <div class="compact-meta">${safeText(o.customer_name||'Cliente')} · ${safeText(o.product_name||'Producto')} · ${safeText(getStatusText(o.status))}</div>
+      <div class="compact-meta">${safeText(getStatusText(o.status))}</div>
     </div>
-    <div class="compact-details">
+    <div class="compact-details" style="display:none">
       <p><b>Pedido:</b> #${o.id}</p>
       <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
       <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
@@ -2185,6 +2255,12 @@ setTimeout(() => {
     }
     return '';
   }
+  function movementText(value){
+    if(!value) return 'Sin movimientos registrados';
+    const d = new Date(value);
+    if(Number.isNaN(d.getTime())) return 'Sin movimientos registrados';
+    return d.toLocaleString('es-MX');
+  }
   function actionForUser(u){
     const isPanelOwner = isTrue(u.is_panel_admin) || u.account_type === 'panel_propietario';
     if (isPanelOwner || u.role === 'admin') return '';
@@ -2192,7 +2268,12 @@ setTimeout(() => {
     const belongsToPanel = isTrue(u.belongs_to_panel_owner) || u.account_type === 'vendedor_panel' || u.account_type === 'distribuidor_del_panel' || !!u.owner_panel_id;
     const textOn = belongsToPanel ? 'Convertir en distribuidor del panel' : 'Convertir en admin distribuidor';
     const textOff = belongsToPanel ? 'Quitar distribuidor del panel' : 'Quitar admin distribuidor';
-    return `<button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${isDistributor ? 'false' : 'true'})">${isDistributor ? textOff : textOn}</button>`;
+    const enabled = !(u.is_enabled === false || u.is_enabled === 0 || u.is_enabled === 'false');
+    const canManage = Number(u.id) !== Number(currentUser?.id);
+    const manageButtons = canManage
+      ? `<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
+      : '';
+    return `<div class="tools" style="margin-bottom:0"><button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${isDistributor ? 'false' : 'true'})">${isDistributor ? textOff : textOn}</button>${manageButtons}</div>`;
   }
   function renderUsersWithHierarchy(){
     const box = document.getElementById('usersList');
@@ -2200,6 +2281,10 @@ setTimeout(() => {
     box.innerHTML = allUsers.map(u => {
       const label = userAccountLabel(u);
       const chipClass = label === 'Panel propietario' ? 'chip' : 'chip';
+      const enabled = !(u.is_enabled === false || u.is_enabled === 0 || u.is_enabled === 'false');
+      const statusChip = enabled
+        ? '<span class="chip" style="background:#dcfce7;color:#166534">Activo</span>'
+        : '<span class="chip" style="background:#fee2e2;color:#991b1b">Deshabilitado</span>';
       return `<div class="item">
         <p><b>ID:</b> ${u.id}</p>
         <p><b>Nombre:</b> ${safeText(u.name)}</p>
@@ -2207,10 +2292,56 @@ setTimeout(() => {
         <p><b>Rol:</b> ${safeText(u.role)} <span class="${chipClass}">${safeText(label)}</span></p>
         ${ownerText(u)}
         <p><b>Saldo:</b> $${formatMoney(u.balance)}</p>
+        <p><b>Estado:</b> ${statusChip}</p>
+        <p><b>Último movimiento:</b> ${movementText(u.last_activity_at)}</p>
+        <p><b>Movimientos 2 meses:</b> ${Number(u.movements_2m||0)}</p>
         ${actionForUser(u)}
       </div>`;
     }).join('') || 'No hay usuarios.';
   }
+
+  async function loadAdminUsersPanelFinal(){
+    const box = document.getElementById('usersList');
+    if (!box) return;
+    try{
+      box.textContent = 'Cargando usuarios...';
+      const users = await api('/api/admin/users');
+      allUsers = Array.isArray(users) ? users : [];
+
+      const statUsersEl = document.getElementById('statUsers');
+      if(statUsersEl) statUsersEl.textContent = String(allUsers.length);
+      const adminUsersCountEl = document.getElementById('adminUsersCount');
+      if(adminUsersCountEl) adminUsersCountEl.textContent = String(allUsers.length);
+
+      const balanceUserSelect = document.getElementById('balanceUserSelect');
+      const balanceUserId = document.getElementById('balanceUserId');
+      if(balanceUserSelect){
+        balanceUserSelect.innerHTML = '<option value="">Selecciona usuario</option>' + allUsers.map(u => `<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)}) - $${formatMoney(u.balance)}</option>`).join('');
+        balanceUserSelect.onchange = () => {
+          if(balanceUserId) balanceUserId.value = balanceUserSelect.value;
+        };
+      }
+
+      box.innerHTML = allUsers.length ? allUsers.map(u => {
+        const isPanelOwner = u.is_panel_admin === true || u.is_panel_admin === 1 || u.is_panel_admin === 'true';
+        const isDistributor = !isPanelOwner && (u.is_subadmin === true || u.is_subadmin === 1 || u.is_subadmin === 'true');
+        const enabled = !(u.is_enabled === false || u.is_enabled === 0 || u.is_enabled === 'false');
+        const statusChip = enabled
+          ? '<span class="chip" style="background:#dcfce7;color:#166534">Activo</span>'
+          : '<span class="chip" style="background:#fee2e2;color:#991b1b">Deshabilitado</span>';
+        const roleLabel = isPanelOwner ? 'Panel propietario' : (isDistributor ? 'Admin distribuidor' : 'Usuario');
+        const manageButtons = (Number(u.id) !== Number(currentUser?.id) && !isPanelOwner && u.role !== 'admin')
+          ? `<div class="tools" style="margin-bottom:0"><button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${isDistributor ? 'false' : 'true'})">${isDistributor ? 'Quitar admin distribuidor' : 'Convertir en admin distribuidor'}</button><button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button></div>`
+          : '';
+        return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)} <span class="chip">${safeText(roleLabel)}</span></p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Último movimiento:</b> ${u.last_activity_at ? safeText(String(u.last_activity_at).replace('T', ' ').slice(0, 19)) : 'Sin movimientos registrados'}</p><p><b>Movimientos 2 meses:</b> ${Number(u.movements_2m || 0)}</p>${manageButtons}</div>`;
+      }).join('') : 'No hay usuarios.';
+    }catch(e){
+      box.textContent = 'No se pudieron cargar los usuarios.';
+      console.warn('Error cargando usuarios del panel admin', e);
+    }
+  }
+
+  window.loadAdminUsersPanelFinal = loadAdminUsersPanelFinal;
   const oldLoadUsersHierarchy = typeof loadUsers === 'function' ? loadUsers : null;
   if (oldLoadUsersHierarchy) {
     loadUsers = async function(){
@@ -2231,6 +2362,32 @@ setTimeout(() => {
   }
   setTimeout(renderUsersWithHierarchy, 600);
 })();
+
+if(typeof window.adminSetUserEnabled !== 'function'){
+  window.adminSetUserEnabled = async function(userId, enabled){
+    try{
+      const enableValue = enabled === true || enabled === 'true';
+      if(!confirm(enableValue ? '¿Habilitar este usuario?' : '¿Deshabilitar este usuario?')) return;
+      const data = await api('/api/admin/users/'+userId+'/status', {
+        method:'PATCH',
+        body: JSON.stringify({ enabled: enableValue })
+      });
+      showMessage(data.message || (enableValue ? 'Usuario habilitado' : 'Usuario deshabilitado'));
+      if(typeof loadUsers === 'function') await loadUsers();
+    }catch(e){ showMessage(e.message || 'Error cambiando estado del usuario','error'); }
+  };
+}
+
+if(typeof window.adminDeleteUser !== 'function'){
+  window.adminDeleteUser = async function(userId){
+    try{
+      if(!confirm('¿Seguro que quieres eliminar este usuario? Solo se permite si no tiene movimientos.')) return;
+      const data = await api('/api/admin/users/'+userId, { method:'DELETE' });
+      showMessage(data.message || 'Usuario eliminado');
+      if(typeof loadUsers === 'function') await loadUsers();
+    }catch(e){ showMessage(e.message || 'No se pudo eliminar usuario','error'); }
+  };
+}
 
 
 

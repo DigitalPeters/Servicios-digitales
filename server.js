@@ -718,6 +718,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_subadmin BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS owner_user_id INTEGER`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT TRUE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0`);
@@ -862,6 +863,7 @@ async function initDatabase() {
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
   await pool.query(`UPDATE users SET is_subadmin = FALSE WHERE is_subadmin IS NULL`);
+  await pool.query(`UPDATE users SET is_enabled = TRUE WHERE is_enabled IS NULL`);
 
   // Los paneles creados/rentados son "Panel propietario", no "Admin distribuidor".
   // Por eso, si existe un usuario cuyo correo está en admin_panels, se limpia is_subadmin.
@@ -1211,6 +1213,10 @@ app.post("/api/login", async (req, res) => {
     const panel = await getAdminPanelForEmail(user.email);
     if (panel && String(panel.status || "activo").toLowerCase() !== "activo") {
       return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    }
+
+    if (user.is_enabled === false) {
+      return res.status(403).json({ error: "Tu acceso está deshabilitado. Contacta al administrador de tu panel." });
     }
 
     const match = await bcrypt.compare(password || "", user.password);
@@ -2420,6 +2426,9 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
     if (req.isPanelAdmin) {
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+                COALESCE(u.is_enabled, TRUE) AS is_enabled,
+                activity.last_activity_at,
+                COALESCE(activity.movements_2m, 0)::int AS movements_2m,
                 owner.name AS owner_name,
                 owner.email AS owner_email,
                 own_panel.business_name AS owner_panel_name,
@@ -2433,6 +2442,18 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
                      WHEN u.role = 'admin' THEN 'admin_global'
                      ELSE 'usuario' END AS account_type
          FROM users u
+         LEFT JOIN LATERAL (
+           SELECT
+             MAX(m.ts) AS last_activity_at,
+             COUNT(*) FILTER (WHERE m.ts >= NOW() - INTERVAL '2 months')::int AS movements_2m
+           FROM (
+             SELECT o.created_at AS ts FROM orders o WHERE o.user_id = u.id
+             UNION ALL
+             SELECT br.created_at AS ts FROM balance_requests br WHERE br.user_id = u.id
+             UNION ALL
+             SELECT ar.created_at AS ts FROM account_reports ar WHERE ar.user_id = u.id
+           ) m
+         ) activity ON TRUE
          LEFT JOIN users owner ON owner.id = u.owner_user_id
          LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
          LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
@@ -2443,6 +2464,9 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
     } else {
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
+              COALESCE(u.is_enabled, TRUE) AS is_enabled,
+              activity.last_activity_at,
+              COALESCE(activity.movements_2m, 0)::int AS movements_2m,
               owner.name AS owner_name,
               owner.email AS owner_email,
               own_panel.business_name AS owner_panel_name,
@@ -2456,6 +2480,18 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
                    WHEN u.role = 'admin' THEN 'admin_global'
                    ELSE 'usuario' END AS account_type
        FROM users u
+       LEFT JOIN LATERAL (
+         SELECT
+           MAX(m.ts) AS last_activity_at,
+           COUNT(*) FILTER (WHERE m.ts >= NOW() - INTERVAL '2 months')::int AS movements_2m
+         FROM (
+           SELECT o.created_at AS ts FROM orders o WHERE o.user_id = u.id
+           UNION ALL
+           SELECT br.created_at AS ts FROM balance_requests br WHERE br.user_id = u.id
+           UNION ALL
+           SELECT ar.created_at AS ts FROM account_reports ar WHERE ar.user_id = u.id
+         ) m
+       ) activity ON TRUE
        LEFT JOIN users owner ON owner.id = u.owner_user_id
        LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
        LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
@@ -2467,6 +2503,113 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando usuarios" });
+  }
+});
+
+app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const { enabled } = req.body;
+
+    if (!userId || typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "ID y estado habilitado son obligatorios" });
+    }
+
+    if (userId === Number(req.user.id)) {
+      return res.status(400).json({ error: "No puedes deshabilitar tu propio usuario" });
+    }
+
+    const targetResult = await pool.query(
+      `SELECT id, role, owner_user_id, COALESCE(is_panel_admin, false) AS is_panel_admin
+       FROM users
+       WHERE id = $1
+       LIMIT 1`,
+      [userId]
+    );
+
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "Usuario no encontrado" });
+    if (target.role === "admin") return res.status(403).json({ error: "No puedes modificar estado de cuentas admin" });
+
+    if (req.isPanelAdmin && Number(target.owner_user_id || 0) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "Solo puedes modificar usuarios de tu panel" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET is_enabled = $1
+       WHERE id = $2
+       RETURNING id, name, email, COALESCE(is_enabled, TRUE) AS is_enabled`,
+      [enabled, userId]
+    );
+
+    res.json({ message: enabled ? "Usuario habilitado correctamente" : "Usuario deshabilitado correctamente", user: result.rows[0] });
+  } catch (err) {
+    console.error("Error cambiando estado de usuario:", err.message);
+    res.status(500).json({ error: "Error cambiando estado del usuario" });
+  }
+});
+
+app.delete("/api/admin/users/:userId", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = Number(req.params.userId);
+    if (!userId) return res.status(400).json({ error: "ID de usuario inválido" });
+    if (userId === Number(req.user.id)) return res.status(400).json({ error: "No puedes eliminar tu propio usuario" });
+
+    await client.query("BEGIN");
+
+    const targetResult = await client.query(
+      `SELECT id, role, owner_user_id
+       FROM users
+       WHERE id = $1
+       LIMIT 1`,
+      [userId]
+    );
+
+    const target = targetResult.rows[0];
+    if (!target) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    if (target.role === "admin") {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "No puedes eliminar cuentas admin" });
+    }
+
+    if (req.isPanelAdmin && Number(target.owner_user_id || 0) !== Number(req.user.id)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Solo puedes eliminar usuarios de tu panel" });
+    }
+
+    const usage = await client.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM orders WHERE user_id = $1) AS orders_count,
+         (SELECT COUNT(*)::int FROM balance_requests WHERE user_id = $1) AS balance_count,
+         (SELECT COUNT(*)::int FROM account_reports WHERE user_id = $1) AS reports_count`,
+      [userId]
+    );
+
+    const counts = usage.rows[0] || {};
+    const hasMovements = Number(counts.orders_count || 0) > 0 || Number(counts.balance_count || 0) > 0 || Number(counts.reports_count || 0) > 0;
+    if (hasMovements) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No se puede eliminar porque el usuario ya tiene movimientos históricos." });
+    }
+
+    await client.query(`DELETE FROM subadmin_reseller_prices WHERE owner_user_id = $1`, [userId]);
+    await client.query(`DELETE FROM user_product_prices WHERE user_id = $1`, [userId]);
+    await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+
+    await client.query("COMMIT");
+    res.json({ message: "Usuario eliminado correctamente" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error eliminando usuario:", err.message);
+    res.status(500).json({ error: "Error eliminando usuario" });
+  } finally {
+    client.release();
   }
 });
 
@@ -4142,10 +4285,37 @@ app.patch("/api/admin/subadmin-prices", authMiddleware, adminMiddleware, async (
 app.get("/api/distributor/resellers", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email, role, balance, owner_user_id, created_at
-       FROM users
-       WHERE owner_user_id = $1
-       ORDER BY id DESC`,
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         u.role,
+         u.balance,
+         u.owner_user_id,
+         u.created_at,
+         COALESCE(u.is_enabled, TRUE) AS is_enabled,
+         activity.last_activity_at,
+         COALESCE(activity.movements_2m, 0)::int AS movements_2m,
+         CASE
+           WHEN activity.last_activity_at IS NULL THEN TRUE
+           WHEN activity.last_activity_at < NOW() - INTERVAL '2 months' THEN TRUE
+           ELSE FALSE
+         END AS inactive_2m
+       FROM users u
+       LEFT JOIN LATERAL (
+         SELECT
+           MAX(m.ts) AS last_activity_at,
+           COUNT(*) FILTER (WHERE m.ts >= NOW() - INTERVAL '2 months')::int AS movements_2m
+         FROM (
+           SELECT o.created_at AS ts FROM orders o WHERE o.user_id = u.id
+           UNION ALL
+           SELECT br.created_at AS ts FROM balance_requests br WHERE br.user_id = u.id
+           UNION ALL
+           SELECT ar.created_at AS ts FROM account_reports ar WHERE ar.user_id = u.id
+         ) m
+       ) activity ON TRUE
+       WHERE u.owner_user_id = $1
+       ORDER BY COALESCE(activity.last_activity_at, u.created_at) DESC, u.id DESC`,
       [req.user.id]
     );
 
@@ -4198,9 +4368,10 @@ app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, as
              password = $2,
              role = 'user',
              owner_user_id = $3,
-             is_subadmin = FALSE
+             is_subadmin = FALSE,
+             is_enabled = TRUE
          WHERE id = $4
-         RETURNING id, name, email, role, balance, owner_user_id`,
+         RETURNING id, name, email, role, balance, owner_user_id, COALESCE(is_enabled, TRUE) AS is_enabled`,
         [cleanName, hashedPassword, req.user.id, existingUser.id, cleanEmail]
       );
 
@@ -4209,9 +4380,9 @@ app.post("/api/distributor/resellers", authMiddleware, distributorMiddleware, as
     }
 
     const result = await pool.query(
-      `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
-       VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
-       RETURNING id, name, email, role, balance, owner_user_id`,
+      `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin, is_enabled)
+       VALUES ($1, $2, $3, 'user', 0, $4, FALSE, TRUE)
+       RETURNING id, name, email, role, balance, owner_user_id, COALESCE(is_enabled, TRUE) AS is_enabled`,
       [cleanName, cleanEmail, hashedPassword, req.user.id]
     );
 
@@ -4299,10 +4470,11 @@ app.post("/api/distributor/resellers/:id/reset-access", authMiddleware, distribu
            password = $1,
            role = 'user',
            owner_user_id = $2,
-           is_subadmin = FALSE
+           is_subadmin = FALSE,
+           is_enabled = TRUE
        WHERE id = $3
          AND (owner_user_id = $2 OR owner_user_id IS NULL OR owner_user_id = 0)
-       RETURNING id, name, email, role, balance, owner_user_id`,
+       RETURNING id, name, email, role, balance, owner_user_id, COALESCE(is_enabled, TRUE) AS is_enabled`,
       [hashedPassword, req.user.id, resellerId]
     );
 
@@ -4356,16 +4528,17 @@ app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distribut
              password = $3,
              role = 'user',
              owner_user_id = $4,
-             is_subadmin = FALSE
+             is_subadmin = FALSE,
+             is_enabled = TRUE
          WHERE id = $5
-         RETURNING id, name, email, role, balance, owner_user_id`,
+         RETURNING id, name, email, role, balance, owner_user_id, COALESCE(is_enabled, TRUE) AS is_enabled`,
         [cleanName, cleanEmail, hashedPassword, req.user.id, existingUser.id]
       );
     } else {
       result = await pool.query(
-        `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin)
-         VALUES ($1, $2, $3, 'user', 0, $4, FALSE)
-         RETURNING id, name, email, role, balance, owner_user_id`,
+        `INSERT INTO users (name, email, password, role, balance, owner_user_id, is_subadmin, is_enabled)
+         VALUES ($1, $2, $3, 'user', 0, $4, FALSE, TRUE)
+         RETURNING id, name, email, role, balance, owner_user_id, COALESCE(is_enabled, TRUE) AS is_enabled`,
         [cleanName, cleanEmail, hashedPassword, req.user.id]
       );
     }
@@ -4374,6 +4547,62 @@ app.post("/api/distributor/resellers/repair-by-email", authMiddleware, distribut
   } catch (err) {
     console.error("Error reparando acceso por correo:", err.message);
     res.status(500).json({ error: "Error reparando acceso por correo" });
+  }
+});
+
+app.patch("/api/distributor/resellers/:id/status", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const resellerId = Number(req.params.id);
+    const { enabled } = req.body;
+
+    if (!resellerId || typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "ID y estado habilitado son obligatorios" });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET is_enabled = $1
+       WHERE id = $2 AND owner_user_id = $3
+       RETURNING id, name, email, COALESCE(is_enabled, TRUE) AS is_enabled`,
+      [enabled, resellerId, req.user.id]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "Vendedor no encontrado en tu panel" });
+    }
+
+    res.json({ message: enabled ? "Vendedor habilitado correctamente" : "Vendedor deshabilitado correctamente", user: result.rows[0] });
+  } catch (err) {
+    console.error("Error cambiando estado de vendedor:", err.message);
+    res.status(500).json({ error: "Error cambiando estado del vendedor" });
+  }
+});
+
+app.post("/api/distributor/resellers/disable-inactive", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE users u
+       SET is_enabled = FALSE
+       WHERE u.owner_user_id = $1
+         AND COALESCE(u.is_enabled, TRUE) = TRUE
+         AND NOT EXISTS (
+           SELECT 1
+           FROM (
+             SELECT o.created_at AS ts FROM orders o WHERE o.user_id = u.id AND o.created_at >= NOW() - INTERVAL '2 months'
+             UNION ALL
+             SELECT br.created_at AS ts FROM balance_requests br WHERE br.user_id = u.id AND br.created_at >= NOW() - INTERVAL '2 months'
+             UNION ALL
+             SELECT ar.created_at AS ts FROM account_reports ar WHERE ar.user_id = u.id AND ar.created_at >= NOW() - INTERVAL '2 months'
+           ) mov
+         )
+       RETURNING u.id`,
+      [req.user.id]
+    );
+
+    res.json({ message: `Se deshabilitaron ${result.rowCount || 0} vendedores sin movimientos en los últimos 2 meses`, affected: Number(result.rowCount || 0) });
+  } catch (err) {
+    console.error("Error deshabilitando vendedores inactivos:", err.message);
+    res.status(500).json({ error: "Error deshabilitando vendedores inactivos" });
   }
 });
 

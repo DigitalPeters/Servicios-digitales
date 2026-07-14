@@ -632,16 +632,6 @@
   .shop-products-view-block .shop-grid,
   .shop-categories-grid{grid-template-columns:1fr}
   .shop-card-head{gap:8px}
-}
-
-@media(max-width:520px){
-  .shop-product-list{grid-template-columns:1fr}
-  .shop-list-item,
-  .shop-card,
-  .shop-list-head{
-    width:100%;
-    min-height:160px;
-  }
 
   .shop-list-head{
     align-items:center;
@@ -661,6 +651,16 @@
 
   .shop-list-head .shop-expand{
     margin-top:8px;
+  }
+}
+
+@media(max-width:520px){
+  .shop-product-list{grid-template-columns:1fr}
+  .shop-list-item,
+  .shop-card,
+  .shop-list-head{
+    width:100%;
+    min-height:160px;
   }
 }
 
