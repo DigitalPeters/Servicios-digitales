@@ -642,6 +642,26 @@
     width:100%;
     min-height:160px;
   }
+
+  .shop-list-head{
+    align-items:center;
+    text-align:center;
+  }
+
+  .shop-card-main,
+  .shop-card-main .product-name,
+  .shop-card-price-wrap,
+  .shop-card-price-wrap .price,
+  .shop-card-price-wrap .stock{
+    width:100%;
+    text-align:center;
+    align-items:center;
+    justify-content:center;
+  }
+
+  .shop-list-head .shop-expand{
+    margin-top:8px;
+  }
 }
 
 /* ===== Dashboard Light Mode Premium (override final) ===== */
