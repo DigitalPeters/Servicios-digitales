@@ -275,19 +275,19 @@ const pool = new Pool({
 
 console.log("DATABASE_URL existe:", !!process.env.DATABASE_URL);
 
-async function markAccountAsSold(client, accountId, orderId, userId) {
+async function markAccountAsSold(client, accountId, orderId, userId, isReusableSale = false) {
     try {
         console.log(`[INVENTARIO] Intentando descontar cuenta ${accountId} para pedido ${orderId}`);
         
         const result = await client.query(`
             UPDATE platform_accounts 
-            SET status = CASE WHEN reusable = 1 THEN status ELSE 'delivered' END,
+            SET status = CASE WHEN $4 = true THEN status ELSE 'delivered' END,
                 assigned_order_id = $1, 
                 assigned_user_id = $2, 
                 delivered_at = NOW() 
-            WHERE id = $3 AND (status = 'available' OR reusable = 1)
+            WHERE id = $3 AND (status = 'available' OR ($4 = true AND reusable = 1))
             RETURNING id, reusable;
-        `, [orderId, userId, accountId]);
+        `, [orderId, userId, accountId, isReusableSale]);
 
         if (result.rowCount === 0) {
             throw new Error(`La cuenta ${accountId} ya no está disponible o no existe.`);
@@ -1670,25 +1670,33 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     );
 
     const isPlatformProduct =
-  String(product.product_type || '').toLowerCase() === 'streaming_auto';
-console.log(
-  'PRODUCTO:',
-  product.name,
-  'TIPO:',
-  product.product_type,
-  'AUTO:',
-  isPlatformProduct
-);
+      String(product.product_type || '').toLowerCase() === 'streaming_auto';
+    const isReusableProduct = isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
+
+    console.log(
+      'PRODUCTO:',
+      product.name,
+      'TIPO:',
+      product.product_type,
+      'AUTO:',
+      isPlatformProduct,
+      'REUSABLE:',
+      isReusableProduct
+    );
     let assignedAccount = null;
     let deliveredAccountData = "";
     let orderStatus = "accion_en_espera";
     let adminResponse = "";
 
     if (isPlatformProduct) {
+      const availableCondition = isReusableProduct
+        ? "(status = 'available' OR reusable = 1)"
+        : "status = 'available'";
+
       const availableAccountResult = await client.query(
         `SELECT *
          FROM platform_accounts
-         WHERE (status = 'available' OR reusable = 1)
+         WHERE ${availableCondition}
            AND (
              lower(product_name) = lower($1)
              OR lower(platform) = lower($1)
@@ -1709,6 +1717,13 @@ console.log(
         });
       }
 
+      const isReusableSale = isPdfOrCourseProduct(
+        productName,
+        productCategory,
+        product.product_type,
+        assignedAccount
+      );
+
       deliveredAccountData = buildDeliveredAccountData(
         assignedAccount,
         productName,
@@ -1719,6 +1734,7 @@ console.log(
 
       orderStatus = "exito";
       adminResponse = deliveredAccountData;
+      assignedAccount.isReusableSale = isReusableSale;
     }
 
     const charged = chargeMode === "on_purchase" ? 1 : 0;
@@ -1756,8 +1772,8 @@ console.log(
     const newOrderId = orderInsertResult.rows[0].id;
 
 if (assignedAccount) {
-    // LLAMAMOS A LA FUNCIÓN NUEVA
-    await markAccountAsSold(client, assignedAccount.id, newOrderId, userId);
+    const isReusableSale = assignedAccount.isReusableSale === true;
+    await markAccountAsSold(client, assignedAccount.id, newOrderId, userId, isReusableSale);
     
     // Si la función de arriba falla, el código salta al catch y hace ROLLBACK
     // por lo tanto, aquí ya puedes estar seguro de que la cuenta está entregada.
