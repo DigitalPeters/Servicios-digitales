@@ -2530,9 +2530,15 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
 app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const { enabled } = req.body;
+    const rawEnabled = req.body?.enabled;
+    const enabled =
+      rawEnabled === true || rawEnabled === "true" || rawEnabled === 1 || rawEnabled === "1"
+        ? true
+        : rawEnabled === false || rawEnabled === "false" || rawEnabled === 0 || rawEnabled === "0"
+          ? false
+          : null;
 
-    if (!userId || typeof enabled !== "boolean") {
+    if (!userId || enabled === null) {
       return res.status(400).json({ error: "ID y estado habilitado son obligatorios" });
     }
 
@@ -2541,7 +2547,7 @@ app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, as
     }
 
     const targetResult = await pool.query(
-      `SELECT id, role, owner_user_id, COALESCE(is_panel_admin, false) AS is_panel_admin
+      `SELECT id, role, owner_user_id
        FROM users
        WHERE id = $1
        LIMIT 1`,
