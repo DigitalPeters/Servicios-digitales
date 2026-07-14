@@ -281,12 +281,12 @@ async function markAccountAsSold(client, accountId, orderId, userId) {
         
         const result = await client.query(`
             UPDATE platform_accounts 
-            SET status = 'delivered', 
+            SET status = CASE WHEN reusable = 1 THEN status ELSE 'delivered' END,
                 assigned_order_id = $1, 
                 assigned_user_id = $2, 
                 delivered_at = NOW() 
-            WHERE id = $3 AND status = 'available'
-            RETURNING id;
+            WHERE id = $3 AND (status = 'available' OR reusable = 1)
+            RETURNING id, reusable;
         `, [orderId, userId, accountId]);
 
         if (result.rowCount === 0) {
@@ -538,7 +538,7 @@ function dynamicStockSubquery(productAlias = "products") {
   return `COALESCE((
     SELECT COUNT(*)::int
     FROM platform_accounts pa
-    WHERE pa.status IN ('available', 'disponible')
+    WHERE (pa.status IN ('available', 'disponible') OR pa.reusable = 1)
       AND (
         (${productAlias}.owner_admin_id IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
         OR pa.owner_admin_id = ${productAlias}.owner_admin_id
@@ -1513,9 +1513,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     await client.query("BEGIN");
     console.log("--- INICIO DE COMPRA ---");
-console.log("Producto ID:", productId, "Usuario ID:", userId);
-// Agrega esto para ver qué cuenta está seleccionando
-console.log("Buscando cuenta para:", productName, productCategory);
+    console.log("Producto ID:", productId, "Usuario ID:", userId);
 
     const viewerContext = await getViewerContext(userId, client);
     const ownerFilter = adminOwnedWhere(viewerContext, "p");
@@ -1660,6 +1658,8 @@ console.log("Buscando cuenta para:", productName, productCategory);
     const productName = String(product.name || "").trim();
     const productCategory = String(product.category || "").trim();
 
+    console.log("Buscando cuenta para:", productName, productCategory);
+
     const platformCountResult = await client.query(
       `SELECT COUNT(*)::int AS total
        FROM platform_accounts
@@ -1688,7 +1688,7 @@ console.log(
       const availableAccountResult = await client.query(
         `SELECT *
          FROM platform_accounts
-         WHERE status = 'available'
+         WHERE (status = 'available' OR reusable = 1)
            AND (
              lower(product_name) = lower($1)
              OR lower(platform) = lower($1)
