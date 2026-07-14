@@ -28,7 +28,13 @@ function showSection(name) {
 
   document.getElementById('sidebar')?.classList.remove('show');
 
-  if (normalizedName === 'shop' && !allProducts.length) loadProducts();
+  if (normalizedName === 'shop') {
+    if (!allProducts.length && typeof loadProducts === 'function') {
+      loadProducts();
+    } else if (typeof renderShopHome === 'function') {
+      renderShopHome();
+    }
+  }
   if (normalizedName === 'orders') loadMyOrders();
 
   if (normalizedName === 'admin' && currentUser?.role === 'admin') {
@@ -556,7 +562,7 @@ async function searchInventoryHistory() {
   const timelinePanel = document.getElementById('inventoryHistoryTimeline');
 
   if (!query) {
-    alert('Por favor ingresa un correo madre, perfil, PIN o pedido para buscar la historia de inventario.');
+    alert('Por favor ingresa un correo madre, correo de cliente, nombre, perfil, PIN o número de pedido para buscar la historia de inventario.');
     return;
   }
 

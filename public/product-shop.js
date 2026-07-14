@@ -1,13 +1,18 @@
+let currentShopCategory = null;
+
 async function loadProducts() {
   allProducts = await api('/api/products');
-  statProducts.textContent = allProducts.length;
-  adminProductsCount.textContent = allProducts.length;
+  const statProductsEl = document.getElementById('statProducts');
+  const adminProductsCountEl = document.getElementById('adminProductsCount');
+  if (statProductsEl) statProductsEl.textContent = String(allProducts.length);
+  if (adminProductsCountEl) adminProductsCountEl.textContent = String(allProducts.length);
   buildCategoryFilter();
-  renderProducts(allProducts);
+  renderShopHome();
 }
 
 function buildCategoryFilter() {
-  const sel = categoryFilter;
+  const sel = document.getElementById('categoryFilter');
+  if (!sel) return;
   const cur = sel.value;
   const cats = [...new Set(allProducts.map((p) => p.category || 'Otros'))].sort();
   sel.innerHTML =
@@ -16,9 +21,61 @@ function buildCategoryFilter() {
   sel.value = cur;
 }
 
+function renderShopHome() {
+  currentShopCategory = null;
+  setShopMode('categories');
+  renderCategoriesOnly(allProducts);
+}
+
+function setShopMode(mode) {
+  const section = document.getElementById('section-shop');
+  if (!section) return;
+  section.classList.remove('shop-view-categories', 'shop-view-products');
+  section.classList.add(mode === 'products' ? 'shop-view-products' : 'shop-view-categories');
+}
+
+function renderCategoriesOnly(products) {
+  const productsListEl = document.getElementById('productsList');
+  if (!productsListEl) return;
+  const byCategory = {};
+  products.forEach((p) => {
+    const category = p.category || 'Otros';
+    (byCategory[category] = byCategory[category] || []).push(p);
+  });
+
+  const categories = Object.keys(byCategory).sort();
+  productsListEl.innerHTML = `
+    <div class="shop-categories-grid">
+      ${categories
+        .map((category) => {
+          const items = byCategory[category];
+          const available = items.filter((p) => Number(p.stock_enabled || 0) !== 1 || Number(p.stock || 0) > 0).length;
+          return `
+            <button class="shop-category-card" type="button" data-category="${safeText(category)}" onclick="openShopCategory(this.dataset.category)">
+              <div class="shop-category-card-icon">▶</div>
+              <div class="shop-category-card-main">
+                <div class="shop-category-card-name">${safeText(category)}</div>
+                <div class="shop-category-card-meta">${items.length} producto${items.length === 1 ? '' : 's'} • ${available} con stock</div>
+              </div>
+            </button>`;
+        })
+        .join('')}
+    </div>`;
+}
+
+function openShopCategory(category) {
+  currentShopCategory = String(category || '').trim() || null;
+  setShopMode('products');
+  filterProducts();
+}
+
+function backToShopCategories() {
+  renderShopHome();
+}
+
 function filterProducts() {
-  const term = (productSearch?.value || globalSearch?.value || '').toLowerCase();
-  const cat = categoryFilter?.value || '';
+  const term = '';
+  const cat = currentShopCategory || '';
   const filtered = allProducts.filter(
     (p) =>
       (!term ||
@@ -26,63 +83,102 @@ function filterProducts() {
         String(p.category || '').toLowerCase().includes(term)) &&
       (!cat || (p.category || 'Otros') === cat)
   );
+  if (!currentShopCategory) {
+    renderCategoriesOnly(filtered);
+    return;
+  }
   renderProducts(filtered);
 }
 
 function renderProducts(products) {
-  let html = '';
-  const cats = {};
-  products.forEach((p) => {
-    const c = p.category || 'Otros';
-    (cats[c] = cats[c] || []).push(p);
-  });
-  Object.keys(cats)
-    .sort()
-    .forEach((c) => {
-      const items = cats[c];
-      html += `
-      <section class="shop-category-block">
-        <header class="shop-category-head">
-          <h3 class="shop-category-name">${safeText(c)}</h3>
-          <span class="shop-category-count">${items.length} producto${items.length === 1 ? '' : 's'}</span>
-        </header>
-        <div class="shop-grid">${items.map(renderProductRow).join('')}</div>
-      </section>`;
-    });
-  productsList.innerHTML = html || 'No hay productos.';
+  const productsListEl = document.getElementById('productsList');
+  if (!productsListEl) return;
+  const title = currentShopCategory ? safeText(currentShopCategory) : 'Productos';
+  productsListEl.innerHTML = `
+    <section class="shop-category-block shop-products-view-block">
+      <header class="shop-category-head">
+        <button class="outline-btn shop-back-btn" type="button" onclick="backToShopCategories()">◀ Categorias</button>
+        <h3 class="shop-category-name">${title}</h3>
+        <span class="shop-category-count">${products.length} producto${products.length === 1 ? '' : 's'}</span>
+      </header>
+      <div class="shop-product-list">${products.map(renderProductRow).join('')}</div>
+    </section>`;
 }
 
 function renderProductRow(product) {
   const stockEnabled = Number(product.stock_enabled || 0) === 1;
   const stock = Number(product.stock || 0);
   const soldOut = stockEnabled && stock <= 0;
+  const stackedName = String(product.name || '').replace(/\s+/g, '<br>');
 
-    return `<article class="shop-card product-row" data-product-id="${product.id}">
-      <button class="shop-card-head product-header" type="button" onclick="toggleProduct(${product.id})">
-            <div class="shop-card-main">
-                <div class="product-name">${safeText(product.name)}</div>
-        </div>
-        <div class="shop-card-price-wrap">
-          <div class="price">$${formatMoney(product.price)}</div>
-          ${stockEnabled ? `<div class="stock ${soldOut ? 'out' : ''}">${soldOut ? 'Sin stock' : 'Stock: ' + stock}</div>` : '<div class="stock">Sin límite</div>'}
-        </div>
-            <div class="shop-expand">⌄</div>
-      </button>
-      <div id="product-details-${product.id}" class="product-details shop-card-details">
-        <p class="product-description">${safeText(product.description || '')}</p>
-        <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
-        ${renderProductInputs(product)}
-        <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? 'Sin stock' : 'Comprar'}</button>
+  return `<article class="shop-card product-row shop-list-item" data-product-id="${product.id}">
+    <button class="shop-card-head product-header shop-list-head" type="button" onclick="openProductModal(${product.id})">
+      <div class="shop-card-main">
+        <div class="product-name">${stackedName || safeText(product.name)}</div>
       </div>
-    </article>`;
+      <div class="shop-card-price-wrap">
+        <div class="price">$${formatMoney(product.price)}</div>
+        ${stockEnabled ? `<div class="stock ${soldOut ? 'out' : ''}">${soldOut ? 'Sin stock' : 'Stock: ' + stock}</div>` : '<div class="stock">Sin límite</div>'}
+      </div>
+      <div class="shop-expand">Ver</div>
+    </button>
+  </article>`;
 }
 
 function toggleProduct(id) {
   const row = document.querySelector(`.product-row[data-product-id="${id}"]`);
   if (!row) return;
-  const open = row.classList.contains('open');
+  const isOpen = row.classList.contains('open');
   document.querySelectorAll('.product-row').forEach((r) => r.classList.remove('open'));
-  if (!open) row.classList.add('open');
+  if (!isOpen) row.classList.add('open');
+}
+
+function ensureShopProductModal() {
+  if (document.getElementById('shopProductModal')) return;
+  const html = `
+    <div id="shopProductModal" class="modal-overlay hidden" aria-hidden="true">
+      <div class="modal-card shop-product-modal-card">
+        <button class="modal-close-btn" type="button" onclick="closeProductModal()" aria-label="Cerrar">×</button>
+        <div id="shopProductModalBody"></div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function openProductModal(productId) {
+  ensureShopProductModal();
+  const modal = document.getElementById('shopProductModal');
+  const body = document.getElementById('shopProductModalBody');
+  if (!modal || !body) return;
+
+  const product = allProducts.find((p) => Number(p.id) === Number(productId));
+  if (!product) return;
+
+  const stockEnabled = Number(product.stock_enabled || 0) === 1;
+  const stock = Number(product.stock || 0);
+  const soldOut = stockEnabled && stock <= 0;
+
+  body.innerHTML = `
+    <div class="modal-head">
+      <h2>${safeText(product.name || 'Producto')}</h2>
+      <p class="small-text">${safeText(product.category || 'Categoria')}</p>
+    </div>
+    <p class="product-description">${safeText(product.description || 'Sin descripción disponible.')}</p>
+    <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
+    <div class="shop-modal-price">$${formatMoney(product.price)}</div>
+    <div class="shop-modal-stock ${soldOut ? 'out' : ''}">${stockEnabled ? (soldOut ? 'Sin stock' : 'Stock: ' + stock) : 'Sin límite'}</div>
+    ${renderProductInputs(product)}
+    <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? 'Sin stock' : 'Comprar'}</button>`;
+
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeProductModal() {
+  const modal = document.getElementById('shopProductModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
 }
 
 function renderProductInputs(product) {
@@ -145,6 +241,7 @@ async function buyProduct(productId) {
       })
     });
 
+    closeProductModal();
     showMessage(data.message || 'Compra realizada');
     if (data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
     showSection('orders');
@@ -165,3 +262,10 @@ function convertFileToBase64(file) {
     reader.onerror = (error) => reject(error);
   });
 }
+
+window.openShopCategory = openShopCategory;
+window.backToShopCategories = backToShopCategories;
+window.toggleProduct = toggleProduct;
+window.openProductModal = openProductModal;
+window.closeProductModal = closeProductModal;
+window.renderShopHome = renderShopHome;

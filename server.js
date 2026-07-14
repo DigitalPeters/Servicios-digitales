@@ -538,15 +538,14 @@ function dynamicStockSubquery(productAlias = "products") {
   return `COALESCE((
     SELECT COUNT(*)::int
     FROM platform_accounts pa
-    WHERE (pa.status IN ('available', 'disponible') OR pa.reusable = 1)
+    WHERE pa.status IN ('available', 'disponible')
       AND (
         (${productAlias}.owner_admin_id IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
         OR pa.owner_admin_id = ${productAlias}.owner_admin_id
       )
       AND (
-        lower(pa.product_name) = lower(${productAlias}.name)
+        lower(COALESCE(NULLIF(TRIM(pa.product_name), ''), NULLIF(TRIM(pa.platform), ''))) = lower(${productAlias}.name)
         OR lower(pa.platform) = lower(${productAlias}.name)
-        OR lower(pa.platform) = lower(${productAlias}.category)
       )
   ), 0)`;
 }
@@ -4654,8 +4653,11 @@ app.get('/api/admin/inventory-history', authMiddleware, adminMiddleware, async (
         if (!search) {
             return res.status(400).json({ error: 'Se requiere q=texto de búsqueda' });
         }
-        const lowerSearch = search.toLowerCase();
+    const lowerSearch = search.toLowerCase();
     const likeSearch = `%${lowerSearch}%`;
+    const likeRawSearch = `%${search}%`;
+    const normalizedSearch = lowerSearch.replace(/\s+/g, '');
+    const likeNormalizedSearch = `%${normalizedSearch}%`;
 
         const query = `
             SELECT 
@@ -4683,14 +4685,21 @@ app.get('/api/admin/inventory-history', authMiddleware, adminMiddleware, async (
             LEFT JOIN orders o ON pa.assigned_order_id = o.id
             LEFT JOIN users u ON pa.assigned_user_id = u.id
             WHERE lower(pa.account_email) LIKE $1
+              OR regexp_replace(lower(COALESCE(pa.account_email, '')), '\\s+', '', 'g') LIKE $3
               OR lower(pa.profile_name) LIKE $1
+              OR regexp_replace(lower(COALESCE(pa.profile_name, '')), '\\s+', '', 'g') LIKE $3
               OR lower(pa.profile_pin) LIKE $1
-               OR pa.assigned_order_id::text = $2
-               OR o.id::text = $2
+              OR regexp_replace(lower(COALESCE(pa.profile_pin, '')), '\\s+', '', 'g') LIKE $3
+              OR lower(COALESCE(u.email, '')) LIKE $1
+              OR regexp_replace(lower(COALESCE(u.email, '')), '\\s+', '', 'g') LIKE $3
+              OR lower(COALESCE(u.name, '')) LIKE $1
+              OR regexp_replace(lower(COALESCE(u.name, '')), '\\s+', '', 'g') LIKE $3
+               OR pa.assigned_order_id::text LIKE $2
+               OR o.id::text LIKE $2
             ORDER BY pa.created_at ASC, pa.delivered_at ASC;
         `;
 
-          const result = await pool.query(query, [likeSearch, search]);
+        const result = await pool.query(query, [likeSearch, likeRawSearch, likeNormalizedSearch]);
         const rows = result.rows || [];
 
         res.json({ events: rows });
