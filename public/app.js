@@ -16,7 +16,7 @@ function showSection(name) {
 
   document.getElementById('sidebar')?.classList.remove('show');
 
-  if (name === 'shop') loadProducts();
+  if (name === 'shop' && !allProducts.length) loadProducts();
   if (name === 'orders') loadMyOrders();
 
   if (name === 'admin' && currentUser?.role === 'admin') {
@@ -293,11 +293,12 @@ async function buyProduct(productId) {
     
     showMessage(data.message || 'Compra realizada');
     if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
-    await Promise.allSettled([
-      loadMyOrders(),
-      loadProducts()
-    ]);
     showSection('orders');
+    loadMyOrders().catch(e => console.warn('Error recargando pedidos:', e));
+    if (allProducts.length) {
+      loadProducts().catch(e => console.warn('Error recargando productos:', e));
+    }
+
     
   } catch (e) {
     showMessage(e.message, 'error');

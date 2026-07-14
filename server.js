@@ -1285,11 +1285,65 @@ app.get("/api/products", authMiddleware, async (req, res) => {
     );
 
     const products = [];
+    const productIds = result.rows.map(p => Number(p.id)).filter(n => Number.isInteger(n) && n > 0);
+    const customPriceMap = new Map();
+    const ownerPriceMap = new Map();
+    const resellerPriceMap = new Map();
+
+    if (viewer.role !== "admin" && productIds.length) {
+      if (viewer.owner_user_id) {
+        const resellerPrices = await pool.query(
+          `SELECT product_id, sale_price
+           FROM subadmin_reseller_prices
+           WHERE owner_user_id = $1
+             AND product_id = ANY($2::int[])`,
+          [viewer.owner_user_id, productIds]
+        );
+        resellerPrices.rows.forEach(row => {
+          resellerPriceMap.set(Number(row.product_id), Number(row.sale_price || 0));
+        });
+
+        const ownerPrices = await pool.query(
+          `SELECT product_id, sale_price
+           FROM user_product_prices
+           WHERE user_id = $1
+             AND product_id = ANY($2::int[])`,
+          [viewer.owner_user_id, productIds]
+        );
+        ownerPrices.rows.forEach(row => {
+          ownerPriceMap.set(Number(row.product_id), Number(row.sale_price || 0));
+        });
+      } else {
+        const customPrices = await pool.query(
+          `SELECT product_id, sale_price
+           FROM user_product_prices
+           WHERE user_id = $1
+             AND product_id = ANY($2::int[])`,
+          [viewer.id, productIds]
+        );
+        customPrices.rows.forEach(row => {
+          customPriceMap.set(Number(row.product_id), Number(row.sale_price || 0));
+        });
+      }
+    }
 
     for (const product of result.rows) {
       const effectivePrice = String(product.product_type || '').toLowerCase() === 'combo_auto'
         ? await calculateComboPrice(pool, viewer, product)
-        : await getEffectiveProductPrice(pool, viewer, product);
+        : (() => {
+            if (viewer.role === "admin") {
+              return Number(product.price || 0);
+            }
+            if (viewer.owner_user_id) {
+              const pid = Number(product.id);
+              if (resellerPriceMap.has(pid)) return resellerPriceMap.get(pid);
+              if (ownerPriceMap.has(pid)) return ownerPriceMap.get(pid);
+              return Number(product.price || 0);
+            }
+            const pid = Number(product.id);
+            if (customPriceMap.has(pid)) return customPriceMap.get(pid);
+            return Number(product.price || 0);
+          })();
       const cleanProduct = {
         ...product,
         base_price: product.price,
