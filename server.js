@@ -551,6 +551,23 @@ function dynamicStockSubquery(productAlias = "products") {
   ), 0)`;
 }
 
+function effectiveStockExpression(productAlias = "products") {
+  return `CASE
+    WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) LIKE '%manual%'
+      THEN GREATEST(0, COALESCE(${productAlias}.stock, 0))::int
+    ELSE ${dynamicStockSubquery(productAlias)}
+  END`;
+}
+
+function normalizeProductType(value) {
+  const clean = String(value || "streaming_auto").trim().toLowerCase();
+  if (!clean) return "streaming_auto";
+  if (clean.includes("manual")) return "manual";
+  if (clean.includes("combo")) return "combo_auto";
+  if (clean.includes("auto") || clean.includes("automatic")) return "streaming_auto";
+  return ["streaming_auto", "manual", "combo_auto"].includes(clean) ? clean : "streaming_auto";
+}
+
 async function getEffectiveProductPrice(client, user, product) {
   const fallbackPrice = Number(product.price || 0);
 
@@ -821,19 +838,6 @@ async function initDatabase() {
 
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS announcements (
-      id SERIAL PRIMARY KEY,
-      message TEXT NOT NULL,
-      active INTEGER DEFAULT 1,
-      owner_admin_id INTEGER,
-      created_at TIMESTAMP DEFAULT NOW()
-    )
-  `);
-  await pool.query(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
-
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_panels (
       id SERIAL PRIMARY KEY,
@@ -877,6 +881,9 @@ async function initDatabase() {
   await pool.query(`UPDATE products SET stock_enabled = 0 WHERE stock_enabled IS NULL`);
   await pool.query(`UPDATE products SET stock = 0 WHERE stock IS NULL`);
   await pool.query(`UPDATE products SET product_type = 'streaming_auto' WHERE product_type IS NULL OR product_type = ''`);
+  await pool.query(`UPDATE products SET product_type = 'manual' WHERE lower(trim(product_type)) LIKE '%manual%'`);
+  await pool.query(`UPDATE products SET product_type = 'combo_auto' WHERE lower(trim(product_type)) LIKE '%combo%'`);
+  await pool.query(`UPDATE products SET product_type = 'streaming_auto' WHERE lower(trim(product_type)) LIKE '%auto%' AND lower(trim(product_type)) <> 'combo_auto'`);
   await pool.query(`UPDATE products SET combo_items = '[]' WHERE combo_items IS NULL OR combo_items = ''`);
   await pool.query(`UPDATE products SET combo_discount = 0 WHERE combo_discount IS NULL`);
   await pool.query(`UPDATE orders SET order_data = '{}' WHERE order_data IS NULL`);
@@ -1059,7 +1066,7 @@ async function getComboItems(client, comboItemsValue) {
 
   const result = await client.query(
     `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
-            ${dynamicStockSubquery("p")} AS stock,
+            ${effectiveStockExpression("p")} AS stock,
             p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
      FROM products p
      WHERE p.id = ANY($1::int[]) AND p.active = 1`,
@@ -1276,7 +1283,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
 
     const result = await pool.query(
       `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
-              ${dynamicStockSubquery("p")} AS stock,
+              ${effectiveStockExpression("p")} AS stock,
               p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
        FROM products p
        WHERE p.active = 1 AND ${owner.clause}
@@ -1346,6 +1353,10 @@ app.get("/api/products", authMiddleware, async (req, res) => {
           })();
       const cleanProduct = {
         ...product,
+        product_type: normalizeProductType(product.product_type),
+        stock_enabled: normalizeProductType(product.product_type) === 'manual'
+          ? Number(product.stock_enabled || 0)
+          : 1,
         base_price: product.price,
         price: effectivePrice
       };
@@ -1386,6 +1397,12 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
       .map(field => normalizeFieldName(field))
       .filter(field => field.length > 0);
 
+    const normalizedType = normalizeProductType(product_type);
+    const normalizedStock = Math.max(0, Number(stock || 0));
+    const normalizedStockEnabled = normalizedType === 'manual'
+      ? ((stock_enabled === true || stock_enabled === 1 || stock_enabled === '1' || normalizedStock > 0) ? 1 : 0)
+      : 1;
+
     await pool.query(
       `INSERT INTO products
        (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id)
@@ -1398,9 +1415,9 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
         category || "Otros",
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
-        stock_enabled ? 1 : 0,
-        Math.max(0, Number(stock || 0)),
-        ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
+        normalizedStockEnabled,
+        normalizedStock,
+        normalizedType,
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
         req.isPanelAdmin ? req.user.id : null
@@ -1437,6 +1454,12 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
       .map(field => normalizeFieldName(field))
       .filter(field => field.length > 0);
 
+    const normalizedType = normalizeProductType(product_type);
+    const normalizedStock = Math.max(0, Number(stock || 0));
+    const normalizedStockEnabled = normalizedType === 'manual'
+      ? ((stock_enabled === true || stock_enabled === 1 || stock_enabled === '1' || normalizedStock > 0) ? 1 : 0)
+      : 1;
+
     const result = await pool.query(
       `UPDATE products
        SET name = $1,
@@ -1460,9 +1483,9 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
         category || "Otros",
         JSON.stringify([...new Set(cleanFields)]),
         finalChargeMode,
-        stock_enabled ? 1 : 0,
-        Math.max(0, Number(stock || 0)),
-        ['streaming_auto','manual','combo_auto'].includes(product_type) ? product_type : 'streaming_auto',
+        normalizedStockEnabled,
+        normalizedStock,
+        normalizedType,
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
         productId,
@@ -1519,7 +1542,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const ownerFilter = adminOwnedWhere(viewerContext, "p");
     const productResult = await client.query(
       `SELECT p.*,
-              ${dynamicStockSubquery("p")} AS stock
+              ${effectiveStockExpression("p")} AS stock
        FROM products p
        WHERE p.id = $1 AND p.active = 1 AND ${ownerFilter.clause}
        FOR UPDATE`,
@@ -1533,7 +1556,12 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
-    if (Number(product.stock_enabled || 0) === 1 && Number(product.stock || 0) <= 0) {
+    const productType = normalizeProductType(product.product_type);
+    const enforceStock = productType === 'manual'
+      ? Number(product.stock_enabled || 0) === 1
+      : true;
+
+    if (enforceStock && Number(product.stock || 0) <= 0) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Producto agotado. No hay stock disponible." });
     }
@@ -1561,7 +1589,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    const isComboProduct = String(product.product_type || '').toLowerCase() === 'combo_auto';
+    const isComboProduct = productType === 'combo_auto';
     const price = isComboProduct
       ? await calculateComboPrice(client, user, product)
       : await getEffectiveProductPrice(client, user, product);
@@ -1634,7 +1662,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         );
       }
 
-      if (Number(product.stock_enabled || 0) === 1) {
+      if (Number(product.stock_enabled || 0) === 1 && normalizeProductType(product.product_type) === 'manual') {
         await client.query(`UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`, [productId]);
       }
 
@@ -1660,17 +1688,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     console.log("Buscando cuenta para:", productName, productCategory);
 
-    const platformCountResult = await client.query(
-      `SELECT COUNT(*)::int AS total
-       FROM platform_accounts
-       WHERE lower(product_name) = lower($1)
-          OR lower(platform) = lower($1)
-          OR lower(platform) = lower($2)`,
-      [productName, productCategory]
-    );
-
-    const isPlatformProduct =
-      String(product.product_type || '').toLowerCase() === 'streaming_auto';
+    const isPlatformProduct = productType === 'streaming_auto';
     const isReusableProduct = isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
 
     console.log(
@@ -1777,12 +1795,12 @@ if (assignedAccount) {
     
     // Si la función de arriba falla, el código salta al catch y hace ROLLBACK
     // por lo tanto, aquí ya puedes estar seguro de que la cuenta está entregada.
-} else {
+} else if (isPlatformProduct) {
     // Si no hay cuenta, cancelamos la compra
     await client.query("ROLLBACK");
     return res.status(400).json({ error: "No se pudo asignar cuenta." });
 }
-if (Number(product.stock_enabled || 0) === 1) {
+if (Number(product.stock_enabled || 0) === 1 && normalizeProductType(product.product_type) === 'manual') {
     await client.query(
         `UPDATE products
          SET stock = stock - 1
@@ -3293,6 +3311,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       profile_pin,
       access_url,
       extra_data,
+      official_purchase_date,
       reported_account_id,
       replacement_account_id
     } = req.body || {};
@@ -3356,8 +3375,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       const insertAccountResult = await client.query(
         `INSERT INTO platform_accounts
          (platform, product_name, account_email, account_password, profile_name, profile_pin,
-          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12)
+          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at, official_purchase_date)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12,$13)
          RETURNING *`,
         [
           replacementPlatform,
@@ -3371,7 +3390,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
           report.order_id,
           report.user_id,
           ownerAdminId,
-          expirationDate
+          expirationDate,
+          String(official_purchase_date || '').trim() || null
         ]
       );
 
@@ -4635,6 +4655,7 @@ app.get('/api/admin/inventory-history', authMiddleware, adminMiddleware, async (
             return res.status(400).json({ error: 'Se requiere q=texto de búsqueda' });
         }
         const lowerSearch = search.toLowerCase();
+    const likeSearch = `%${lowerSearch}%`;
 
         const query = `
             SELECT 
@@ -4661,15 +4682,15 @@ app.get('/api/admin/inventory-history', authMiddleware, adminMiddleware, async (
             FROM platform_accounts pa
             LEFT JOIN orders o ON pa.assigned_order_id = o.id
             LEFT JOIN users u ON pa.assigned_user_id = u.id
-            WHERE lower(pa.account_email) = $1
-               OR lower(pa.profile_name) = $1
-               OR lower(pa.profile_pin) = $1
+            WHERE lower(pa.account_email) LIKE $1
+              OR lower(pa.profile_name) LIKE $1
+              OR lower(pa.profile_pin) LIKE $1
                OR pa.assigned_order_id::text = $2
                OR o.id::text = $2
             ORDER BY pa.created_at ASC, pa.delivered_at ASC;
         `;
 
-        const result = await pool.query(query, [lowerSearch, search]);
+          const result = await pool.query(query, [likeSearch, search]);
         const rows = result.rows || [];
 
         res.json({ events: rows });
@@ -4848,92 +4869,6 @@ app.get("/api/bank-info", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("Error cargando datos bancarios:", err.message);
     res.status(500).json({ error: "Error cargando datos bancarios" });
-  }
-});
-
-// COMUNICADOS GLOBALES: visibles para todos los usuarios con sesión
-app.get("/api/announcements", authMiddleware, async (req, res) => {
-  try {
-    const viewer = await getViewerContext(req.user.id);
-    const owner = viewer?.owner_admin_id || null;
-    const result = await pool.query(
-      `SELECT id, message, active, created_at
-       FROM announcements
-       WHERE active = 1
-         AND (($1::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $1)
-       ORDER BY id DESC
-       LIMIT 10`,
-      [owner]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error cargando comunicados" });
-  }
-});
-
-// ADMIN: listar comunicados
-app.get("/api/admin/announcements", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const owner = req.isPanelAdmin ? req.user.id : null;
-    const result = await pool.query(
-      `SELECT id, message, active, created_at
-       FROM announcements
-       WHERE (($1::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $1)
-       ORDER BY id DESC
-       LIMIT 50`,
-      [owner]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error cargando comunicados" });
-  }
-});
-
-// ADMIN: crear comunicado
-app.post("/api/admin/announcements", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const message = String(req.body.message || "").trim();
-    if (!message) return res.status(400).json({ error: "El comunicado es obligatorio" });
-
-    const result = await pool.query(
-      `INSERT INTO announcements (message, active, owner_admin_id) VALUES ($1, 1, $2) RETURNING id, message, active, created_at`,
-      [message, req.isPanelAdmin ? req.user.id : null]
-    );
-    res.json({ message: "Comunicado publicado", announcement: result.rows[0] });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error creando comunicado" });
-  }
-});
-
-// ADMIN: activar / ocultar comunicado
-app.patch("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const active = Number(req.body.active) === 1 ? 1 : 0;
-    const result = await pool.query(
-      `UPDATE announcements SET active = $1 WHERE id = $2 AND (($3::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $3) RETURNING id, message, active, created_at`,
-      [active, id, req.isPanelAdmin ? req.user.id : null]
-    );
-    if (!result.rows[0]) return res.status(404).json({ error: "Comunicado no encontrado" });
-    res.json({ message: "Comunicado actualizado", announcement: result.rows[0] });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error actualizando comunicado" });
-  }
-});
-
-// ADMIN: eliminar comunicado
-app.delete("/api/admin/announcements/:id", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await pool.query(`DELETE FROM announcements WHERE id = $1 AND (($2::int IS NULL AND owner_admin_id IS NULL) OR owner_admin_id = $2)`, [id, req.isPanelAdmin ? req.user.id : null]);
-    res.json({ message: "Comunicado eliminado" });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error eliminando comunicado" });
   }
 });
 
@@ -5397,9 +5332,7 @@ app.post("/api/admin/accounts/:id/discard", authMiddleware, adminMiddleware, asy
 
 // ROLES SEPARADOS: admin_global, admin_distribuidor, panel_propietario - 2026-06-08 03:36:19
 
-// JERARQUIA PANEL PROPIETARIO Y ANUNCIOS PROPIOS - 2026-06-08 03:50:31
-
-// COMUNICADOS MENU PANEL PROPIETARIO - 2026-06-08 03:59:14
+// JERARQUIA PANEL PROPIETARIO - 2026-06-08 03:50:31
 
 // REEMPLAZO MANUAL REPORTABLE - 2026-06-08 04:30:28
 

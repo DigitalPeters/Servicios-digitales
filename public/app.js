@@ -2,24 +2,36 @@ let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];
 let currentInventoryPage = 1;
 let currentOrdersPage = 1;
 
-function showAuth(type){document.getElementById('loginForm').classList.toggle('hidden',type!=='login');document.getElementById('registerForm').classList.toggle('hidden',type!=='register');document.getElementById('loginTab').classList.toggle('active',type==='login');document.getElementById('registerTab').classList.toggle('active',type==='register')}
-function toggleSidebar(){document.getElementById('sidebar').classList.toggle('show')}
-
 function showSection(name) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  const targetName = String(name || '').trim();
+  if (!targetName) return;
+  const normalizedName = ({
+    reportsMenu: 'reports-menu',
+    failureResponses: 'failure-responses',
+    accountResponses: 'failure-responses',
+    reportResponses: 'failure-responses',
+    store: 'shop'
+  })[targetName] || targetName;
 
-  const sec = document.getElementById('section-' + name);
-  if (sec) sec.classList.add('active');
+  let sec = document.getElementById('section-' + normalizedName);
+  if (!sec && (normalizedName === 'reports-menu' || normalizedName === 'failure-responses')) {
+    if (typeof ensureReportMenuFinal === 'function') ensureReportMenuFinal();
+    sec = document.getElementById('section-' + normalizedName);
+  }
+  if (!sec) return;
+
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  sec.classList.add('active');
 
   document.querySelectorAll('.menu-btn')
-    .forEach(b => b.classList.toggle('active', b.dataset.section === name));
+    .forEach(b => b.classList.toggle('active', b.dataset.section === normalizedName));
 
   document.getElementById('sidebar')?.classList.remove('show');
 
-  if (name === 'shop' && !allProducts.length) loadProducts();
-  if (name === 'orders') loadMyOrders();
+  if (normalizedName === 'shop' && !allProducts.length) loadProducts();
+  if (normalizedName === 'orders') loadMyOrders();
 
-  if (name === 'admin' && currentUser?.role === 'admin') {
+  if (normalizedName === 'admin' && currentUser?.role === 'admin') {
     loadUsers();
     loadAdminProducts();
     loadAdminOrders();
@@ -28,703 +40,15 @@ function showSection(name) {
     loadAccountReports();
   }
 
-  if (name === 'alerts') loadExpiringAlerts();
+  if (normalizedName === 'alerts') loadExpiringAlerts();
 
   // --- SECCIÓN DASHBOARD ---
-  if (name === 'dashboard' && currentUser?.role === 'admin') {
+  if (normalizedName === 'dashboard' && currentUser?.role === 'admin') {
     loadExpiringCount();
   }
 } // <--- Esta es la ÚNICA llave que cierra toda la función
 
-function cambiarSeccion(name){
-  const key = String(name || '').toLowerCase().trim();
-  const map = {
-    dashboard: 'dashboard',
-    inicio: 'dashboard',
-    'mi-cuenta': 'account',
-    micuenta: 'account',
-    cuenta: 'account',
-    tienda: 'shop',
-    pedidos: 'orders',
-    saldo: 'balance',
-    reportes: 'reports'
-  };
-  showSection(map[key] || name);
-}
-
-function scrollToAdmin(id){showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80)}
-
-function openUsersFromDashboard(){
-  if(currentUser?.role==='admin'){
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminUsersPanel'),80);
-  }else{
-    showSection('account');
-  }
-}
-
-async function reloadDashboard() {
-  if (!currentUser || currentUser.role !== 'admin') return;
-
-  showMessage('Actualizando panel...');
-
-  await Promise.allSettled([
-    loadUsers(),
-    loadAdminProducts(),
-    loadAdminOrders(),
-    loadBalanceRequests(),
-    loadAccountReports(),
-    loadSalesReport(true),
-    loadPlatformInventory()
-  ]);
-
-  showMessage('Panel actualizado');
-}
-
-function openProductsFromDashboard(){
-  if(currentUser?.role==='admin'){
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminProductsPanel'),80);
-  }else{
-    showSection('shop');
-  }
-}
-
-
-function openOrdersFromDashboard(){
-  if(currentUser?.role==='admin'){
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminOrdersPanel'),80);
-  }else{
-    showSection('orders');
-  }
-}
-function showMessage(text,type='success'){document.getElementById('message').innerHTML=`<p class="${type}">${safeText(text)}</p>`;setTimeout(()=>{document.getElementById('message').innerHTML=''},4500)}
-function safeText(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
-function parseJsonArray(v){try{if(Array.isArray(v))return v;const p=JSON.parse(v||'[]');return Array.isArray(p)?p:[]}catch{return[]}}
-function parseJsonObject(v){try{if(typeof v==='object'&&v!==null)return v;const p=JSON.parse(v||'{}');return typeof p==='object'&&p!==null?p:{}}catch{return{}}}
-function normalizeFieldName(n){return String(n||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ñ/g,'n').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
-function fieldLabel(f){const labels={curp:'CURP',rfc:'RFC',idcif:'IDCIF',nss:'NSS',nombre_completo:'Nombre completo',correo:'Correo',telefono:'Teléfono',fecha_nacimiento:'Fecha de nacimiento'};return labels[f]||String(f).replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}
-function getChargeModeText(m){return m==='on_success'?'Se descuenta cuando el admin marque Éxito':'Se descuenta al comprar'}
-function getStatusText(s){return({accion_en_espera:'Acción en espera',en_proceso:'En proceso',exito:'Éxito',rechazado:'Rechazado'}[s]||s)}
-function formatMoney(v){return Number(v||0).toFixed(2)}
-async function api(path,opt={}){const headers=opt.headers||{};if(token)headers.Authorization='Bearer '+token;if(!(opt.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok){const detailed=(Array.isArray(d.errors)&&d.errors.length?d.errors.join(' | '):'')||(typeof d.error==='string'&&d.error)||`Error HTTP ${r.status}`;throw new Error(detailed)}return d}
-async function register(){try{const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp()}catch(e){showMessage(e.message,'error')}}
-async function login(){try{const data=await api('/api/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});token=data.token;localStorage.setItem('token',token);showMessage('Sesión iniciada');await loadApp()}catch(e){showMessage(e.message,'error')}}
-function logout(){localStorage.removeItem('token');token=null;currentUser=null;document.getElementById('authSection').classList.remove('hidden');document.getElementById('appSection').classList.add('hidden');showMessage('Sesión cerrada')}
-
-async function loadApp() {
-  if (!token) return;
-  try {
-    currentUser = await api('/api/me');
-    document.getElementById('authSection')?.classList.add('hidden');
-    document.getElementById('appSection')?.classList.remove('hidden');
-
-    userName.textContent = currentUser.name;
-    userEmail.textContent = currentUser.email;
-    userRole.textContent = currentUser.role;
-    userBalance.textContent = formatMoney(currentUser.balance);
-    sideEmail.textContent = currentUser.email;
-    topUserName.textContent = currentUser.name;
-    topUserBalance.textContent = formatMoney(currentUser.balance);
-    statUsers.textContent = '0';
-    
-    const btnHistorial = document.getElementById('btnHistorialId');
-    if (btnHistorial) {
-      btnHistorial.onclick = function() {
-        if (typeof window.abrirModalHistorial === 'function') {
-          window.abrirModalHistorial();
-        }
-      };
-    }
-
-    await loadProducts();
-    await loadMyOrders();
-    await loadBalanceRequests();
-
-    if (currentUser.role === 'admin') {
-      setTodaySalesDate();
-      await loadUsers();
-      await loadAdminProducts();
-      await loadAdminOrders();
-      await loadSalesReport();
-      await loadPlatformInventory();
-      await loadExpiringCount();
-      await loadAccountReports();
-    }
-    showSection('dashboard');
-    
-  } catch (e) {
-    console.error("Error en loadApp:", e);
-    logout();
-  }
-}
-
-async function loadProducts(){allProducts=await api('/api/products');statProducts.textContent=allProducts.length;adminProductsCount.textContent=allProducts.length;buildCategoryFilter();renderProducts(allProducts)}
-
-async function loadExpiringCount(){
-  try{
-    if(!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin'){
-      const renewalsNoAdmin = document.getElementById('count-pedidos_pendientes');
-      if(renewalsNoAdmin) renewalsNoAdmin.textContent = '0';
-      return;
-    }
-
-    const data = await api('/api/alerts/count');
-    const renewals = Number(data?.count || 0);
-    const renewalsEl = document.getElementById('count-pedidos_pendientes');
-    if(renewalsEl) renewalsEl.textContent = String(renewals);
-
-    const expiringCard = document.getElementById('dashExpiringCard');
-    if(expiringCard) expiringCard.classList.remove('hidden');
-  }catch(e){
-    console.warn('Error cargando contador de renovaciones', e);
-  }
-}
-
-function buildCategoryFilter(){const sel=categoryFilter;const cur=sel.value;const cats=[...new Set(allProducts.map(p=>p.category||'Otros'))].sort();sel.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option value="${safeText(c)}">${safeText(c)}</option>`).join('');sel.value=cur}
-function filterProducts(){const term=(productSearch?.value||globalSearch?.value||'').toLowerCase();const cat=categoryFilter?.value||'';const filtered=allProducts.filter(p=>(!term||String(p.name).toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term))&&(!cat||(p.category||'Otros')===cat));renderProducts(filtered)}
-function renderProducts(products){let html='';const cats={};products.forEach(p=>{const c=p.category||'Otros';(cats[c]=cats[c]||[]).push(p)});Object.keys(cats).forEach(c=>{html+=`<div class="category-title">${safeText(c)}</div>`+cats[c].map(renderProductRow).join('')});productsList.innerHTML=html||'No hay productos.'}
-
-function renderProductRow(product) {
-    const stockEnabled = Number(product.stock_enabled || 0) === 1;
-    const stock = Number(product.stock || 0);
-    const soldOut = stockEnabled && stock <= 0;
-
-    return `<div class="product-row" data-product-id="${product.id}">
-        <div class="product-header" onclick="toggleProduct(${product.id})">
-            <div>
-                <div class="product-name">${safeText(product.name)}</div>
-                <span class="chip">${safeText(product.category || 'Otros')}</span>
-            </div>
-            <div>
-                <div class="price">$${formatMoney(product.price)}</div>
-                ${stockEnabled ? `<div class="stock ${soldOut ? 'out' : ''}">${soldOut ? 'Sin stock' : 'Stock: ' + stock}</div>` : ''}
-            </div>
-            <div>⌄</div>
-        </div>
-        <div id="product-details-${product.id}" class="product-details">
-            <p class="product-description">${safeText(product.description || '')}</p>
-            <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
-            
-            ${renderProductInputs(product)}
-            
-            <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? 'Sin stock' : 'Comprar'}</button>
-        </div>
-    </div>`;
-}
-
-
-function toggleProduct(id){const row=document.querySelector(`.product-row[data-product-id="${id}"]`);if(!row)return;const open=row.classList.contains('open');document.querySelectorAll('.product-row').forEach(r=>r.classList.remove('open'));if(!open)row.classList.add('open')}
-
-function renderProductInputs(product) {
-    const fields = parseJsonArray(product.required_fields);
-    if (!fields.length) return `<p class="small-text">Este producto no requiere datos adicionales.</p>`;
-    
-    return fields.map(f => {
-        const palabra = f.toLowerCase();
-        // Si el dato requerido contiene alguna de estas palabras, pide un archivo
-        if (palabra.includes('pdf') || palabra.includes('foto') || palabra.includes('ine') || palabra.includes('archivo')) {
-            return `
-            <div style="margin-bottom: 10px;">
-                <label class="field-label" style="color: #d84315; font-weight: bold;">${safeText(fieldLabel(f))} (Subir Archivo)</label>
-                <input type="file" id="field-${product.id}-${f}" accept=".pdf, image/*" style="width: 100%; font-size: 13px;" />
-            </div>`;
-        } else {
-            // Si no, muestra tu campo de texto normal
-            return `
-            <div style="margin-bottom: 10px;">
-                <label class="field-label">${safeText(fieldLabel(f))}</label>
-                <input id="field-${product.id}-${f}" placeholder="Ingresa ${safeText(fieldLabel(f))}" style="width: 100%;" />
-            </div>`;
-        }
-    }).join('');
-}
-// Función para convertir el PDF a texto (Base64)
-function convertFileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-  });
-}
-
-// Tu función de compra actualizada
-async function buyProduct(productId) {
-  try {
-    const product = allProducts.find(p => Number(p.id) === Number(productId)) || 
-                    await api('/api/products').then(ps => ps.find(p => Number(p.id) === Number(productId)));
-    
-    if (!product) throw new Error('Producto no encontrado');
-    
-    if (!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n¿Confirmas la compra?`)) return;
-    
-    const fields = parseJsonArray(product.required_fields);
-    const order_data = {};
-    
-    fields.forEach(f => {
-      const input = document.getElementById(`field-${productId}-${f}`);
-      order_data[f] = input ? input.value.trim() : '';
-    });
-
-    // === NUEVO: CAPTURAMOS EL PDF ===
-    let attached_document = null;
-    // Buscamos la cajita del PDF usando el ID del producto
-    const fileInput = document.getElementById(`file-${productId}`);
-    
-    if (fileInput && fileInput.files.length > 0) {
-      const file = fileInput.files[0];
-      // Validamos que sea menor a 5MB para no saturar tu base de datos
-      if (file.size > 5 * 1024 * 1024) {
-        throw new Error("El PDF es muy pesado. Máximo 5 MB.");
-      }
-      attached_document = await convertFileToBase64(file);
-    }
-    // ================================
-
-    const data = await api('/api/buy/' + productId, {
-      method: 'POST',
-      body: JSON.stringify({ 
-        order_data,
-        attached_document // <-- Inyectamos el PDF al servidor
-      })
-    });
-    
-    showMessage(data.message || 'Compra realizada');
-    if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
-    showSection('orders');
-    loadMyOrders().catch(e => console.warn('Error recargando pedidos:', e));
-    if (allProducts.length) {
-      loadProducts().catch(e => console.warn('Error recargando productos:', e));
-    }
-
-    
-  } catch (e) {
-    showMessage(e.message, 'error');
-  }
-}
-
-
-async function loadMyOrders(){
-  myOrders=await api('/api/my-orders');
-  statOrders.textContent=myOrders.length;
-  renderMyOrders();
-  recentOrdersList.innerHTML=myOrders.slice(0,4).map(o=>`<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`).join('')||'Sin pedidos recientes.'
-}
-function extractDeliveredAccountEmail(text){
-  const m=String(text||'').match(/(?:Correo|📧\s*Correo):\s*([^\n\r\s]+)/i);
-  return m?m[1].trim():'';
-}
-function getWarrantyInfoFromOrder(o){
-  const raw=String(o.delivered_account_data||o.admin_response||'');
-  const m=raw.match(/Fecha de entrega:\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
-  let start=o.created_at?new Date(o.created_at):null;
-  if(m){
-    const day=Number(m[1]), month=Number(m[2])-1, year=Number(m[3].length===2?'20'+m[3]:m[3]);
-    start=new Date(year,month,day);
-  }
-  if(!start||isNaN(start.getTime()))return null;
-  const end=new Date(start);end.setDate(end.getDate()+28);
-  const today=new Date();
-  const msDay=24*60*60*1000;
-  const daysRemaining=Math.max(0,Math.ceil((end-today)/msDay));
-  const daysUsed=Math.min(28,Math.max(0,28-daysRemaining));
-  return {start,end,daysRemaining,daysUsed,active:daysRemaining>0};
-}
-function renderWarrantyNotice(o){
-  if(!hasAccountDelivery(o))return '';
-  const w=getWarrantyInfoFromOrder(o);
-  if(!w)return '';
-  return `<div class="order-data"><b>Garantía:</b><p style="margin:5px 0"><b>Entrega:</b> ${w.start.toLocaleDateString('es-MX')} &nbsp; <b>Vence:</b> ${w.end.toLocaleDateString('es-MX')} &nbsp; <b>Días restantes:</b> <span class="${w.active?'success':'error'}">${w.daysRemaining}</span></p></div>`;
-}
-async function loadMyReports(){
-  try {
-    const reports = await api('/api/my-account-reports');
-    const box = document.getElementById('myReportsList');
-    if(!box) return;
-    box.innerHTML = reports.length ? reports.map(r => `
-      <div class="item">
-        <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status)}</span></p>
-        <p><b>Correo reportado:</b> ${safeText(r.email)}</p>
-        <p><b>Falla:</b> ${safeText(r.issue_type)}</p>
-        <p><b>Explicación:</b> ${safeText(r.description)}</p>
-        <div class="order-data response-text" style="background:#eef2ff; margin-top: 10px;"><b>Respuesta del admin:</b><br>${safeText(r.admin_response || 'En revisión por el administrador...')}</div>
-      </div>
-    `).join('') : 'No has reportado fallas.';
-  } catch(e) { console.warn(e); }
-}
-
-function renderMyOrders(){
-  const search=(document.getElementById('myOrdersSearch')?.value||'').toLowerCase().trim();
-  const statusFilter=document.getElementById('myOrdersStatusFilter')?.value||'';
-  let rows=[...(myOrders||[])];
-  rows=rows.filter(o=>{
-    const raw=String(o.delivered_account_data||o.admin_response||'');
-    const email=extractDeliveredAccountEmail(raw);
-    const hay=`${o.id} ${o.product_name||''} ${o.product_category||''} ${email} ${o.status||''}`.toLowerCase();
-    const statusOk=!statusFilter || (statusFilter==='reportado' ? /reporte|falla|reemplazo|reembolso/i.test(raw+String(o.admin_response||'')) : o.status===statusFilter);
-    return statusOk && (!search || hay.includes(search));
-  });
-  myOrdersList.innerHTML=rows.map(o=>{
-    const data=parseJsonObject(o.order_data);
-    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
-    const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`
-  }).join('')||'No hay pedidos con esos filtros.'
-setTimeout(() => {
-    const seccion = document.getElementById('myOrdersList'); // Asegúrate que este sea el ID de tu contenedor
-    if (seccion) {
-      seccion.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, 500);
-}
-
-function isLikelyAttachmentValue(v){
-  const s=String(v||'').trim();
-  if(!s) return false;
-  if(/^data:image\//i.test(s)) return true;
-  if(/^https?:\/\//i.test(s)) return true;
-  if(/\.(png|jpe?g|webp|gif|bmp|svg|pdf)(\?|#|$)/i.test(s)) return true;
-  return false;
-}
-
-function isLikelyImageAttachment(v){
-  const s=String(v||'').trim();
-  if(/^data:image\//i.test(s)) return true;
-  if(/\.(png|jpe?g|webp|gif|bmp|svg)(\?|#|$)/i.test(s)) return true;
-  return false;
-}
-
-function renderAttachmentButtons(url){
-  const safeUrl=safeText(url||'');
-  return `<div class="proof-actions"><a class="proof-action-btn" href="${safeUrl}" target="_blank" rel="noopener noreferrer">👁️ Ver Imagen</a><a class="proof-action-btn proof-action-download" href="${safeUrl}" download>📥 Descargar Comprobante</a></div>`;
-}
-
-function renderOrderData(data){
-  const entries=Object.entries(data||{});
-  if(!entries.length)return'';
-  return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k,v])=>{
-    const value=String(v??'').trim();
-    if(isLikelyAttachmentValue(value)){
-      const preview=isLikelyImageAttachment(value)?`<div class="proof-preview"><img src="${safeText(value)}" alt="Comprobante adjunto"></div>`:'';
-      return `<div class="order-proof-row"><p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b></p>${renderAttachmentButtons(value)}${preview}</div>`;
-    }
-    return `<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(value)}</p>`;
-  }).join('')}</div>`
-}
-async function enviarSolicitudSaldo(){
-  try{
-    const nombre=(document.getElementById('saldoNombre')?.value||'').trim();
-    const banco=(document.getElementById('saldoBanco')?.value||'').trim();
-    const monto=(document.getElementById('saldoMonto')?.value||'').trim();
-    if(!nombre||!banco||!monto)throw new Error('Nombre, banco y monto son obligatorios');
-
-    const data=await api('/api/balance-requests',{
-      method:'POST',
-      body:JSON.stringify({
-        amount:monto,
-        bank:banco,
-        reference:'No proporcionada',
-        account_holder:nombre,
-        proof:''
-      })
-    });
-
-    showMessage(data.message||'Solicitud enviada');
-    saldoNombre.value=saldoBanco.value=saldoMonto.value='';
-    await loadBalanceRequests();
-  }catch(e){showMessage(e.message,'error')}
-}
-async function enviarReporteCuenta(){
-  try{
-    const correo=(document.getElementById('reporteCorreo')?.value||'').trim();
-    const tipo=(document.getElementById('reporteTipo')?.value||'otro').trim();
-    const explicacion=(document.getElementById('reporteExplicacion')?.value||'').trim();
-    if(!correo||!explicacion)throw new Error('Correo y explicación son obligatorios');
-
-    // --- NUEVA MAGIA: LEER LA FOTO COMO TEXTO ---
-    let fotoBase64 = null;
-    const fotoInput = document.getElementById('reporteEvidencia');
-    if (fotoInput && fotoInput.files.length > 0) {
-        const file = fotoInput.files[0];
-        // Protección vital: Si la foto pesa más de 2MB, la bloqueamos para no tirar tu servidor
-        if (file.size > 2 * 1024 * 1024) {
-            throw new Error('La imagen es muy pesada (Máximo 2MB). Usa una imagen más ligera o recortada.');
-        }
-        fotoBase64 = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(file);
-        });
-    }
-    // ---------------------------------------------
-
-    const data=await api('/api/account-reports',{
-        method:'POST',
-        body:JSON.stringify({
-            email:correo,
-            issue_type:tipo,
-            description:explicacion,
-            evidence_image: fotoBase64 // Enviamos la foto adjunta al servidor
-        })
-    });
-    
-    showMessage(data.message||'Reporte enviado');
-    
-    // Limpiamos los campos para que quede como nuevo
-    if(document.getElementById('reporteCorreo')) document.getElementById('reporteCorreo').value='';
-    if(document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value='';
-    if(fotoInput) fotoInput.value='';
-    
-    // Refrescamos las vistas para que el vendedor vea su reporte al instante
-    if(typeof loadAccountReports === 'function') await loadAccountReports();
-    if(typeof loadMyReports === 'function') loadMyReports();
-    
-  }catch(e){
-    showMessage(e.message,'error')
-  }
-}
-function getBalanceRequestStatusText(status){
-  const statuses={
-    pendiente:"Pendiente",
-    aprobado:"Aprobado",
-    aprobada:"Aprobada",
-    rechazado:"Rechazado",
-    rechazada:"Rechazada"
-  };
-  return statuses[String(status||"").toLowerCase()] || status || "pendiente";
-}
-
-async function loadBalanceRequests(){
-  try{
-    let requests=[];
-    if(currentUser?.role==='admin'){
-      requests=await api('/api/admin/balance-requests');
-      const pending=requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
-      statBalanceRequests.textContent=pending.length;
-
-      const box=document.getElementById('adminBalanceRequestsList');
-      if(box){
-        box.innerHTML=pending.length?pending.map(r=>`
-          <div class="item">
-            <p><b>Solicitud:</b> #${r.id}</p>
-            <p><b>Cliente:</b> ${safeText(r.customer_name||r.name||'Cliente')}</p>
-            <p><b>Correo:</b> ${safeText(r.customer_email||r.email||'')}</p>
-            <p><b>Nombre transferencia:</b> ${safeText(r.account_holder||r.titular||'')}</p>
-            <p><b>Banco:</b> ${safeText(r.bank||r.banco||'')}</p>
-            <p><b>Monto:</b> $${formatMoney(r.amount||r.monto)}</p>
-            <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(r.status||'pendiente'))}</span></p>
-
-            <label class="field-label">Respuesta para el cliente</label>
-            <textarea id="balance-response-${r.id}" placeholder="Ejemplo: Saldo aprobado y agregado a tu cuenta.">${safeText(r.admin_response||'')}</textarea>
-
-            <div class="two-row">
-              <button class="green-btn" onclick="updateBalanceRequestStatus(${r.id}, 'aprobado')">
-                Aprobar y sumar saldo
-              </button>
-              <button class="danger-btn" onclick="updateBalanceRequestStatus(${r.id}, 'rechazado')">
-                Rechazar
-              </button>
-            </div>
-          </div>
-        `).join(''):'Sin solicitudes pendientes.';
-      }
-    }else{
-      try{requests=await api('/api/my-balance-requests')}catch(_){requests=[]}
-      const pending=requests.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
-      statBalanceRequests.textContent=pending.length;
-    }
-  }catch(e){
-    console.warn('No se pudieron cargar solicitudes de saldo',e);
-    statBalanceRequests.textContent='0';
-  }
-}
-
-async function updateBalanceRequestStatus(requestId,status){
-  try{
-    const response=document.getElementById('balance-response-'+requestId)?.value||'';
-    const data=await api('/api/admin/balance-requests/'+requestId+'/status',{
-      method:'PATCH',
-      body:JSON.stringify({
-        status:status,
-        admin_response:response
-      })
-    });
-    showMessage(data.message||'Solicitud de saldo actualizada');
-    await loadBalanceRequests();
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),120);
-  }catch(e){
-    showMessage(e.message,'error');
-  }
-}
-
-function openBalanceRequests(){if(currentUser?.role==='admin'){showSection('admin');setTimeout(()=>scrollToAdmin('adminBalanceRequestsPanel'),80)}else{showSection('balance')}}
-function copyText(t){
-  copyToClipboard(t,'Copiado');
-}
-function getAccountTextFromOrder(order){
-  return String(order?.delivered_account_data || order?.admin_response || '').trim();
-}
-function hasAccountDelivery(order){
-  const text=getAccountTextFromOrder(order);
-  if(!text)return false;
-  return text.includes('Cuenta de Streaming') || text.includes('Cuenta entregada') || text.includes('Cuenta entregada automáticamente') || (text.includes('Correo:') && text.includes('Contraseña:')) || (text.includes('📧 Correo') && text.includes('🔐 Contraseña'));
-}
-function copyToClipboard(text,successMessage='Copiado'){
-  const value=String(text||'').trim();
-  if(!value){showMessage('No hay datos para copiar','error');return;}
-  if(navigator.clipboard && window.isSecureContext){
-    navigator.clipboard.writeText(value).then(()=>showMessage(successMessage)).catch(()=>fallbackCopy(value,successMessage));
-  }else{
-    fallbackCopy(value,successMessage);
-  }
-}
-function fallbackCopy(text,successMessage){
-  try{
-    const area=document.createElement('textarea');
-    area.value=text;
-    area.setAttribute('readonly','');
-    area.style.position='fixed';
-    area.style.left='-9999px';
-    document.body.appendChild(area);
-    area.select();
-    document.execCommand('copy');
-    document.body.removeChild(area);
-    showMessage(successMessage);
-  }catch(e){
-    showMessage('No se pudo copiar. Selecciona el texto manualmente.','error');
-  }
-}
-function copyAccountDataFromOrder(orderId,source='my'){
-  const list=source==='admin'?adminOrders:myOrders;
-  const order=list.find(o=>Number(o.id)===Number(orderId));
-  let text='';
-  if(source==='admin'){
-    const responseBox=document.getElementById(`response-${orderId}`);
-    text=(responseBox?.value || getAccountTextFromOrder(order) || '').trim();
-  }else{
-    text=getAccountTextFromOrder(order);
-  }
-  copyToClipboard(text,'Datos de cuenta copiados');
-}
-
-function openModalEntregaInmediata(text){
-  const modal=document.getElementById('modalEntregaInmediata');
-  const box=document.getElementById('modalEntregaInmediataText');
-  if(!modal || !box) return;
-  box.value=String(text||'').trim();
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden','false');
-}
-
-function closeModalEntregaInmediata(){
-  const modal=document.getElementById('modalEntregaInmediata');
-  if(!modal) return;
-  modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden','true');
-}
-
-function copyEntregaInmediataData(){
-  const text=document.getElementById('modalEntregaInmediataText')?.value||'';
-  if(!text.trim()) return showMessage('No hay datos para copiar','error');
-  copyToClipboard(text,'Datos de entrega copiados');
-}
-function extractAccountEmailFromText(text){
-  const value=String(text||'');
-  const match=value.match(/(?:📧\s*)?Correo:\s*([^\s\n]+)/i);
-  return match ? match[1].trim() : '';
-}
-function reportDeliveredAccount(orderId){
-  const order=myOrders.find(o=>Number(o.id)===Number(orderId));
-  const text=getAccountTextFromOrder(order);
-  const email=extractAccountEmailFromText(text);
-  if(!email){showMessage('No pude detectar el correo de esta cuenta para reportarla','error');return;}
-  showSection('reports');
-  const input=document.getElementById('reporteCorreo');
-  if(input){input.value=email;}
-  copyToClipboard(email,'Correo copiado y colocado en el reporte');
-  setTimeout(()=>document.getElementById('reporteExplicacion')?.focus(),150);
-}
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
-function toggleCreateProduct(){createProductBox.classList.toggle('hidden')}
-async function createProduct(){try{const data=await api('/api/admin/create-product',{method:'POST',body:JSON.stringify({name:productName.value,description:productDescription.value,price:productPrice.value,cost_price:(document.getElementById('productCostPrice')?.value||0),category:productCategory.value,required_fields:getRequiredFieldsFromInput('productRequiredFields'),charge_mode:productChargeMode.value,stock_enabled:productStockEnabled.checked,stock:productStock.value})});showMessage(data.message||'Producto creado');productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';if(document.getElementById('productCostPrice'))productCostPrice.value='0';productStock.value='0';productStockEnabled.checked=false;await loadProducts();await loadAdminProducts();}catch(e){showMessage(e.message,'error');}}
-async function loadUsers(){allUsers=await api('/api/admin/users');statUsers.textContent=allUsers.length;adminUsersCount.textContent=allUsers.length;balanceUserSelect.innerHTML='<option value="">Selecciona usuario</option>'+allUsers.map(u=>`<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)}) - $${formatMoney(u.balance)}</option>`).join('');balanceUserSelect.onchange=()=>{balanceUserId.value=balanceUserSelect.value};usersList.innerHTML=allUsers.map(u=>`<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p></div>`).join('')||'No hay usuarios.'}
-async function addBalance(){try{const data=await api('/api/admin/add-balance',{method:'POST',body:JSON.stringify({user_id:Number(balanceUserId.value),amount:balanceAmount.value,note:balanceNote.value})});showMessage(data.message||'Saldo agregado');balanceAmount.value=balanceNote.value='';await loadUsers();}catch(e){showMessage(e.message,'error');}}
-async function loadAdminProducts(){const products=allProducts.length?allProducts:await api('/api/products');adminProductsCount.textContent=products.length;adminProductsList.innerHTML=products.map(p=>{const rf=parseJsonArray(p.required_fields);const se=Number(p.stock_enabled||0)===1;return `<div class="item" id="admin-product-${p.id}"><div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id})"><b>${safeText(p.name)}</b><span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')}</span></div><div class="admin-product-body"><label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" /><label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea><div class="three-row"><div><label class="field-label">Precio de venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo de compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div><label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea><label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select><label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/><div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div></div></div>`}).join('')||'No hay productos.'}
-function toggleAdminProduct(id){document.getElementById('admin-product-'+id)?.classList.toggle('open')}
-async function updateProduct(id){try{const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({name:document.getElementById('editName-'+id).value,description:document.getElementById('editDescription-'+id).value,price:document.getElementById('editPrice-'+id).value,cost_price:(document.getElementById('editCostPrice-'+id)?.value||0),category:document.getElementById('editCategory-'+id).value,required_fields,charge_mode:document.getElementById('editChargeMode-'+id).value,stock_enabled:document.getElementById('editStockEnabled-'+id).checked,stock:document.getElementById('editStock-'+id).value})});showMessage(data.message||'Producto actualizado');await loadProducts();await loadAdminProducts();}catch(e){showMessage(e.message,'error');}}
-async function deleteProduct(id){if(!confirm('¿Seguro que quieres eliminar este producto?'))return;try{const data=await api('/api/admin/products/'+id,{method:'DELETE'});showMessage(data.message||'Producto eliminado');await loadProducts();await loadAdminProducts();}catch(e){showMessage(e.message,'error');}}
-async function loadAdminOrders(){
-  adminOrders=await api('/api/admin/orders');
-  adminOrdersCount.textContent=adminOrders.length;
-  statOrders.textContent=currentUser?.role==='admin'?adminOrders.length:myOrders.length;
-  adminOrdersList.innerHTML=adminOrders.map(o=>{
-    const od=parseJsonObject(o.order_data);
-    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Cliente:</b> ${safeText(o.customer_name)}</p><p><b>Correo:</b> ${safeText(o.customer_email)}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p><p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>${renderOrderData(od)}<label class="field-label">Estado</label><select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select><label class="field-label">Respuesta para el cliente</label><textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>${copyButton}<label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label><button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button></div>`
-  }).join('')||'No hay pedidos.'
-}
-async function updateOrderStatus(id){try{const data=await api('/api/admin/orders/'+id+'/status',{method:'PATCH',body:JSON.stringify({status:document.getElementById('status-'+id).value,response_message:document.getElementById('response-'+id).value,refund_if_rejected:document.getElementById('refund-'+id).checked})});showMessage(data.message||'Pedido actualizado');await loadAdminOrders();}catch(e){showMessage(e.message,'error');}}
-
-function openSalesReport(){
-  if(currentUser?.role==='admin'){
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
-    loadSalesReport();
-  }
-}
-function setTodaySalesDate(){
-  const input=document.getElementById('salesReportDate');
-  if(input && !input.value){
-    const today=new Date();
-    const yyyy=today.getFullYear();
-    const mm=String(today.getMonth()+1).padStart(2,'0');
-    const dd=String(today.getDate()).padStart(2,'0');
-    input.value=`${yyyy}-${mm}-${dd}`;
-  }
-}
-async function loadSalesReport(){
-  if(currentUser?.role!=='admin')return;
-  try{
-    setTodaySalesDate();
-    const date=document.getElementById('salesReportDate')?.value||'';
-    const data=await api('/api/admin/sales-report'+(date?'?date='+encodeURIComponent(date):''));
-    const total=Number(data?.summary?.total_sales||0);
-    const totalOrders=Number(data?.summary?.total_orders||0);
-    const byUser=data?.by_user||[];
-    const byProduct=data?.by_product||[];
-    const details=data?.details||[];
-    const salesToday=document.getElementById('statSalesToday');
-    const adminSalesTodayEl=document.getElementById('adminSalesToday');
-    const totalEl=document.getElementById('salesReportTotal');
-    const ordersEl=document.getElementById('salesReportOrders');
-    const usersEl=document.getElementById('salesReportUsers');
-    if(salesToday)salesToday.textContent=formatMoney(total);
-    if(adminSalesTodayEl)adminSalesTodayEl.textContent=formatMoney(total);
-    if(totalEl)totalEl.textContent=formatMoney(total);
-    if(ordersEl)ordersEl.textContent=totalOrders;
-    if(usersEl)usersEl.textContent=byUser.length;
-
-    const byUserBox=document.getElementById('salesByUserList');
-    if(byUserBox){
-      byUserBox.innerHTML=byUser.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Usuario</th><th>Pedidos</th><th>Total</th></tr></thead><tbody>${byUser.map(u=>`<tr><td><b>${safeText(u.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(u.customer_email||'')}</span></td><td>${u.total_orders}</td><td>$${formatMoney(u.total_sales)}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por usuario.';
-    }
-    const byProductBox=document.getElementById('salesByProductList');
-    if(byProductBox){
-      byProductBox.innerHTML=byProduct.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto real vendido</th><th>Pedidos</th><th>Total</th></tr></thead><tbody>${byProduct.map(p=>`<tr><td><b>${safeText(p.product_name||'Producto')}</b><br><span class="small-text">${safeText(p.product_category||'')}</span></td><td>${p.total_orders}</td><td>$${formatMoney(p.total_sales)}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por producto.';
-    }
-    const detailsBox=document.getElementById('salesDetailsList');
-    if(detailsBox){
-      detailsBox.innerHTML=details.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Producto real vendido</th><th>Monto</th><th>Fecha México</th></tr></thead><tbody>${details.map(o=>`<tr><td>#${o.id}</td><td><b>${safeText(o.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(o.customer_email||'')}</span></td><td>${safeText(o.product_name||'')}</td><td>$${formatMoney(o.amount)}</td><td>${safeText(o.created_at_mx||new Date(o.created_at).toLocaleString())}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas en esta fecha.';
-    }
-  }catch(e){
-    console.warn('No se pudo cargar reporte de ventas',e);
-    showMessage(e.message||'Error cargando reporte de ventas','error');
-  }
-}
-
 // Después de que el código termine de pintar las tablas (innerHTML = ...), agrega esto:
 setTimeout(() => {
   const target = document.getElementById('salesDetailsList'); // o el ID de tu sección de pedidos
@@ -738,62 +62,7 @@ setTimeout(() => {
 // El dashboard siempre consulta el día actual del servidor en horario México.
 // El filtro de fecha del panel se conserva solo cuando el admin selecciona una fecha.
 // ===============================
-async function loadSalesReport(forceToday=false){
-  if(currentUser?.role!=='admin')return;
-  try{
-    const input=document.getElementById('salesReportDate');
-    if(forceToday && input) input.value='';
 
-    const date=input?.value||'';
-    const data=await api('/api/admin/sales-report'+(date?'?date='+encodeURIComponent(date):''));
-
-    if(input && data?.date) input.value=data.date;
-
-    const total=Number(data?.summary?.total_sales||0);
-    const totalOrders=Number(data?.summary?.total_orders||0);
-    const byUser=data?.by_user||[];
-    const byProduct=data?.by_product||[];
-    const details=data?.details||[];
-
-    const salesToday=document.getElementById('statSalesToday');
-    const adminSalesTodayEl=document.getElementById('adminSalesToday');
-    const totalEl=document.getElementById('salesReportTotal');
-    const ordersEl=document.getElementById('salesReportOrders');
-    const usersEl=document.getElementById('salesReportUsers');
-
-    if(salesToday)salesToday.textContent=formatMoney(total);
-    if(adminSalesTodayEl)adminSalesTodayEl.textContent=formatMoney(total);
-    if(totalEl)totalEl.textContent=formatMoney(total);
-    if(ordersEl)ordersEl.textContent=totalOrders;
-    if(usersEl)usersEl.textContent=byUser.length;
-
-    const byUserBox=document.getElementById('salesByUserList');
-    if(byUserBox){
-      byUserBox.innerHTML=byUser.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Usuario</th><th>Pedidos</th><th>Total</th></tr></thead><tbody>${byUser.map(u=>`<tr><td><b>${safeText(u.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(u.customer_email||'')}</span></td><td>${u.total_orders}</td><td>$${formatMoney(u.total_sales)}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por usuario.';
-    }
-
-    const byProductBox=document.getElementById('salesByProductList');
-    if(byProductBox){
-      byProductBox.innerHTML=byProduct.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto real vendido</th><th>Pedidos</th><th>Total</th></tr></thead><tbody>${byProduct.map(p=>`<tr><td><b>${safeText(p.product_name||'Producto')}</b><br><span class="small-text">${safeText(p.product_category||'')}</span></td><td>${p.total_orders}</td><td>$${formatMoney(p.total_sales)}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por producto.';
-    }
-
-    const detailsBox=document.getElementById('salesDetailsList');
-    if(detailsBox){
-      detailsBox.innerHTML=details.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Producto real vendido</th><th>Monto</th><th>Fecha México</th></tr></thead><tbody>${details.map(o=>`<tr><td>#${o.id}</td><td><b>${safeText(o.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(o.customer_email||'')}</span></td><td>${safeText(o.product_name||'')}</td><td>$${formatMoney(o.amount)}</td><td>${safeText(o.created_at_mx||'')}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas en esta fecha.';
-    }
-  }catch(e){
-    console.warn('No se pudo cargar reporte de ventas',e);
-    showMessage(e.message||'Error cargando reporte de ventas','error');
-  }
-}
-
-function openSalesReport(){
-  if(currentUser?.role==='admin'){
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminSalesReportPanel'),80);
-    loadSalesReport(true);
-  }
-}
 
 const __oldShowSectionForSalesToday = showSection;
 showSection = function(name){
@@ -809,245 +78,11 @@ showSection = function(name){
 // }, 60000);
 
 
-function isDistributorUser(){
-  return currentUser && (currentUser.role === 'admin' || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
-}
-function isSubadminOnly(){
-  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' || (currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')));
-}
-
-const __oldShowSectionForDistributor = showSection;
-showSection = function(name){
-  __oldShowSectionForDistributor(name);
-  if(name === 'distributor' && isDistributorUser()){
-    loadDistributorPanel();
-    loadDistributorPrices();
-  }
-};
-
-const __oldLoadAppForDistributor = loadApp;
-loadApp = async function(){
-  await __oldLoadAppForDistributor();
-  const distributorVisible = isSubadminOnly();
-  document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !distributorVisible);
-  document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
-  if(currentUser?.role === 'admin'){
-    renderAdminSubadminSelect();
-  }
-};
-
-async function createReseller(){
-  try{
-    const data = await api('/api/distributor/resellers', {
-      method:'POST',
-      body: JSON.stringify({
-        name: resellerName.value,
-        email: resellerEmail.value,
-        password: resellerPassword.value
-      })
-    });
-    showMessage(data.message || 'Vendedor creado');
-    resellerName.value = resellerEmail.value = resellerPassword.value = '';
-    await loadDistributorPanel();
-  }catch(e){ showMessage(e.message,'error'); }
-}
-
-async function loadDistributorPanel(){
-  if(!isDistributorUser()) return;
-  try{
-    const sellers = await api('/api/distributor/resellers');
-    const stat = document.getElementById('statResellers');
-    if(stat) stat.textContent = sellers.length;
-    const select = document.getElementById('resellerBalanceSelect');
-    if(select){
-      select.innerHTML = '<option value="">Selecciona vendedor</option>' + sellers.map(s=>`<option value="${s.id}">${safeText(s.name)} (${safeText(s.email)}) - $${formatMoney(s.balance)}</option>`).join('');
-    }
-    const box = document.getElementById('resellersList');
-    if(box){
-      box.innerHTML = sellers.length ? sellers.map(s=>`<div class="item"><p><b>ID:</b> ${s.id}</p><p><b>Nombre:</b> ${safeText(s.name)}</p><p><b>Correo:</b> ${safeText(s.email)}</p><p><b>Saldo:</b> $${formatMoney(s.balance)}</p><div class="tools" style="margin-bottom:0"><button class="outline-btn" style="width:auto" onclick="resetResellerAccess(${s.id})">Reparar acceso</button><button class="danger-btn" style="width:auto" onclick="deleteReseller(${s.id})">Eliminar vendedor</button></div></div>`).join('') : 'Sin vendedores.';
-    }
-  }catch(e){ showMessage(e.message || 'Error cargando vendedores','error'); }
-}
-
-async function resetResellerAccess(id){
-  try{
-    const password = prompt('Escribe una nueva contraseña para este vendedor (mínimo 6 caracteres):');
-    if(!password) return;
-    const data = await api('/api/distributor/resellers/'+id+'/reset-access', {
-      method:'POST',
-      body: JSON.stringify({ password })
-    });
-    showMessage(data.message || 'Acceso reparado');
-    await loadDistributorPanel();
-  }catch(e){ showMessage(e.message || 'Error reparando acceso','error'); }
-}
-
-async function deleteReseller(id){
-  try{
-    if(!confirm('¿Seguro que quieres eliminar este vendedor? Esta acción solo se permite si no tiene pedidos, reportes o solicitudes.')) return;
-    const data = await api('/api/distributor/resellers/'+id, { method:'DELETE' });
-    showMessage(data.message || 'Vendedor eliminado');
-    await loadDistributorPanel();
-  }catch(e){ showMessage(e.message || 'No se pudo eliminar vendedor','error'); }
-}
-
-
-async function repairResellerByEmail(){
-  try{
-    const email = prompt('Correo exacto del vendedor:');
-    if(!email) return;
-    const password = prompt('Nueva contraseña para el vendedor (mínimo 6 caracteres):');
-    if(!password) return;
-    const name = prompt('Nombre del vendedor (opcional):') || email;
-    const data = await api('/api/distributor/resellers/repair-by-email', {
-      method:'POST',
-      body: JSON.stringify({ email, password, name })
-    });
-    showMessage(data.message || 'Acceso reparado');
-    await loadDistributorPanel();
-  }catch(e){ showMessage(e.message || 'Error reparando acceso por correo','error'); }
-}
-
-async function addResellerBalance(){
-  try{
-    const data = await api('/api/distributor/add-balance', {
-      method:'POST',
-      body: JSON.stringify({
-        user_id: Number(resellerBalanceSelect.value),
-        amount: resellerBalanceAmount.value,
-        note: resellerBalanceNote.value
-      })
-    });
-    showMessage(data.message || 'Saldo agregado');
-    resellerBalanceAmount.value = resellerBalanceNote.value = '';
-    await loadDistributorPanel();
-  }catch(e){ showMessage(e.message,'error'); }
-}
-
-async function loadDistributorPrices(){
-  if(!isDistributorUser()) return;
-  try{
-    const prices = await api('/api/distributor/prices');
-    const box = document.getElementById('distributorPricesList');
-    if(!box) return;
-    box.innerHTML = prices.length ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Tu costo</th><th>Precio vendedor</th><th>Ganancia</th><th>Guardar</th></tr></thead><tbody>${prices.map(p=>`<tr><td><b>${safeText(p.name)}</b><br><span class="small-text">${safeText(p.category||'')}</span></td><td>$${formatMoney(p.owner_price)}</td><td><input id="resellerPrice-${p.product_id}" type="number" step="0.01" value="${Number(p.reseller_price||0)}" /></td><td>$${formatMoney(Number(p.reseller_price||0)-Number(p.owner_price||0))}</td><td><button class="primary-btn" onclick="saveDistributorPrice(${p.product_id})">Guardar</button></td></tr>`).join('')}</tbody></table></div>` : 'No hay productos.';
-  }catch(e){ showMessage(e.message || 'Error cargando precios','error'); }
-}
-
-async function saveDistributorPrice(productId){
-  try{
-    const value = document.getElementById('resellerPrice-'+productId).value;
-    const data = await api('/api/distributor/prices', {method:'PATCH', body: JSON.stringify({product_id: productId, sale_price: value})});
-    showMessage(data.message || 'Precio actualizado');
-    await loadDistributorPrices();
-  }catch(e){ showMessage(e.message,'error'); }
-}
-
-const __oldLoadUsersForSubadminTools = loadUsers;
-loadUsers = async function(){
-  await __oldLoadUsersForSubadminTools();
-  renderAdminSubadminSelect();
-  const box=document.getElementById('usersList');
-  if(currentUser?.role==='admin' && box && Array.isArray(allUsers)){
-    box.innerHTML = allUsers.map(u=>{
-      const isPanelOwner = u.is_panel_admin === true || u.is_panel_admin === 1 || u.is_panel_admin === 'true';
-      const isDistributor = !isPanelOwner && (u.is_subadmin === true || u.is_subadmin === 1 || u.is_subadmin === 'true');
-      const chip = isPanelOwner ? '<span class="chip">Panel propietario</span>' : (isDistributor ? '<span class="chip">Admin distribuidor</span>' : '');
-      const roleText = isPanelOwner ? 'panel_propietario' : safeText(u.role);
-      const action = (!isPanelOwner && u.role !== 'admin') ? `<button class="outline-btn" onclick="toggleSubadmin(${u.id}, ${isDistributor ? 'false' : 'true'})">${isDistributor ? 'Quitar admin distribuidor' : 'Convertir en admin distribuidor'}</button>` : '';
-      return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${roleText} ${chip}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p>${action}</div>`;
-    }).join('') || 'No hay usuarios.';
-  }
-};
-
-function renderAdminSubadminSelect(){
-  const select=document.getElementById('subadminPriceUserSelect');
-  if(!select || !Array.isArray(allUsers)) return;
-  const current=select.value;
-  const subadmins=allUsers.filter(u=>!(u.is_panel_admin === true || u.is_panel_admin === 1 || u.is_panel_admin === 'true') && (u.is_subadmin === true || u.is_subadmin === 1 || u.is_subadmin === 'true'));
-  select.innerHTML='<option value="">Selecciona admin distribuidor</option>'+subadmins.map(u=>`<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)})</option>`).join('');
-  select.value=current;
-}
-
-async function toggleSubadmin(userId, value){
-  try{
-    const data=await api('/api/admin/users/'+userId+'/subadmin',{method:'PATCH', body:JSON.stringify({is_subadmin:value===true})});
-    showMessage(data.message || 'Usuario actualizado');
-    await loadUsers();
-  }catch(e){ showMessage(e.message,'error'); }
-}
-
-async function loadAdminSubadminPrices(){
-  try{
-    const userId=document.getElementById('subadminPriceUserSelect')?.value;
-    const box=document.getElementById('adminSubadminPricesList');
-    if(!userId){ if(box) box.innerHTML='Selecciona un admin distribuidor.'; return; }
-    const prices=await api('/api/admin/subadmin-prices/'+userId);
-    if(!box) return;
-    box.innerHTML=prices.length ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Precio general</th><th>Precio para este admin</th><th>Guardar</th></tr></thead><tbody>${prices.map(p=>`<tr><td><b>${safeText(p.name)}</b><br><span class="small-text">${safeText(p.category||'')}</span></td><td>$${formatMoney(p.general_price)}</td><td><input id="subadminPrice-${p.product_id}" type="number" step="0.01" value="${Number(p.sale_price||0)}" /></td><td><button class="primary-btn" onclick="saveAdminSubadminPrice(${userId}, ${p.product_id})">Guardar</button></td></tr>`).join('')}</tbody></table></div>` : 'No hay productos.';
-  }catch(e){ showMessage(e.message || 'Error cargando precios','error'); }
-}
-
-async function saveAdminSubadminPrice(userId, productId){
-  try{
-    const value=document.getElementById('subadminPrice-'+productId).value;
-    const data=await api('/api/admin/subadmin-prices',{method:'PATCH', body:JSON.stringify({user_id:Number(userId), product_id:productId, sale_price:value})});
-    showMessage(data.message || 'Precio guardado');
-    await loadAdminSubadminPrices();
-  }catch(e){ showMessage(e.message,'error'); }
-}
-
 
 
 // ===============================
 // FIX FINAL: reporte de ventas con costo y ganancia real
 // ===============================
-async function loadSalesReport(forceToday=false){
-  if(currentUser?.role!=='admin')return;
-  try{
-    const input=document.getElementById('salesReportDate');
-    if(forceToday && input) input.value='';
-    const date=input?.value||'';
-    const data=await api('/api/admin/sales-report'+(date?'?date='+encodeURIComponent(date):''));
-    if(input && data?.date) input.value=data.date;
-
-    const total=Number(data?.summary?.total_sales||0);
-    const totalCost=Number(data?.summary?.total_cost||0);
-    const totalProfit=Number(data?.summary?.total_profit||0);
-    const totalOrders=Number(data?.summary?.total_orders||0);
-    const byUser=data?.by_user||[];
-    const byProduct=data?.by_product||[];
-    const details=data?.details||[];
-    renderDashboardSalesCharts(byUser, byProduct);
-
-    const setText=(id,value)=>{const el=document.getElementById(id); if(el)el.textContent=value;};
-    setText('statSalesToday', formatMoney(total));
-    setText('adminSalesToday', formatMoney(total));
-    setText('salesReportTotal', formatMoney(total));
-    setText('salesReportCost', formatMoney(totalCost));
-    setText('salesReportProfit', formatMoney(totalProfit));
-    setText('salesReportOrders', totalOrders);
-    setText('salesReportUsers', byUser.length);
-
-    const byUserBox=document.getElementById('salesByUserList');
-    if(byUserBox){
-      byUserBox.innerHTML=byUser.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Usuario</th><th>Pedidos</th><th>Venta</th><th>Costo</th><th>Ganancia</th></tr></thead><tbody>${byUser.map(u=>`<tr><td><b>${safeText(u.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(u.customer_email||'')}</span></td><td>${u.total_orders}</td><td>$${formatMoney(u.total_sales)}</td><td>$${formatMoney(u.total_cost)}</td><td><b>$${formatMoney(u.total_profit)}</b></td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por usuario.';
-    }
-
-    const byProductBox=document.getElementById('salesByProductList');
-    if(byProductBox){
-      byProductBox.innerHTML=byProduct.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto real vendido</th><th>Pedidos</th><th>Venta</th><th>Costo</th><th>Ganancia</th></tr></thead><tbody>${byProduct.map(p=>`<tr><td><b>${safeText(p.product_name||'Producto')}</b><br><span class="small-text">${safeText(p.product_category||'')}</span></td><td>${p.total_orders}</td><td>$${formatMoney(p.total_sales)}</td><td>$${formatMoney(p.total_cost)}</td><td><b>$${formatMoney(p.total_profit)}</b></td></tr>`).join('')}</tbody></table></div>`:'Sin ventas por producto.';
-    }
-
-    const detailsBox=document.getElementById('salesDetailsList');
-    if(detailsBox){
-      detailsBox.innerHTML=details.length?`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Cliente</th><th>Producto real vendido</th><th>Venta</th><th>Costo</th><th>Ganancia</th><th>Fecha México</th></tr></thead><tbody>${details.map(o=>`<tr><td>#${o.id}</td><td><b>${safeText(o.customer_name||'Cliente')}</b><br><span class="small-text">${safeText(o.customer_email||'')}</span></td><td>${safeText(o.product_name||'')}</td><td>$${formatMoney(o.amount)}</td><td>$${formatMoney(o.cost_price)}</td><td><b>$${formatMoney(o.profit)}</b></td><td>${safeText(o.created_at_mx||'')}</td></tr>`).join('')}</tbody></table></div>`:'Sin ventas en esta fecha.';
-    }
-  }catch(e){
-    console.warn('No se pudo cargar reporte de ventas',e);
-    showMessage(e.message||'Error cargando reporte de ventas','error');
-  }
-}
 
 
 function populatePlatformProductSelect(){
@@ -1273,15 +308,6 @@ async function createPlatformAccount(){
   }
 }
 
-function openAccountReportsFromDashboard(){
-  if(currentUser?.role==='admin'){
-    showSection('admin');
-    setTimeout(()=>scrollToAdmin('adminAccountReportsPanel'),80);
-    loadAccountReports();
-  }else{
-    showSection('reports');
-  }
-}
 
 function calculateReportRefundInfo(report){
   const amount=Number(report.order_amount||0);
@@ -1295,62 +321,6 @@ function calculateReportRefundInfo(report){
   return {daysUsed,daysRemaining,refund};
 }
 
-async function loadAccountReports(){
-  if(currentUser?.role!=='admin')return;
-  try{
-    const reports = await api('/api/admin/account-reports');
-    
-    // --- PON ESTE DETECTOR AQUÍ ---
-    console.log("👀 REPORTES RECIBIDOS:", reports);
-    // ------------------------------
-    const pending=reports.filter(r=>String(r.status||'').toLowerCase()==='pendiente');
-    const stat=document.getElementById('statReports');
-    if(stat)stat.textContent=pending.length;
-    const box=document.getElementById('adminAccountReportsList');
-  if(!box)return;
-  box.innerHTML=reports.length?reports.map(r=>{
-    const info=calculateReportRefundInfo(r);
-    const canAct=String(r.status||'').toLowerCase()==='pendiente';
-    return `<div class="item">
-      <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
-      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
-      <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
-      <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
-      <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
-      <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
-
-      ${r.evidence_image ? `
-      <details style="margin: 12px 0; cursor: pointer; background: #2a2a40; padding: 10px; border-radius: 5px; border: 1px solid #444;">
-        <summary style="color: #10b981; font-weight: bold; outline: none; user-select: none;">📷 Ver Evidencia Adjunta</summary>
-        <div style="text-align: center; margin-top: 15px;">
-          <img src="${r.evidence_image}" style="max-width: 100%; max-height: 400px; border-radius: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);" alt="Evidencia">
-        </div>
-      </details>
-      ` : ''}
-      <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
-      ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
-      <div class="two-row">
-        <button class="green-btn" onclick="replaceReportedAccountAuto(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazo (inventario)</button>
-        <button class="outline-btn" onclick="replaceReportedAccountManual(${r.id})" ${canAct?'':'disabled'}>✍️ Reemplazo manual</button>
-      </div>
-      <div class="two-row" style="margin-top:10px">
-        <button class="danger-btn" onclick="refundReportedAccount(${r.id}, '${r.order_created_at}')" ${canAct?'':'disabled'}>💰 Reembolso proporcional</button>
-        <button class="danger-btn" style="background:#b91c1c" onclick="refundFullReportedAccount(${r.id})" ${canAct?'':'disabled'}>💸 Reembolso completo</button>
-      </div>
-      <div class="two-row" style="margin-top:10px">
-        <select id="reportStatus-${r.id}">
-          <option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option>
-          <option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option>
-          <option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option>
-          <option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option>
-        </select>
-        <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
-      </div>
-      <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
-    </div>`;
-  }).join(''):'Sin reportes de falla.';
-  }catch(e){console.warn('No se pudieron cargar reportes de falla',e)}
-}
 
 // Reemplazo automático desde inventario
 async function replaceReportedAccountAuto(reportId){
@@ -1371,11 +341,11 @@ function replaceReportedAccountManual(reportId){
       <div class="modal-card" style="max-width:720px;">
         <div style="display:flex;justify-content:space-between;align-items:center"><h3>Reemplazo manual</h3><button class="modal-close-btn" onclick="document.getElementById('replaceManualModal')?.remove()">×</button></div>
         <p class="small-text">Ingresa los datos de la cuenta que vas a usar como reemplazo. La fecha de compra debe reflejar la fecha original cuando corresponde.</p>
-        <label class="field-label">Correo</label><input id="rm_email" />
-        <label class="field-label">Contraseña</label><input id="rm_password" />
+        <label class="field-label">Correo</label><input id="rm_email" type="email" />
+        <label class="field-label">Contraseña</label><input id="rm_password" type="text" />
         <label class="field-label">Perfil (opcional)</label><input id="rm_profile" />
         <label class="field-label">PIN (opcional)</label><input id="rm_pin" />
-        <label class="field-label">Fecha de compra oficial (YYYY-MM-DD)</label><input id="rm_purchase_date" placeholder="2026-06-01" />
+        <label class="field-label">Fecha de compra oficial</label><input id="rm_purchase_date" type="date" />
         <label class="field-label">URL / Nota (opcional)</label><input id="rm_url" />
         <div style="display:flex;gap:8px;margin-top:12px">
           <button class="green-btn" onclick="submitReplaceManual(${reportId})">Aplicar reemplazo</button>
@@ -1389,428 +359,43 @@ function replaceReportedAccountManual(reportId){
 
 async function submitReplaceManual(reportId){
   try{
-    const account_email = (document.getElementById('rm_email')?.value||'').trim();
-    const account_password = (document.getElementById('rm_password')?.value||'').trim();
-    const profile_name = (document.getElementById('rm_profile')?.value||'').trim();
-    const profile_pin = (document.getElementById('rm_pin')?.value||'').trim();
-    const official_purchase_date = (document.getElementById('rm_purchase_date')?.value||'').trim();
-    const access_url = (document.getElementById('rm_url')?.value||'').trim();
+    const account_email=(document.getElementById('rm_email')?.value||'').trim();
+    const account_password=(document.getElementById('rm_password')?.value||'').trim();
+    const profile_name=(document.getElementById('rm_profile')?.value||'').trim();
+    const profile_pin=(document.getElementById('rm_pin')?.value||'').trim();
+    const official_purchase_date=(document.getElementById('rm_purchase_date')?.value||'').trim();
+    const access_url=(document.getElementById('rm_url')?.value||'').trim();
 
-    if(!account_email || !account_password) return alert('Correo y contraseña son obligatorios para reemplazo manual');
+    if(!account_email || !account_password){
+      throw new Error('Correo y contraseña son obligatorios para reemplazo manual.');
+    }
 
-    const body = { manual:true, account_email, account_password, profile_name, profile_pin, access_url, official_purchase_date };
-    const data = await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify(body)});
-    showMessage(data.message||'Reemplazo manual aplicado');
+    const body = {
+      manual:true,
+      account_email,
+      account_password,
+      profile_name,
+      profile_pin,
+      access_url,
+      official_purchase_date
+    };
+
+    const data = await api('/api/admin/account-reports/'+reportId+'/replace',{
+      method:'POST',
+      body: JSON.stringify(body)
+    });
+
+    showMessage(data.message||'Cuenta reemplazada manualmente');
     document.getElementById('replaceManualModal')?.remove();
     await loadAccountReports();
     if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
-  }catch(e){showMessage(e.message||'Error en reemplazo manual','error')}
-}
-
-// Reembolso completo: aplica el monto total pagado por el vendedor
-async function refundFullReportedAccount(reportId){
-  try{
-    if(!reportId) throw new Error('ID de reporte inválido');
-    if(!confirm('¿Aplicar reembolso completo por el monto total pagado al vendedor?')) return;
-    const endpoint = `/api/admin/account-reports/${encodeURIComponent(reportId)}/refund-full`;
-    const data = await api(endpoint,{method:'POST',body:JSON.stringify({})});
-    showMessage(data.message||'Reembolso completo aplicado');
-    await loadAccountReports();
-    await loadUsers();
-  }catch(e){showMessage(e.message||'Error aplicando reembolso completo','error')}
-}
-
-async function updateAccountReportStatus(reportId){
-  try{
-    const status=document.getElementById(`reportStatus-${reportId}`)?.value||'pendiente';
-    const admin_response=document.getElementById(`reportResponse-${reportId}`)?.value||'';
-    const data=await api('/api/admin/account-reports/'+reportId+'/status',{method:'PATCH',body:JSON.stringify({status,admin_response})});
-    showMessage(data.message||'Reporte actualizado');
-    await loadAccountReports();
-  }catch(e){showMessage(e.message,'error')}
-}
-
-
-async function replaceReportedAccount(reportId){
-  try{
-    const useManual = confirm(
-      '¿Quieres capturar manualmente la cuenta de reemplazo?\n\n' +
-      'Aceptar = Capturar correo, contraseña, perfil y PIN manualmente.\n' +
-      'Cancelar = Usar una cuenta disponible del inventario automático.'
-    );
-
-    let body = {};
-
-    if(useManual){
-      const account_email = prompt('Correo de la cuenta nueva:');
-      if(!account_email || !account_email.trim()) throw new Error('El correo de la cuenta es obligatorio');
-
-      const account_password = prompt('Contraseña de la cuenta nueva:');
-      if(!account_password || !account_password.trim()) throw new Error('La contraseña es obligatoria');
-
-      const profile_name = prompt('Perfil (opcional):', '') || '';
-      const profile_pin = prompt('PIN del perfil (opcional):', '') || '';
-      const access_url = prompt('URL para código/soporte (opcional):', '') || '';
-      const extra_data = prompt('Notas extra / datos adicionales (opcional):', '') || '';
-
-      body = {
-        manual: true,
-        account_email: account_email.trim(),
-        account_password: account_password.trim(),
-        profile_name: profile_name.trim(),
-        profile_pin: profile_pin.trim(),
-        access_url: access_url.trim(),
-        extra_data: extra_data.trim()
-      };
-    }else{
-      if(!confirm('¿Reemplazar esta cuenta usando una cuenta disponible del inventario automático?'))return;
-    }
-
-    const data=await api('/api/admin/account-reports/'+reportId+'/replace',{
-      method:'POST',
-      body:JSON.stringify(body)
-    });
-
-    showMessage(data.message||'Cuenta reemplazada');
-    await loadAccountReports();
-    if(typeof loadMyAccountReports === 'function') await loadMyAccountReports();
-    if(typeof loadAdminOrders === 'function') await loadAdminOrders();
-    if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
   }catch(e){
-    showMessage(e.message || 'Error reemplazando cuenta','error');
+    showMessage(e.message||'Error aplicando reemplazo manual','error');
   }
 }
 
-
-async function refundReportedAccount(reportId, fechaCompra) {
-  try {
-    let amountToSend = null;
-
-    // 1. PRIMER PASO: Preguntar qué cuenta falló
-    const cuentaFallida = prompt("Si es un COMBO: ¿Qué cuenta específica falló? (Ej. Netflix, Vix)\n\nSi es cuenta normal: Deja esto en blanco y presiona Aceptar.");
-    
-    if (cuentaFallida === null) return; // Si el admin cancela, cerramos.
-
-    // 2. SEGUNDO PASO: Si escribió el nombre de la cuenta, pedimos el precio
-    if (cuentaFallida.trim() !== '') {
-        const basePriceStr = prompt(`¿Cuál es el costo base de la cuenta de ${cuentaFallida.toUpperCase()}? (Solo escribe el número, ej. 45.50)`);
-        
-        if (basePriceStr === null) return;
-
-        const precioBase = parseFloat(basePriceStr);
-        if (isNaN(precioBase) || precioBase <= 0) {
-            alert("Monto inválido. Operación cancelada.");
-            return;
-        }
-
-        // 3. TERCER PASO: Hacemos el cálculo matemático AQUÍ MISMO para que no falle nada
-        const hoy = new Date();
-        const compra = new Date(fechaCompra);
-        const diasTotalesServicio = 28; // Tu sistema original usa 28 días, lo igualamos aquí.
-        
-        let diasUsados = 0;
-        // Validamos que la fecha sea correcta
-        if (!isNaN(compra.getTime())) {
-            const diferenciaMilisegundos = hoy.getTime() - compra.getTime();
-            diasUsados = Math.floor(diferenciaMilisegundos / (1000 * 60 * 60 * 24));
-        }
-        
-        // Evitamos números negativos
-        diasUsados = Math.max(0, diasUsados); 
-
-        let diasRestantes = 0;
-        if (diasUsados >= diasTotalesServicio) {
-            amountToSend = 0;
-        } else {
-            diasRestantes = diasTotalesServicio - diasUsados;
-            const costoPorDia = precioBase / diasTotalesServicio;
-            amountToSend = parseFloat((costoPorDia * diasRestantes).toFixed(2));
-        }
-
-        // 4. Confirmación final con todos los datos
-        if (!confirm(`COMBO DETECTADO (Falla en ${cuentaFallida.toUpperCase()}):\n\nEsta cuenta se ha usado por ${diasUsados} días.\nEl reembolso por los ${diasRestantes} días restantes es de: $${amountToSend}.\n\n¿Aplicar este monto al vendedor?`)) {
-            return;
-        }
-        
-    } else {
-        // SI ES CUENTA NORMAL (Lo dejó en blanco)
-        if (!confirm('¿Aplicar reembolso proporcional NORMAL al saldo del usuario?')) {
-            return;
-        }
-    }
-
-    // 5. Enviamos la instrucción al servidor
-    const data = await api('/api/admin/account-reports/' + reportId + '/refund-proportional', {
-        method: 'POST',
-        body: JSON.stringify({ overrideAmount: amountToSend }) 
-    });
-
-    showMessage(data.message || 'Reembolso aplicado');
-    await loadAccountReports();
-    await loadUsers();
-
-  } catch (e) {
-    // Si algo falla, forzamos que salga un aviso visual en pantalla
-    console.error("Error al procesar reembolso:", e);
-    alert("Ocurrió un error al intentar reembolsar: " + e.message);
-  }
-}
-// ===============================
-// GRÁFICAS DEL DASHBOARD ADMIN
-// Usa los datos del reporte de ventas existente. No requiere librerías externas.
-// ===============================
-function makeChartColor(index){
-  const colors=['#f00662','#17135a','#2563eb','#7c3aed','#06b6d4','#f59e0b','#16a34a'];
-  return colors[index % colors.length];
-}
-
-function renderDashboardSalesCharts(byUser=[], byProduct=[]){
-  const chartsPanel=document.getElementById('dashboardChartsPanel');
-  if(chartsPanel && currentUser?.role==='admin') chartsPanel.classList.remove('hidden');
-
-  const productBox=document.getElementById('dashboardTopProductsChart');
-  const userBox=document.getElementById('dashboardTopUsersChart');
-
-  if(productBox){
-    const products=(byProduct||[]).slice(0,6);
-    const totalOrders=products.reduce((acc,p)=>acc+Number(p.total_orders||0),0);
-    if(!products.length || totalOrders<=0){
-      productBox.innerHTML='<div class="empty-chart">Sin productos vendidos hoy.</div>';
-    }else{
-      let start=0;
-      const stops=[];
-      products.forEach((p,i)=>{
-        const val=Number(p.total_orders||0);
-        const deg=(val/totalOrders)*360;
-        const color=makeChartColor(i);
-        stops.push(`${color} ${start}deg ${start+deg}deg`);
-        start+=deg;
-      });
-      productBox.innerHTML=`<div class="donut-summary"><div class="donut" style="background:conic-gradient(${stops.join(',')})"><div class="donut-center">${totalOrders}<span>pedidos</span></div></div><div class="legend-list">${products.map((p,i)=>`<div class="legend-item"><span class="legend-dot" style="background:${makeChartColor(i)}"></span><span class="legend-name">${safeText(p.product_name||'Producto')}</span><span class="legend-value">${Number(p.total_orders||0)}</span></div>`).join('')}</div></div>`;
-    }
-  }
-
-  if(userBox){
-    const users=(byUser||[]).slice(0,6);
-    const max=Math.max(...users.map(u=>Number(u.total_sales||0)),0);
-    if(!users.length || max<=0){
-      userBox.innerHTML='<div class="empty-chart">Sin ventas por usuario hoy.</div>';
-    }else{
-      userBox.innerHTML=`<div class="bar-chart">${users.map((u,i)=>{const val=Number(u.total_sales||0);const pct=Math.max(4,(val/max)*100);return `<div class="bar-row"><div class="bar-label" title="${safeText(u.customer_email||u.customer_name||'Usuario')}">${safeText(u.customer_name||u.customer_email||'Usuario')}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:linear-gradient(90deg,${makeChartColor(i)},#f00662)"></div></div><div class="bar-value">$${formatMoney(val)}</div></div>`}).join('')}</div>`;
-    }
-  }
-}
-
-// loadApp automático movido al final seguro
-
-
-// ===============================
-// FIX SEGURO: permisos de dashboard/admin y botones funcionales
-// ===============================
-function isAdminUserSafe(){ return currentUser && currentUser.role === 'admin' && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true'); }
-
-function setHiddenSafe(id, hidden){
-  const el=document.getElementById(id);
-  if(el) el.classList.toggle('hidden', !!hidden);
-}
-
-function syncAdminVisibilitySafe(){
-  const isAdmin=isAdminUserSafe();
-  const esPanelPropietario =
-    currentUser?.is_panel_admin === true ||
-    currentUser?.is_panel_admin === 1 ||
-    currentUser?.is_panel_admin === 'true' ||
-    currentUser?.account_type === 'panel_propietario';
-  const showTraceability = isAdmin || esPanelPropietario;
-
-  setHiddenSafe('adminMenuBtn', true);
-  setHiddenSafe('adminSalesMenuBtn', true);
-  setHiddenSafe('dashInventoryCard', !isAdmin);
-  setHiddenSafe('dashSalesTodayCard', !isAdmin);
-  setHiddenSafe('dashboardChartsPanel', !isAdmin);
-  setHiddenSafe('dashBalanceCard', isAdmin);
-  
-  if(!isAdmin){
-    setHiddenSafe('section-admin', true);
-  }else{
-    const adminSection=document.getElementById('section-admin');
-    if(adminSection) adminSection.classList.remove('hidden');
-  }
-
-  // CONTROL DE BARRA LATERAL Y BOTONES APP
-  const sidebar = document.getElementById('sidebar');
-
-if (!isAdmin && !esPanelPropietario) {
-  if (sidebar) sidebar.style.display = 'none';
-  setHiddenSafe('panel-botones-vendedor', false);
-} else {
-  if (sidebar) sidebar.style.display = '';
-  setHiddenSafe('panel-botones-vendedor', true);
-}
-    
-    // DETECTOR UNIVERSAL DE DISTRIBUIDORES A PRUEBA DE BALAS
-    const esDist = currentUser && (
-      currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true' || 
-      currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
-      currentUser.account_type === 'admin_distribuidor' || currentUser.account_type === 'distribuidor_del_panel' || currentUser.account_type === 'panel_propietario'
-    );
-    
-    const btnUsr = document.getElementById('btn-dist-usuarios');
-    const btnPre = document.getElementById('btn-dist-precios');
-    const btnGan = document.getElementById('btn-dist-ganancias');
-    if (btnUsr) btnUsr.classList.toggle('hidden', !esDist);
-    if (btnPre) btnPre.classList.toggle('hidden', !esDist);
-    if (btnGan) btnGan.classList.toggle('hidden', !esDist);
-
-  
-  // TRUCO A PRUEBA DE BALAS PARA FULMINAR LAS TARJETAS VIEJAS
-  const tarjetasViejas = document.querySelectorAll('#section-dashboard .grid-cards');
-  tarjetasViejas.forEach(contenedor => {
-  if (!isAdmin && !esPanelPropietario) {
-    contenedor.style.display = 'none';
-  } else {
-    contenedor.style.display = '';
-  }
-});
-}
-function setDashboardMenuActiveSafe(){
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section==='dashboard'));
-}
-
-const __originalShowSectionStable = typeof showSection === 'function' ? showSection : null;
-showSection = function(name){
-  if(name==='admin' && !isAdminUserSafe()) name='dashboard';
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  const sec=document.getElementById('section-'+name);
-  if(sec) sec.classList.add('active');
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section===name));
-  document.getElementById('sidebar')?.classList.remove('show');
-  syncAdminVisibilitySafe();
-  if(name==='shop' && typeof loadProducts==='function') loadProducts();
-  if(name==='orders' && typeof loadMyOrders==='function') loadMyOrders();
-  if(name==='reports') {
-    setTimeout(()=>document.getElementById('reporteCorreo')?.focus(),80);
-    if(typeof loadMyReports==='function') loadMyReports();
-  }
-  if(name==='admin' && isAdminUserSafe()){
-    Promise.allSettled([
-      typeof loadUsers==='function'?loadUsers():Promise.resolve(),
-      typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
-      typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
-      typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
-      typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve()
-    ]);
-  }
-};
-
-async function scrollToAdmin(id){
-  if(!isAdminUserSafe()) return showSection('dashboard');
-  showSection('admin');
-
-  if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') await loadAdminOrders(1);
-  if(id==='adminBalanceRequestsPanel' && typeof loadBalanceRequests==='function') await loadBalanceRequests();
-  if(id==='adminAccountReportsPanel' && typeof loadAccountReports==='function') await loadAccountReports();
-  if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') await loadPlatformInventory(1);
-
-  setTimeout(()=>{
-    const el=document.getElementById(id);
-    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
-  },120);
-}
-
-function openUsersFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminUsersPanel'); else showSection('account'); }
-function openProductsFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminProductsPanel'); else showSection('shop'); }
-function openInventoryFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminPlatformAccountsPanel'); else showSection('shop'); }
-function openOrdersFromDashboard(){ if(isAdminUserSafe()) scrollToAdmin('adminOrdersPanel'); else showSection('orders'); }
-function openBalanceRequests(){ if(isAdminUserSafe()) scrollToAdmin('adminBalanceRequestsPanel'); else showSection('balance'); }
-function openAccountReportsFromDashboard(){
-  if(isAdminUserSafe()){
-    scrollToAdmin('adminAccountReportsPanel');
-  } else {
-    showSection('reports');
-    if(typeof loadMyReports === 'function') loadMyReports();
-  }
-}
-function openSalesReport(){ if(isAdminUserSafe()) scrollToAdmin('adminSalesReportPanel'); }
-
-const __baseLoadPlatformInventorySafe = typeof loadPlatformInventory === 'function' ? loadPlatformInventory : null;
-if(__baseLoadPlatformInventorySafe){
-  loadPlatformInventory = async function(page){
-    await __baseLoadPlatformInventorySafe(page);
-    const src=document.getElementById('adminPlatformAccountsCount');
-    const dst=document.getElementById('statInventory');
-    if(src && dst) dst.textContent = src.textContent || '0';
-  };
-}
-
-loadApp = async function(){
-  if(!token) return;
-  try{
-    currentUser = await api('/api/me');
-  }catch(e){
-    console.error('Sesión inválida', e);
-    localStorage.removeItem('token'); token=null; currentUser=null;
-    document.getElementById('authSection')?.classList.remove('hidden');
-    document.getElementById('appSection')?.classList.add('hidden');
-    return;
-  }
-
-  document.getElementById('authSection')?.classList.add('hidden');
-  document.getElementById('appSection')?.classList.remove('hidden');
-  const set=(id,val)=>{const el=document.getElementById(id); if(el) el.textContent=val;};
-  set('userName', currentUser?.name||'');
-  set('userEmail', currentUser?.email||'');
-  set('userRole', currentUser?.role||'user');
-  set('userBalance', formatMoney(currentUser?.balance));
-  set('sideEmail', currentUser?.email||'');
-  set('topUserName', currentUser?.name||'Usuario');
-  set('topUserBalance', formatMoney(currentUser?.balance));
-
-  syncAdminVisibilitySafe();
-
-  const panelAdminVisible = currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
-  const distributorVisibleFinal = panelAdminVisible || (currentUser && currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true'));
-  setHiddenSafe('distributorMenuBtn', !distributorVisibleFinal);
-  setHiddenSafe('dashDistributorCard', !distributorVisibleFinal);
-  setHiddenSafe('adminMenuBtn', true);
-  setHiddenSafe('adminSalesMenuBtn', true);
-
-  if(panelAdminVisible){
-    const statUsersEl=document.getElementById('statUsers'); if(statUsersEl) statUsersEl.textContent='0';
-    const statProductsEl=document.getElementById('statProducts'); if(statProductsEl) statProductsEl.textContent='0';
-  }
-
-  await Promise.allSettled([
-    typeof loadProducts==='function'?loadProducts():Promise.resolve(),
-    typeof loadMyOrders==='function'?loadMyOrders():Promise.resolve(),
-    typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve()
-  ]);
-
-  if(isAdminUserSafe()){
-    if(typeof setTodaySalesDate==='function') setTodaySalesDate();
-    await Promise.allSettled([
-      typeof loadUsers==='function'?loadUsers():Promise.resolve(),
-      typeof loadAdminProducts==='function'?loadAdminProducts():Promise.resolve(),
-      typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
-      typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
-      typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-      typeof loadDailySummary==='function'?loadDailySummary():Promise.resolve(),
-      typeof loadAdminActivity==='function'?loadAdminActivity():Promise.resolve()
-    ]);
-  }
-
-  set('topUserBalance', formatMoney(currentUser?.balance));
-  if(typeof loadMyReports==='function') loadMyReports();
-
- if(currentUser?.role === 'admin' || (currentUser?.is_subadmin === true || currentUser?.is_subadmin === 1 || currentUser?.is_subadmin === 'true')) {
-    showSection('dashboard');
-  } else {
-    // ESTO DEJA ENTRAR A LOS VENDEDORES AL PANEL CENTRAL
-    document.querySelector('[data-section="dashboard"]')?.classList.remove('hidden');
-    document.querySelector('[data-section="account"]')?.classList.add('hidden'); 
-    showSection('dashboard');
-  }
-};
+window.replaceReportedAccountManual = replaceReportedAccountManual;
+window.submitReplaceManual = submitReplaceManual;
 
 
 
@@ -1856,95 +441,7 @@ function toggleComboEditBox(id) {
   }
 }
 
-async function createProduct(){
-  try{
-    const data=await api('/api/admin/create-product',{
-      method:'POST',
-      body:JSON.stringify({
-        name:productName.value,
-        description:productDescription.value,
-        price:productPrice.value || 0,
-        cost_price:(document.getElementById('productCostPrice')?.value||0),
-        category:productCategory.value,
-        required_fields:getRequiredFieldsFromInput('productRequiredFields'),
-        charge_mode:productChargeMode.value,
-        stock_enabled:productStockEnabled.checked,
-        stock:productStock.value,
-        product_type:document.getElementById('productType')?.value || 'streaming_auto',
-        combo_items:getSelectedComboItems('create'),
-        combo_discount:document.getElementById('productComboDiscount')?.value || 0
-      })
-    });
-    showMessage(data.message||'Producto creado');
-    productName.value=productDescription.value=productPrice.value=productCategory.value=productRequiredFields.value='';
-    if(document.getElementById('productCostPrice'))productCostPrice.value='0';
-    if(document.getElementById('productType'))productType.value='streaming_auto';
-    if(document.getElementById('productComboDiscount'))productComboDiscount.value='5';
-    toggleComboCreateBox();
-    productStock.value='0';
-    productStockEnabled.checked=false;
-    await loadProducts();
-    await loadAdminProducts();
-  }catch(e){showMessage(e.message,'error')}
-}
-
-async function loadAdminProducts(){
-  const products=allProducts.length?allProducts:await api('/api/products');
-  if(document.getElementById('adminProductsCount'))adminProductsCount.textContent=products.length;
-  const list=document.getElementById('adminProductsList');
-  if(!list)return;
-  list.innerHTML=products.map(p=>{
-    const rf=parseJsonArray(p.required_fields);
-    const se=Number(p.stock_enabled||0)===1;
-    const type=String(p.product_type||'streaming_auto');
-    const selectedCombo=parseJsonArray(p.combo_items);
-    return `<div class="item" id="admin-product-${p.id}">
-      <div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id}); setTimeout(()=>toggleComboEditBox(${p.id}),60)">
-        <b>${safeText(p.name)}</b>
-        <span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')} · ${type==='combo_auto'?'Combo':type==='manual'?'Manual':'Automático'}</span>
-      </div>
-      <div class="admin-product-body">
-        <label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" />
-        <label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea>
-        <div class="three-row"><div><label class="field-label">Precio de venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo de compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div>
-        <label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea>
-        <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
-        <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
-        <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
-        <label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>
-        <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div>
-      </div>
-    </div>`
-  }).join('')||'No hay productos.';
-  products.forEach(p=>{
-    if(String(p.product_type||'')==='combo_auto'){
-      renderComboOptions(`editComboItemsBox-${p.id}`, parseJsonArray(p.combo_items), `edit-${p.id}`, p.id);
-    }
-  });
-}
-
-async function updateProduct(id){
-  try{
-    const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);
-    const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({
-      name:document.getElementById('editName-'+id).value,
-      description:document.getElementById('editDescription-'+id).value,
-      price:document.getElementById('editPrice-'+id).value,
-      cost_price:(document.getElementById('editCostPrice-'+id)?.value||0),
-      category:document.getElementById('editCategory-'+id).value,
-      required_fields,
-      charge_mode:document.getElementById('editChargeMode-'+id).value,
-      stock_enabled:document.getElementById('editStockEnabled-'+id).checked,
-      stock:document.getElementById('editStock-'+id).value,
-      product_type:document.getElementById(`editProductType-${id}`)?.value || 'streaming_auto',
-      combo_items:getSelectedComboItems(`edit-${id}`),
-      combo_discount:document.getElementById(`editComboDiscount-${id}`)?.value || 0
-    })});
-    showMessage(data.message||'Producto actualizado');
-    await loadProducts();
-    await loadAdminProducts();
-  }catch(e){showMessage(e.message,'error')}
-}
+// Funciones de comercio admin movidas a admin-commerce.js
 
 
 // ===============================
@@ -1978,13 +475,6 @@ function ensureComboCreateControls(){
     renderComboOptions('productComboItemsBox', [], 'create');
     toggleComboCreateBox();
   }
-}
-
-function toggleCreateProduct(){
-  const box=document.getElementById('createProductBox');
-  if(!box)return;
-  box.classList.toggle('hidden');
-  ensureComboCreateControls();
 }
 
 function hasAccountDelivery(order){
@@ -2279,99 +769,14 @@ setTimeout(() => {
   initInventoryHistoryModalBehavior();
 }, 100);
 
-// ===============================
-// INDICADOR: PRODUCTOS SIN STOCK
-// ===============================
-function isProductOutOfStock(product){
-  return Number(product?.stock_enabled || 0) === 1 && Number(product?.stock || 0) <= 0;
-}
-
-function getOutOfStockProducts(){
-  return (allProducts || []).filter(isProductOutOfStock);
-}
-
-function updateOutOfStockStats(){
-  const count = getOutOfStockProducts().length;
-  const isAdmin = isAdminUserSafe();
-  const setText = (id, value) => {
-    const el = document.getElementById(id);
-    if(el) el.textContent = value;
-  };
-  const setVisible = (id, visible) => {
-    const el = document.getElementById(id);
-    if(el) el.classList.toggle('hidden', !visible);
-  };
-
-  setText('statOutOfStock', count);
-  setText('adminOutOfStockCount', count);
-  setVisible('dashOutOfStockCard', isAdmin);
-  setVisible('adminOutOfStockCard', isAdmin);
-
-  ['dashOutOfStockCard','adminOutOfStockCard'].forEach(id => {
-    const el = document.getElementById(id);
-    if(el) el.classList.toggle('stock-alert', count > 0);
-  });
-}
-
-function openOutOfStockFromDashboard(){
-  if(!isAdminUserSafe()) return showSection('shop');
-
-  updateOutOfStockStats();
-  const outProducts = getOutOfStockProducts();
-
-  scrollToAdmin('adminProductsPanel');
-
-  setTimeout(() => {
-    outProducts.forEach(product => {
-      const item = document.getElementById('admin-product-' + product.id);
-      if(item) item.classList.add('open');
-    });
-
-    if(outProducts[0]){
-      document.getElementById('admin-product-' + outProducts[0].id)?.scrollIntoView({behavior:'smooth', block:'center'});
-      showMessage(`Hay ${outProducts.length} producto${outProducts.length === 1 ? '' : 's'} sin stock.`);
-    }else{
-      showMessage('No tienes productos sin stock.');
-    }
-  }, 450);
-}
-
-const __baseLoadProductsOutOfStock = typeof loadProducts === 'function' ? loadProducts : null;
-if(__baseLoadProductsOutOfStock){
-  loadProducts = async function(){
-    const result = await __baseLoadProductsOutOfStock();
-    updateOutOfStockStats();
-    return result;
-  };
-}
-
-const __baseLoadAdminProductsOutOfStock = typeof loadAdminProducts === 'function' ? loadAdminProducts : null;
-if(__baseLoadAdminProductsOutOfStock){
-  loadAdminProducts = async function(){
-    const result = await __baseLoadAdminProductsOutOfStock();
-    updateOutOfStockStats();
-    return result;
-  };
-}
-
-const __baseSyncAdminVisibilityOutOfStock = typeof syncAdminVisibilitySafe === 'function' ? syncAdminVisibilitySafe : null;
-if(__baseSyncAdminVisibilityOutOfStock){
-  syncAdminVisibilitySafe = function(){
-    __baseSyncAdminVisibilityOutOfStock();
-    updateOutOfStockStats();
-  };
-}
-
-
 loadApp();
 
 
 // ===============================
-// FIX REAL: Pedidos pendientes + Comunicados globales + Auto refresh
+// FIX REAL: Pedidos pendientes + Auto refresh
 // ===============================
 let __autoRefreshRunning = false;
 let __autoRefreshTimer = null;
-let __announcementTimer = null;
 
 function isManualPendingOrder(order){
   const type = String(order?.product_type || '').toLowerCase();
@@ -2419,178 +824,6 @@ function openManualPendingOrdersFromDashboard(){
   },120);
 }
 
-function renderAdminOrdersManualPendingOnly(){
-  const box = document.getElementById('adminOrdersList');
-  if(!box || !Array.isArray(adminOrders)) return;
-  const rows = adminOrders.filter(isManualPendingOrder);
-  const oldNotice = document.getElementById('manualPendingNotice');
-  if(oldNotice) oldNotice.remove();
-  const notice = document.createElement('div');
-  notice.id = 'manualPendingNotice';
-  notice.className = 'bank-box';
-  notice.innerHTML = `<b>Mostrando pedidos pendientes manuales.</b> <button class="outline-btn" style="width:auto;margin-left:10px" onclick="loadAdminOrders()">Ver todos los pedidos</button>`;
-  box.parentNode.insertBefore(notice, box);
-  
-  if(!rows.length){ box.innerHTML='No hay pedidos manuales pendientes.'; return; }
-  
-  box.innerHTML = rows.map(o=>{
-    const od=parseJsonObject(o.order_data);
-    
-    // === NUEVO: SEPARAMOS LOS ARCHIVOS DEL TEXTO NORMAL ===
-    const normalData = {};
-    let fileDataHtml = '';
-
-    for (let key in od) {
-      // Detectamos si el dato es un archivo en Base64
-      if (typeof od[key] === 'string' && od[key].startsWith('data:')) {
-        const isPdf = od[key].startsWith('data:application/pdf');
-        const label = isPdf ? '📄 Descargar PDF' : '🖼️ Descargar Imagen';
-        const ext = isPdf ? '.pdf' : '.jpg';
-        
-        fileDataHtml += `<div style="margin: 8px 0; padding: 8px; border: 1px solid #e0e0e0; border-radius: 5px; background: #fafafa;">
-          <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Archivo de ${safeText(key)}:</b></p>
-          <a href="${od[key]}" download="${key}_pedido_${o.id}${ext}" style="display: inline-block; padding: 6px 12px; background-color: #0288d1; color: white; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold;">${label}</a>
-        </div>`;
-      } else {
-        // Si no es un archivo, lo guardamos para que se dibuje normal
-        normalData[key] = od[key];
-      }
-    }
-    // ======================================================
-
-    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
-    
-    return `<div class="item">
-      <p><b>Pedido:</b> #${o.id}</p>
-      <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
-      <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
-      <p><b>Producto:</b> ${safeText(o.product_name)} <span class="chip">Manual</span></p>
-      <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
-      <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
-      <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
-      
-      ${renderOrderData(normalData)}
-      ${fileDataHtml}
-      
-      <label class="field-label">Estado</label>
-      <select id="status-${o.id}">
-        <option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option>
-        <option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option>
-        <option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option>
-        <option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option>
-      </select>
-      <label class="field-label">Respuesta para el cliente</label>
-      <textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>
-      ${copyButton}
-      <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
-      <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
-    </div>`;
-  }).join('');
-}
-function ensureAnnouncementsUI(){
-  const topbar = document.querySelector('.topbar');
-  if(topbar && !document.getElementById('announcementTicker')){
-    const ticker = document.createElement('div');
-    ticker.id = 'announcementTicker';
-    ticker.className = 'announcement-ticker';
-    ticker.innerHTML = `<div class="announcement-track"><div id="announcementMarquee" class="announcement-marquee"></div></div>`;
-    topbar.insertAdjacentElement('afterend', ticker);
-  }
-  if(currentUser?.role === 'admin') ensureAnnouncementAdminPanel();
-}
-
-function ensureAnnouncementAdminPanel(){
-  const admin = document.getElementById('section-admin');
-  if(!admin || document.getElementById('adminAnnouncementsPanel')) return;
-  const panel = document.createElement('div');
-  panel.id = 'adminAnnouncementsPanel';
-  panel.className = 'panel';
-  panel.innerHTML = `
-    <div class="panel-head"><div><h2>Comunicados globales</h2><p class="small-text">Estos avisos aparecen arriba del panel para todos los usuarios y administradores.</p></div><button class="outline-btn" style="width:auto" onclick="loadAdminAnnouncements()">Actualizar</button></div>
-    <div class="row">
-      <div>
-        <label class="field-label">Nuevo comunicado</label>
-        <textarea id="announcementText" placeholder="Ejemplo: Servicio de Disney con demoras, favor de avisar a tus clientes."></textarea>
-        <button class="primary-btn" onclick="createAnnouncement()">Publicar comunicado</button>
-      </div>
-      <div>
-        <h3>Comunicados publicados</h3>
-        <div id="adminAnnouncementsList" class="announcement-admin-list">Sin comunicados.</div>
-      </div>
-    </div>`;
-  const firstPanel = admin.querySelector('.panel');
-  if(firstPanel) admin.insertBefore(panel, firstPanel); else admin.appendChild(panel);
-}
-
-async function loadAnnouncements(){
-  try{
-    ensureAnnouncementsUI();
-    const list = await api('/api/announcements');
-    const ticker = document.getElementById('announcementTicker');
-    const marquee = document.getElementById('announcementMarquee');
-    if(!ticker || !marquee) return;
-    if(!Array.isArray(list) || !list.length){
-      ticker.classList.remove('show');
-      marquee.innerHTML = '';
-      return;
-    }
-    marquee.innerHTML = list.map(a=>`<span>${safeText(a.message || a.text || '')}</span>`).join('');
-    ticker.classList.add('show');
-  }catch(e){
-    console.warn('No se pudieron cargar comunicados', e);
-  }
-}
-
-async function loadAdminAnnouncements(){
-  if(currentUser?.role !== 'admin') return;
-  try{
-    ensureAnnouncementsUI();
-    const list = await api('/api/admin/announcements');
-    const box = document.getElementById('adminAnnouncementsList');
-    if(!box) return;
-    box.innerHTML = Array.isArray(list) && list.length ? list.map(a=>`
-      <div class="item">
-        <p><b>#${a.id}</b> ${safeText(a.message)}</p>
-        <p><b>Estado:</b> <span class="status">${Number(a.active)===1 || a.active===true?'Activo':'Oculto'}</span></p>
-        <div class="two-row">
-          <button class="outline-btn" onclick="toggleAnnouncement(${a.id}, ${Number(a.active)===1 || a.active===true ? 0 : 1})">${Number(a.active)===1 || a.active===true?'Ocultar':'Activar'}</button>
-          <button class="danger-btn" onclick="deleteAnnouncement(${a.id})">Eliminar</button>
-        </div>
-      </div>`).join('') : 'Sin comunicados.';
-  }catch(e){showMessage(e.message || 'Error cargando comunicados', 'error')}
-}
-
-async function createAnnouncement(){
-  try{
-    const text = (document.getElementById('announcementText')?.value || '').trim();
-    if(!text) throw new Error('Escribe el comunicado');
-    const data = await api('/api/admin/announcements', {method:'POST', body:JSON.stringify({message:text})});
-    showMessage(data.message || 'Comunicado publicado');
-    document.getElementById('announcementText').value='';
-    await loadAnnouncements();
-    await loadAdminAnnouncements();
-  }catch(e){showMessage(e.message, 'error')}
-}
-
-async function toggleAnnouncement(id, active){
-  try{
-    const data = await api('/api/admin/announcements/'+id, {method:'PATCH', body:JSON.stringify({active})});
-    showMessage(data.message || 'Comunicado actualizado');
-    await loadAnnouncements();
-    await loadAdminAnnouncements();
-  }catch(e){showMessage(e.message, 'error')}
-}
-
-async function deleteAnnouncement(id){
-  if(!confirm('¿Eliminar este comunicado?')) return;
-  try{
-    const data = await api('/api/admin/announcements/'+id, {method:'DELETE'});
-    showMessage(data.message || 'Comunicado eliminado');
-    await loadAnnouncements();
-    await loadAdminAnnouncements();
-  }catch(e){showMessage(e.message, 'error')}
-}
-
 const __originalLoadAdminOrdersForPending = typeof loadAdminOrders === 'function' ? loadAdminOrders : null;
 if(__originalLoadAdminOrdersForPending){
   loadAdminOrders = async function(){
@@ -2609,13 +842,11 @@ if(__originalLoadProductsForPending){
   }
 }
 
-const __originalShowSectionForAnnouncements = typeof showSection === 'function' ? showSection : null;
-if(__originalShowSectionForAnnouncements){
+const __originalShowSectionForPending = typeof showSection === 'function' ? showSection : null;
+if(__originalShowSectionForPending){
   showSection = function(name){
-    __originalShowSectionForAnnouncements(name);
+    __originalShowSectionForPending(name);
     ensureManualPendingCard();
-    ensureAnnouncementsUI();
-    if(name === 'admin' && currentUser?.role === 'admin') loadAdminAnnouncements();
   }
 }
 
@@ -2624,15 +855,12 @@ async function autoRefreshPanel(){
   __autoRefreshRunning = true;
   try{
     ensureManualPendingCard();
-    ensureAnnouncementsUI();
-    await loadAnnouncements();
     if(currentUser.role === 'admin'){
       await Promise.allSettled([
         typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
         typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
         typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-        typeof loadProducts==='function'?loadProducts():Promise.resolve(),
-        typeof loadAdminAnnouncements==='function'?loadAdminAnnouncements():Promise.resolve()
+        typeof loadProducts==='function'?loadProducts():Promise.resolve()
       ]);
     }else{
       await Promise.allSettled([
@@ -2651,9 +879,6 @@ async function autoRefreshPanel(){
 function startAutoRefreshPanel(){
   // Solo carga inicial. No hay refresco automático para no interrumpir compras o formularios.
   ensureManualPendingCard();
-  ensureAnnouncementsUI();
-  loadAnnouncements();
-  if(currentUser?.role === 'admin') loadAdminAnnouncements();
   if(__autoRefreshTimer) clearInterval(__autoRefreshTimer);
   __autoRefreshTimer = null;
 }
@@ -2664,229 +889,23 @@ setTimeout(startAutoRefreshPanel, 1200);
 
 
 
-// ===============================
-// FIX FINAL REAL: Comunicados visibles + listas compactas
-// ===============================
 function __isAdminUserFinal(){
   return currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin') && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
 }
 
-function ensureCompactAndAnnouncementsStyles(){
-  if(document.getElementById('finalPanelStyles')) return;
-  const st=document.createElement('style');
-  st.id='finalPanelStyles';
-  st.textContent=`
-    .compact-item{padding:0;overflow:hidden;background:#fff}
-    .compact-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 16px;cursor:pointer;background:#fbfdff;border-radius:18px}
-    .compact-title{font-size:18px;font-weight:900;color:var(--primary)}
-    .compact-meta{font-size:13px;color:var(--muted);font-weight:800;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%}
-    .compact-details{display:none;border-top:1px solid var(--border);padding:16px;background:#fff}
-    .compact-item.open .compact-details{display:block}
-    .compact-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .compact-actions button{width:auto;padding:10px 13px;border-radius:12px}
-    .important-announcements-label{display:none;background:linear-gradient(90deg,#ef4444,#b91c1c);color:#fff;text-align:center;font-weight:900;letter-spacing:.8px;border-radius:16px;margin:0 0 8px;padding:10px 14px;box-shadow:var(--shadow);font-size:15px}
-    .important-announcements-label.show{display:block}
-    .global-announcement-ticker{background:linear-gradient(90deg,var(--primary),var(--primary2));color:#fff;border-radius:18px;margin:0 0 18px;overflow:hidden;box-shadow:var(--shadow);display:none;align-items:center;min-height:48px}
-    .global-announcement-ticker.show{display:flex}
-    .global-announcement-badge{background:rgba(255,255,255,.16);font-weight:900;padding:14px 18px;white-space:nowrap;border-right:1px solid rgba(255,255,255,.18)}
-    .global-announcement-track{flex:1;overflow:hidden;white-space:nowrap}
-    .global-announcement-marquee{display:inline-block;padding-left:100%;animation:globalAnnouncementScroll 24s linear infinite;font-weight:900}
-    .global-announcement-marquee span{margin-right:45px}
-    @keyframes globalAnnouncementScroll{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
-    .announcement-mini{border:1px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px;background:#fbfdff}
-    .announcement-mini p{margin:0 0 8px}
-    @media(max-width:760px){.compact-header{align-items:flex-start}.compact-meta{max-width:52%;white-space:normal}.global-announcement-badge{padding:13px 12px}.global-announcement-marquee{animation-duration:18s}}
-  `;
-  document.head.appendChild(st);
-}
-
-function ensureGlobalAnnouncementsUIFinal(){
-  ensureCompactAndAnnouncementsStyles();
-  const topbar=document.querySelector('.topbar');
-  if(topbar && !document.getElementById('importantAnnouncementsLabel')){
-    const label=document.createElement('div');
-    label.id='importantAnnouncementsLabel';
-    label.className='important-announcements-label';
-    label.textContent='ANUNCIOS IMPORTANTES';
-    topbar.insertAdjacentElement('afterend', label);
-  }
-  const label=document.getElementById('importantAnnouncementsLabel');
-  if(topbar && !document.getElementById('globalAnnouncementTicker')){
-    const ticker=document.createElement('div');
-    ticker.id='globalAnnouncementTicker';
-    ticker.className='global-announcement-ticker';
-    ticker.innerHTML=`<div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
-    (label || topbar).insertAdjacentElement('afterend', ticker);
-  }
-
-  if(__isAdminUserFinal()){
-    const menu=document.querySelector('.menu');
-    if(menu && !document.getElementById('announcementsMenuBtn')){
-      const btn=document.createElement('button');
-      btn.id='announcementsMenuBtn';
-      btn.className='menu-btn';
-      btn.dataset.section='admin';
-      btn.type='button';
-      btn.innerHTML='📢 Comunicados';
-      btn.onclick=function(){ showSection('admin'); setTimeout(()=>document.getElementById('adminAnnouncementsPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),120); };
-      const adminBtn=document.getElementById('adminMenuBtn');
-      if(adminBtn && adminBtn.parentNode===menu) adminBtn.insertAdjacentElement('afterend', btn); else menu.appendChild(btn);
-    }
-
-    const admin=document.getElementById('section-admin');
-    if(admin && !document.getElementById('adminAnnouncementsPanel')){
-      const panel=document.createElement('div');
-      panel.id='adminAnnouncementsPanel';
-      panel.className='panel';
-      panel.innerHTML=`
-        <div class="panel-head">
-          <div><h2>Comunicados globales</h2><p class="small-text">Publica avisos para que aparezcan en una tira superior para todos los usuarios y administradores.</p></div>
-          <button class="outline-btn" style="width:auto" onclick="loadAdminAnnouncementsFinal()">Actualizar</button>
-        </div>
-        <div class="row">
-          <div>
-            <label class="field-label">Nuevo comunicado</label>
-            <textarea id="announcementTextFinal" placeholder="Ejemplo: Hoy Disney puede tardar de 5 a 10 minutos en entregar códigos."></textarea>
-            <button class="primary-btn" onclick="createAnnouncementFinal()">Publicar comunicado</button>
-          </div>
-          <div>
-            <h3>Comunicados publicados</h3>
-            <div id="adminAnnouncementsListFinal">Sin comunicados.</div>
-          </div>
-        </div>`;
-      const salesPanel=document.getElementById('adminSalesReportPanel');
-      const firstPanel=admin.querySelector('.panel');
-      if(salesPanel) admin.insertBefore(panel, salesPanel);
-      else if(firstPanel) admin.insertBefore(panel, firstPanel);
-      else admin.appendChild(panel);
-    }
-  }
-}
-
-async function loadGlobalAnnouncementsFinal(){
-  try{
-    ensureGlobalAnnouncementsUIFinal();
-    const list=await api('/api/announcements');
-    const ticker=document.getElementById('globalAnnouncementTicker');
-    const marquee=document.getElementById('globalAnnouncementMarquee');
-    const label=document.getElementById('importantAnnouncementsLabel');
-    if(!ticker || !marquee) return;
-    const active=(Array.isArray(list)?list:[]).filter(a=>String(a.message||'').trim());
-    if(!active.length){ticker.classList.remove('show'); if(label)label.classList.remove('show'); marquee.innerHTML='';return;}
-    marquee.innerHTML=active.map(a=>`<span>${safeText(a.message)}</span>`).join('');
-    ticker.classList.add('show');
-    if(label)label.classList.add('show');
-  }catch(e){console.warn('No se pudieron cargar comunicados globales',e)}
-}
-
-async function loadAdminAnnouncementsFinal(){
-  if(!__isAdminUserFinal()) return;
-  try{
-    ensureGlobalAnnouncementsUIFinal();
-    const list=await api('/api/admin/announcements');
-    const box=document.getElementById('adminAnnouncementsListFinal');
-    if(!box) return;
-    box.innerHTML=(Array.isArray(list)&&list.length)?list.map(a=>{
-      const active=Number(a.active)===1 || a.active===true;
-      return `<div class="announcement-mini">
-        <p><b>#${a.id}</b> ${safeText(a.message)}</p>
-        <p><b>Estado:</b> <span class="status">${active?'Activo':'Oculto'}</span></p>
-        <div class="compact-actions">
-          <button class="outline-btn" onclick="toggleAnnouncementFinal(${a.id}, ${active?0:1})">${active?'Ocultar':'Activar'}</button>
-          <button class="danger-btn" onclick="deleteAnnouncementFinal(${a.id})">Eliminar</button>
-        </div>
-      </div>`;
-    }).join(''):'Sin comunicados publicados.';
-  }catch(e){showMessage(e.message||'Error cargando comunicados','error')}
-}
-
-async function createAnnouncementFinal(){
-  try{
-    const text=(document.getElementById('announcementTextFinal')?.value||'').trim();
-    if(!text) throw new Error('Escribe el comunicado');
-    const data=await api('/api/admin/announcements',{method:'POST',body:JSON.stringify({message:text})});
-    showMessage(data.message||'Comunicado publicado');
-    document.getElementById('announcementTextFinal').value='';
-    await loadGlobalAnnouncementsFinal();
-    await loadAdminAnnouncementsFinal();
-  }catch(e){showMessage(e.message||'Error publicando comunicado','error')}
-}
-
-async function toggleAnnouncementFinal(id,active){
-  try{
-    const data=await api('/api/admin/announcements/'+id,{method:'PATCH',body:JSON.stringify({active})});
-    showMessage(data.message||'Comunicado actualizado');
-    await loadGlobalAnnouncementsFinal();
-    await loadAdminAnnouncementsFinal();
-  }catch(e){showMessage(e.message||'Error actualizando comunicado','error')}
-}
-
-async function deleteAnnouncementFinal(id){
-  if(!confirm('¿Eliminar este comunicado?')) return;
-  try{
-    const data=await api('/api/admin/announcements/'+id,{method:'DELETE'});
-    showMessage(data.message||'Comunicado eliminado');
-    await loadGlobalAnnouncementsFinal();
-    await loadAdminAnnouncementsFinal();
-  }catch(e){showMessage(e.message||'Error eliminando comunicado','error')}
+function isAdminUserSafe(){
+  if(typeof __isAdminUserFinal === 'function') return __isAdminUserFinal();
+  const role = String(currentUser?.role || '').toLowerCase();
+  const isPanelAdmin = currentUser?.is_panel_admin === true || currentUser?.is_panel_admin === 1 || currentUser?.is_panel_admin === 'true';
+  return (role === 'admin' || role === 'super_admin') && !isPanelAdmin;
 }
 
 function toggleCompactItemFinal(id){
   document.getElementById(id)?.classList.toggle('open');
 }
 
-function renderAdminOrderCompactFinal(o){
-  const od=parseJsonObject(o.order_data);
-  const itemId=`admin-order-compact-${o.id}`;
-  const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
-  return `<div class="item compact-item" id="${itemId}">
-    <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
-      <div class="compact-title">Pedido #${o.id}</div>
-      <div class="compact-meta">${safeText(o.customer_name||'Cliente')} · ${safeText(o.product_name||'Producto')} · ${safeText(getStatusText(o.status))}</div>
-    </div>
-    <div class="compact-details">
-      <p><b>Pedido:</b> #${o.id}</p>
-      <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
-      <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
-      <p><b>Producto:</b> ${safeText(o.product_name)} ${String(o.product_type||'').toLowerCase()==='manual'?'<span class="chip">Manual</span>':''}</p>
-      <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
-      <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
-      <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
-      ${typeof renderWarrantyNotice === 'function' ? renderWarrantyNotice(o) : ''}
-      ${renderOrderData(od)}
-      <label class="field-label">Estado</label>
-      <select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select>
-      <label class="field-label">Respuesta para el cliente</label>
-      <textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>
-      ${copyButton}
-      <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
-      <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
-    </div>
-  </div>`;
-}
 
-async function loadAdminOrders(page){
-  try{
-    if(Number.isFinite(Number(page)) && Number(page)>0) currentOrdersPage=Math.floor(Number(page));
-    adminOrders=await api(`/api/admin/orders?page=${Math.max(1, Number(currentOrdersPage||1))}&limit=${ADMIN_TABLE_PAGE_LIMIT}`);
-    const rows=Array.isArray(adminOrders?.rows) ? adminOrders.rows : [];
-    const total=Number(adminOrders?.total || rows.length || 0);
-    const totalPages=Number(adminOrders?.totalPages || 1);
-    currentOrdersPage=Number(adminOrders?.page || 1);
-    adminOrders=rows;
-
-    const adminCount=document.getElementById('adminOrdersCount');
-    if(adminCount)adminCount.textContent=total;
-    const stat=document.getElementById('statOrders');
-    if(stat)stat.textContent=currentUser?.role==='admin'?total:(myOrders||[]).length;
-    const list=document.getElementById('adminOrdersList');
-    const oldNotice=document.getElementById('manualPendingNotice');
-    if(oldNotice)oldNotice.remove();
-    if(list)list.innerHTML=adminOrders.length?adminOrders.map(renderAdminOrderCompactFinal).join(''):'No hay pedidos.';
-    if(list)renderTablePager(list, 'ordersPaginationControls', currentOrdersPage, totalPages, 'goAdminOrdersPagePrev', 'goAdminOrdersPageNext');
-    if(typeof updateManualPendingCount==='function') updateManualPendingCount();
-  }catch(e){showMessage(e.message||'Error cargando pedidos','error')}
-}
+// loadAdminOrders movida a admin-commerce.js
 
 function goAdminOrdersPagePrev(){
   if(currentOrdersPage>1){
@@ -2971,202 +990,6 @@ async function loadAccountReports() {
   }
 }
 
-// Inicialización limpia de comunicados
-setTimeout(() => {
-  if (typeof ensureGlobalAnnouncementsUIFinal === 'function') ensureGlobalAnnouncementsUIFinal();
-  if (typeof loadGlobalAnnouncementsFinal === 'function') loadGlobalAnnouncementsFinal();
-  if (typeof __isAdminUserFinal === 'function' && __isAdminUserFinal()) {
-    if (typeof loadAdminAnnouncementsFinal === 'function') loadAdminAnnouncementsFinal();
-  }
-}, 800);
-
-// ===============================
-// FIX: Comunicados como opción directa del menú lateral
-// ===============================
-function ensureGlobalAnnouncementsUIFinal(){
-  ensureCompactAndAnnouncementsStyles();
-
-  const topbar=document.querySelector('.topbar');
-  if(topbar && !document.getElementById('importantAnnouncementsLabel')){
-    const label=document.createElement('div');
-    label.id='importantAnnouncementsLabel';
-    label.className='important-announcements-label';
-    label.textContent='ANUNCIOS IMPORTANTES';
-    topbar.insertAdjacentElement('afterend', label);
-  }
-  const label=document.getElementById('importantAnnouncementsLabel');
-  if(topbar && !document.getElementById('globalAnnouncementTicker')){
-    const ticker=document.createElement('div');
-    ticker.id='globalAnnouncementTicker';
-    ticker.className='global-announcement-ticker';
-    ticker.innerHTML=`<div class="global-announcement-track"><div id="globalAnnouncementMarquee" class="global-announcement-marquee"></div></div>`;
-    (label || topbar).insertAdjacentElement('afterend', ticker);
-  }
-
-  const menu=document.querySelector('.menu');
-  if(menu && !document.getElementById('announcementsMenuBtn')){
-    const btn=document.createElement('button');
-    btn.id='announcementsMenuBtn';
-    btn.className='menu-btn';
-    btn.dataset.section='comunicados';
-    btn.type='button';
-    btn.innerHTML='📢 Comunicados';
-    btn.onclick=function(){ showSection('comunicados'); loadComunicadosSectionFinal(); };
-
-    const reportsBtn=document.querySelector('[data-section="reports"]');
-    if(reportsBtn && reportsBtn.parentNode===menu){
-      reportsBtn.insertAdjacentElement('afterend', btn);
-    }else{
-      menu.appendChild(btn);
-    }
-  }
-
-  const main=document.querySelector('.main');
-  if(main && !document.getElementById('section-comunicados')){
-    const section=document.createElement('section');
-    section.id='section-comunicados';
-    section.className='section';
-    section.innerHTML=`
-      <h1 class="section-title">Comunicados</h1>
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Comunicados globales</h2>
-            <p class="small-text">Avisos importantes visibles para todos los usuarios del panel.</p>
-          </div>
-          <button class="outline-btn" style="width:auto" onclick="loadComunicadosSectionFinal()">Actualizar</button>
-        </div>
-        <div id="announcementsCreateBoxFinal" class="hidden">
-          <label class="field-label">Nuevo comunicado</label>
-          <textarea id="announcementTextFinal" placeholder="Ejemplo: Hoy Disney puede tardar de 5 a 10 minutos en entregar códigos."></textarea>
-          <button class="primary-btn" onclick="createAnnouncementFinal()">Publicar comunicado</button>
-          <hr class="divider">
-        </div>
-        <div id="adminAnnouncementsListFinal">Cargando comunicados...</div>
-      </div>`;
-    main.appendChild(section);
-  }
-
-  const oldAdminPanel=document.getElementById('adminAnnouncementsPanel');
-  if(oldAdminPanel) oldAdminPanel.remove();
-}
-
-async function loadAdminAnnouncementsFinal(){
-  await loadComunicadosSectionFinal();
-}
-
-async function loadComunicadosSectionFinal(){
-  try{
-    ensureGlobalAnnouncementsUIFinal();
-    const isAdmin=__isAdminUserFinal();
-    const createBox=document.getElementById('announcementsCreateBoxFinal');
-    if(createBox) createBox.classList.toggle('hidden', !isAdmin);
-
-    const endpoint=isAdmin?'/api/admin/announcements':'/api/announcements';
-    const list=await api(endpoint);
-    const box=document.getElementById('adminAnnouncementsListFinal');
-    if(!box) return;
-
-    if(!Array.isArray(list) || !list.length){
-      box.innerHTML='Sin comunicados publicados.';
-      return;
-    }
-
-    box.innerHTML=list.map(a=>{
-      const active=Number(a.active)===1 || a.active===true;
-      if(isAdmin){
-        return `<div class="announcement-mini">
-          <p><b>#${a.id}</b> ${safeText(a.message)}</p>
-          <p><b>Estado:</b> <span class="status">${active?'Activo':'Oculto'}</span></p>
-          <div class="compact-actions">
-            <button class="outline-btn" onclick="toggleAnnouncementFinal(${a.id}, ${active?0:1})">${active?'Ocultar':'Activar'}</button>
-            <button class="danger-btn" onclick="deleteAnnouncementFinal(${a.id})">Eliminar</button>
-          </div>
-        </div>`;
-      }
-      return `<div class="announcement-mini"><p>${safeText(a.message)}</p></div>`;
-    }).join('');
-  }catch(e){
-    const box=document.getElementById('adminAnnouncementsListFinal');
-    if(box) box.innerHTML='No se pudieron cargar los comunicados.';
-    console.warn('Error cargando comunicados',e);
-  }
-}
-
-const __showSectionBeforeComunicadosMenuFix=typeof showSection==='function'?showSection:null;
-if(__showSectionBeforeComunicadosMenuFix){
-  showSection=function(name){
-    __showSectionBeforeComunicadosMenuFix(name);
-    if(name==='comunicados'){
-      setTimeout(()=>loadComunicadosSectionFinal(),80);
-    }
-  }
-}
-
-setTimeout(()=>{ensureGlobalAnnouncementsUIFinal();loadGlobalAnnouncementsFinal();},400);
-
-
-// ===============================
-// FIX DEFINITIVO: usar SOLO la tira nueva de Comunicados
-// Oculta y elimina la tira antigua (#announcementTicker) para evitar doble cinta.
-// ===============================
-(function(){
-  const styleId='singleAnnouncementTickerFixStyle';
-  if(!document.getElementById(styleId)){
-    const st=document.createElement('style');
-    st.id=styleId;
-    st.textContent='#announcementTicker{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;box-shadow:none!important}';
-    document.head.appendChild(st);
-  }
-
-  function removeLegacyAnnouncementTicker(){
-    const old=document.getElementById('announcementTicker');
-    if(old) old.remove();
-    const oldAdmin=document.getElementById('adminAnnouncementsPanel');
-    if(oldAdmin) oldAdmin.remove();
-  }
-
-  const originalEnsureGlobalAnnouncementsUIFinal = typeof ensureGlobalAnnouncementsUIFinal === 'function' ? ensureGlobalAnnouncementsUIFinal : null;
-  const originalLoadGlobalAnnouncementsFinal = typeof loadGlobalAnnouncementsFinal === 'function' ? loadGlobalAnnouncementsFinal : null;
-
-  // Reemplaza la función vieja que creaba #announcementTicker.
-  ensureAnnouncementsUI = function(){
-    removeLegacyAnnouncementTicker();
-    if(originalEnsureGlobalAnnouncementsUIFinal) originalEnsureGlobalAnnouncementsUIFinal();
-    removeLegacyAnnouncementTicker();
-  };
-
-  // Auto-refresh viejo llama loadAnnouncements(); lo redirigimos a la tira nueva.
-  loadAnnouncements = async function(){
-    removeLegacyAnnouncementTicker();
-    if(originalLoadGlobalAnnouncementsFinal) await originalLoadGlobalAnnouncementsFinal();
-    removeLegacyAnnouncementTicker();
-  };
-
-  // Refuerza la función nueva para limpiar cualquier legacy antes/después.
-  if(originalEnsureGlobalAnnouncementsUIFinal){
-    ensureGlobalAnnouncementsUIFinal = function(){
-      removeLegacyAnnouncementTicker();
-      originalEnsureGlobalAnnouncementsUIFinal();
-      removeLegacyAnnouncementTicker();
-    };
-  }
-
-  if(originalLoadGlobalAnnouncementsFinal){
-    loadGlobalAnnouncementsFinal = async function(){
-      removeLegacyAnnouncementTicker();
-      await originalLoadGlobalAnnouncementsFinal();
-      removeLegacyAnnouncementTicker();
-    };
-  }
-
-  // setInterval(removeLegacyAnnouncementTicker, 1000);
-  setTimeout(removeLegacyAnnouncementTicker, 50);
-  setTimeout(removeLegacyAnnouncementTicker, 500);
-  setTimeout(removeLegacyAnnouncementTicker, 1500);
-})();
-
-
 // ===============================
 // FIX: Entrega manual registrada en platform_accounts
 // Al marcar Éxito en un producto manual, permite elegir plataforma registrada
@@ -3243,76 +1066,8 @@ function renderAdminOrderCompactFinal(o){
   </div>`;
 }
 
-async function updateOrderStatus(id){
-  try{
-    const order=getAdminOrderByIdManualFix(id);
-    const status=document.getElementById('status-'+id)?.value;
-    const payload={
-      status,
-      response_message:document.getElementById('response-'+id)?.value || '',
-      refund_if_rejected:document.getElementById('refund-'+id)?.checked === true
-    };
+// updateOrderStatus movida a admin-commerce.js
 
-    if(order && String(order.product_type||'').toLowerCase()==='manual' && status==='exito'){
-      const accountEmail=(document.getElementById('manualAccountEmail-'+id)?.value || '').trim();
-      const accountPassword=(document.getElementById('manualAccountPassword-'+id)?.value || '').trim();
-      const platformProductId=document.getElementById('manualPlatformProduct-'+id)?.value || order.product_id;
-
-      if(accountEmail || accountPassword){
-        if(!accountEmail || !accountPassword){
-          throw new Error('Para registrar la cuenta manual, correo y contraseña son obligatorios.');
-        }
-        payload.manual_account={
-          product_id:Number(platformProductId),
-          account_email:accountEmail,
-          account_password:accountPassword,
-          profile_name:(document.getElementById('manualProfileName-'+id)?.value || '').trim(),
-          profile_pin:(document.getElementById('manualProfilePin-'+id)?.value || '').trim(),
-          access_url:(document.getElementById('manualAccessUrl-'+id)?.value || '').trim()
-        };
-      }
-    }
-
-    const data=await api('/api/admin/orders/'+id+'/status',{method:'PATCH',body:JSON.stringify(payload)});
-    showMessage(data.message||'Pedido actualizado');
-    await Promise.allSettled([
-      loadAdminOrders(),
-      loadMyOrders(),
-      loadUsers(),
-      loadPlatformInventory(),
-      loadSalesReport()
-    ]);
-  }catch(e){showMessage(e.message||'Error actualizando pedido','error')}
-}
-
-
-// ===============================
-// FIX FINAL: Comunicados solo para admin principal + menú Reportar con respuestas
-// ===============================
-function isMainAdminOnlyFinal(){
-  return currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
-}
-
-function applyComunicadosVisibilityFinal(){
-  const btn=document.getElementById('announcementsMenuBtn');
-  const section=document.getElementById('section-comunicados');
-  if(!isMainAdminOnlyFinal()){
-    if(btn) btn.remove();
-    if(section) section.classList.add('hidden');
-    return;
-  }
-  if(section) section.classList.remove('hidden');
-}
-
-(function(){
-  const previousEnsure=typeof ensureGlobalAnnouncementsUIFinal==='function'?ensureGlobalAnnouncementsUIFinal:null;
-  if(previousEnsure){
-    ensureGlobalAnnouncementsUIFinal=function(){
-      previousEnsure();
-      applyComunicadosVisibilityFinal();
-    };
-  }
-})();
 
 function ensureReportMenuFinal(){
   const menu=document.querySelector('.menu');
@@ -3435,15 +1190,13 @@ async function loadMyFailureResponsesFinal(){
   if(previousShow){
     showSection=function(name){
       ensureReportMenuFinal();
-      applyComunicadosVisibilityFinal();
       previousShow(name);
       if(name==='failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
-      setTimeout(()=>applyComunicadosVisibilityFinal(),120);
     };
   }
 
-  setTimeout(()=>{ensureReportMenuFinal();applyComunicadosVisibilityFinal();},300);
-  setTimeout(()=>{ensureReportMenuFinal();applyComunicadosVisibilityFinal();},1200);
+  setTimeout(()=>{ensureReportMenuFinal();},300);
+  setTimeout(()=>{ensureReportMenuFinal();},1200);
 })();
 
 
@@ -3725,7 +1478,7 @@ function copyAdminPanelInfoPhase1(panelId){
 
 
 // ===============================
-// FASE 2 INICIO: Panel admin rentado con productos, inventario, banco y comunicados propios
+// FASE 2 INICIO: Panel admin rentado con productos, inventario y banco
 // ===============================
 function isPanelAdminRented(){
   return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
@@ -3775,35 +1528,40 @@ if(userCard) userCard.classList.remove('hidden');
     if(title) title.textContent='Mi panel admin';
   }
 
-  // Comunicados: el admin principal y cada panel rentado pueden manejar sus propios avisos.
-  const commBtn=document.getElementById('announcementsMenuBtn');
-  const commSection=document.getElementById('section-comunicados');
-  if(isAnyAdminUserPanel()){
-    if(commBtn) hideElementHard(commBtn, false);
-    if(commSection) hideElementHard(commSection, false);
-  }else{
-    if(commBtn) hideElementHard(commBtn, true);
-  }
 }
 
 const __showSectionBeforeRentedAdmin = typeof showSection === 'function' ? showSection : null;
 showSection = function(name){
   if(name === 'admin' && !isAnyAdminUserPanel()) name = 'dashboard';
 
+  const targetName = String(name || '').trim();
+  if(!targetName) return;
+  const normalizedName = ({
+    reportsMenu: 'reports-menu',
+    failureResponses: 'failure-responses',
+    accountResponses: 'failure-responses',
+    reportResponses: 'failure-responses',
+    store: 'shop'
+  })[targetName] || targetName;
+
+  let sec=document.getElementById('section-'+normalizedName);
+  if(!sec && (normalizedName==='reports-menu' || normalizedName==='failure-responses')){
+    if(typeof ensureReportMenuFinal==='function') ensureReportMenuFinal();
+    sec=document.getElementById('section-'+normalizedName);
+  }
+  if(!sec) return;
+
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  const sec=document.getElementById('section-'+name);
-  if(sec) sec.classList.add('active');
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section===name));
+  sec.classList.add('active');
+  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section===normalizedName));
   document.getElementById('sidebar')?.classList.remove('show');
 
   applyRentedAdminLayout();
 
-  if(name==='shop' && typeof loadProducts==='function') loadProducts();
-  if(name==='orders' && typeof loadMyOrders==='function') loadMyOrders();
-  if(name==='balance' && typeof loadBankInfoForPanel==='function') loadBankInfoForPanel();
-  if(name==='comunicados' && typeof loadComunicadosSectionFinal==='function') loadComunicadosSectionFinal();
-
-  if(name==='admin' && isAnyAdminUserPanel()){
+  if(normalizedName==='shop' && typeof loadProducts==='function') loadProducts();
+  if(normalizedName==='orders' && typeof loadMyOrders==='function') loadMyOrders();
+  if(normalizedName==='balance' && typeof loadBankInfoForPanel==='function') loadBankInfoForPanel();
+  if(normalizedName==='admin' && isAnyAdminUserPanel()){
     Promise.allSettled([
       !isPanelAdminRented() && typeof loadUsers==='function' ? loadUsers() : Promise.resolve(),
       typeof loadAdminProducts==='function' ? loadAdminProducts() : Promise.resolve(),
@@ -4447,28 +2205,11 @@ setTimeout(() => {
       </div>`;
     }).join('') || 'No hay usuarios.';
   }
-  function renameAnnouncementsPanel(){
-    const title = document.querySelector('#adminAnnouncementsPanel h2');
-    const desc = document.querySelector('#adminAnnouncementsPanel .small-text');
-    const isPanelOwner = currentUser && (isTrue(currentUser.is_panel_admin) || currentUser.account_type === 'panel_propietario');
-    if (title) title.textContent = isPanelOwner ? 'Comunicados de mi panel' : 'Comunicados globales';
-    if (desc) desc.textContent = isPanelOwner
-      ? 'Estos avisos solo aparecen para tus vendedores y dentro de tu panel propietario.'
-      : 'Estos avisos aparecen para los usuarios de tu ecosistema global.';
-  }
   const oldLoadUsersHierarchy = typeof loadUsers === 'function' ? loadUsers : null;
   if (oldLoadUsersHierarchy) {
     loadUsers = async function(){
       const result = await oldLoadUsersHierarchy();
       renderUsersWithHierarchy();
-      return result;
-    };
-  }
-  const oldEnsureAnnouncementsPanel = typeof ensureAnnouncementAdminPanel === 'function' ? ensureAnnouncementAdminPanel : null;
-  if (oldEnsureAnnouncementsPanel) {
-    ensureAnnouncementAdminPanel = function(){
-      const result = oldEnsureAnnouncementsPanel();
-      renameAnnouncementsPanel();
       return result;
     };
   }
@@ -4478,128 +2219,11 @@ setTimeout(() => {
       const result = oldShowSectionHierarchy(name);
       if (name === 'admin') {
         setTimeout(renderUsersWithHierarchy, 250);
-        setTimeout(renameAnnouncementsPanel, 250);
       }
       return result;
     };
   }
   setTimeout(renderUsersWithHierarchy, 600);
-  setTimeout(renameAnnouncementsPanel, 600);
-})();
-
-
-// ===============================
-// COMUNICADOS PARA PANEL PROPIETARIO - 2026-06-08 03:59:14
-// ===============================
-(function(){
-  function isPanelOwnerUser(){
-    return currentUser && (
-      (String(currentUser.role || '').toLowerCase() === 'admin' &&
-       !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true') &&
-       !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true')) ||
-      currentUser.is_panel_admin === true ||
-      currentUser.is_panel_admin === 1 ||
-      currentUser.is_panel_admin === 'true' ||
-      currentUser.account_type === 'panel_propietario'
-    );
-  }
-
-  function setupOwnerAnnouncementsMenu(){
-    const btn = document.getElementById('ownerAnnouncementsMenuBtn');
-    if (!btn) return;
-    if (isPanelOwnerUser()) {
-      btn.classList.remove('hidden');
-      btn.style.display = '';
-    } else {
-      btn.classList.add('hidden');
-      btn.style.display = 'none';
-    }
-  }
-
-  window.loadOwnerAnnouncements = async function(){
-    try {
-      if (!isPanelOwnerUser()) return;
-      const list = await api('/api/admin/announcements');
-      const box = document.getElementById('ownerAnnouncementsList');
-      if (!box) return;
-      box.innerHTML = Array.isArray(list) && list.length ? list.map(a => `
-        <div class="item">
-          <p><b>#${a.id}</b> ${safeText(a.message)}</p>
-          <p><b>Estado:</b> <span class="status">${Number(a.active)===1 || a.active===true ? 'Activo' : 'Oculto'}</span></p>
-          <div class="two-row">
-            <button class="outline-btn" onclick="toggleOwnerAnnouncement(${a.id}, ${Number(a.active)===1 || a.active===true ? 0 : 1})">${Number(a.active)===1 || a.active===true ? 'Ocultar' : 'Activar'}</button>
-            <button class="danger-btn" onclick="deleteOwnerAnnouncement(${a.id})">Eliminar</button>
-          </div>
-        </div>
-      `).join('') : 'Sin comunicados.';
-    } catch(e) {
-      showMessage(e.message || 'Error cargando comunicados', 'error');
-    }
-  };
-
-  window.createOwnerAnnouncement = async function(){
-    try {
-      const text = (document.getElementById('ownerAnnouncementText')?.value || '').trim();
-      if (!text) throw new Error('Escribe el comunicado');
-      const data = await api('/api/admin/announcements', { method:'POST', body: JSON.stringify({ message:text }) });
-      showMessage(data.message || 'Comunicado publicado');
-      const input = document.getElementById('ownerAnnouncementText');
-      if (input) input.value = '';
-      await loadAnnouncements();
-      await loadOwnerAnnouncements();
-    } catch(e) {
-      showMessage(e.message || 'Error creando comunicado', 'error');
-    }
-  };
-
-  window.toggleOwnerAnnouncement = async function(id, active){
-    try {
-      const data = await api('/api/admin/announcements/' + id, { method:'PATCH', body: JSON.stringify({ active }) });
-      showMessage(data.message || 'Comunicado actualizado');
-      await loadAnnouncements();
-      await loadOwnerAnnouncements();
-    } catch(e) {
-      showMessage(e.message || 'Error actualizando comunicado', 'error');
-    }
-  };
-
-  window.deleteOwnerAnnouncement = async function(id){
-    if (!confirm('¿Eliminar este comunicado?')) return;
-    try {
-      const data = await api('/api/admin/announcements/' + id, { method:'DELETE' });
-      showMessage(data.message || 'Comunicado eliminado');
-      await loadAnnouncements();
-      await loadOwnerAnnouncements();
-    } catch(e) {
-      showMessage(e.message || 'Error eliminando comunicado', 'error');
-    }
-  };
-
-  const prevShowSectionOwnerAnn = typeof showSection === 'function' ? showSection : null;
-  if (prevShowSectionOwnerAnn) {
-    showSection = function(name){
-      const result = prevShowSectionOwnerAnn(name);
-      setupOwnerAnnouncementsMenu();
-      if (name === 'ownerAnnouncements') loadOwnerAnnouncements();
-      return result;
-    };
-    window.showSection = showSection;
-  }
-
-  const prevLoadAppOwnerAnn = typeof loadApp === 'function' ? loadApp : null;
-  if (prevLoadAppOwnerAnn) {
-    loadApp = async function(){
-      const result = await prevLoadAppOwnerAnn();
-      setupOwnerAnnouncementsMenu();
-      setTimeout(setupOwnerAnnouncementsMenu, 500);
-      setTimeout(setupOwnerAnnouncementsMenu, 1500);
-      return result;
-    };
-    window.loadApp = loadApp;
-  }
-
-  setTimeout(setupOwnerAnnouncementsMenu, 500);
-  setTimeout(setupOwnerAnnouncementsMenu, 1500);
 })();
 
 
@@ -4622,16 +2246,6 @@ setTimeout(() => {
       if(t.includes('varias cuentas') || t.includes('varios perfiles') || t.includes('misma plataforma')) el.style.display='none';
     });
   }
-
-// Función para convertir el PDF a texto (Base64)
-function convertFileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-  });
-}
 
 // Compra individual; no cambia el abrir/cerrar del producto.
 window.buyProduct = async function(productId){
@@ -6210,17 +3824,17 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// DELEGATED FIX: parche seguro para clicks muertos en la tarjeta de cuarentena
-// Si por alguna razón el onclick/handler original falla (caching o override),
-// este listener captura el click y abre el modal usando la misma lógica.
+// Respaldo de click para tarjeta de cuarentena.
+// Si el handler principal no quedó enlazado tras una recarga parcial,
+// este listener ejecuta la misma apertura del modal.
 document.addEventListener('click', (ev) => {
   try {
     const target = ev.target && ev.target.closest ? ev.target.closest('#dashQuarantineCard') : null;
     if (!target) return;
-    console.log('DELEGATED FIX: dashQuarantineCard clicked, attempting to open quarantine modal');
+    console.log('Dashboard: abrir modal de cuarentena (listener de respaldo)');
 
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) {
-      console.warn('DELEGATED FIX: acceso denegado a cuarentena');
+      console.warn('Cuarentena: acceso denegado');
       showMessage('No autorizado para abrir cuarentena', 'error');
       return;
     }
@@ -6233,12 +3847,12 @@ document.addEventListener('click', (ev) => {
         const stat = document.getElementById('statExpiring');
         if (stat) stat.textContent = String(quarantineList.length);
         try { showQuarantineModal(quarantineList); }
-        catch(e){ console.error('DELEGATED FIX: error mostrando modal de cuarentena', e); }
+        catch(e){ console.error('Cuarentena: error mostrando modal', e); }
       })
-      .catch(err => console.error('DELEGATED FIX: error fetching quarantine list', err));
+      .catch(err => console.error('Cuarentena: error consultando lista', err));
 
   } catch (e) {
-    console.error('DELEGATED FIX: fallo al procesar click delegado', e);
+    console.error('Cuarentena: fallo al procesar click de respaldo', e);
   }
 });
 
@@ -6467,7 +4081,7 @@ function applyDashboardRoleVisibilityMatrix(){
   const distOnlyButtons=['btn-dist-usuarios','btn-dist-precios','btn-dist-ganancias'];
   const actionButtons=['actionOrdersBtn','actionBalanceBtn','actionReportBtn','actionResponsesBtn'];
   const vendorOnlyCards=['actionAccountCard','actionShopCard','actionLogoutCard'];
-  const globalInfraIds=['adminPanelsCardPhase1','adminPanelsPanelPhase1','dashAdminPanelsCardMainFinal','ownerAnnouncementsMenuBtn','panicResetMenuBtn'];
+  const globalInfraIds=['adminPanelsCardPhase1','adminPanelsPanelPhase1','dashAdminPanelsCardMainFinal','panicResetMenuBtn'];
 
   // Base segura para cualquier rol
   toggle('accountMenuBtn', false);
@@ -6519,7 +4133,6 @@ function applyDashboardRoleVisibilityMatrix(){
 
   hardHide('adminMenuBtn', true);
   hardHide('adminSalesMenuBtn', true);
-  hardHide('ownerAnnouncementsMenuBtn', true);
   hardHide('panicResetMenuBtn', true);
   hardHide('btnHistorialId', true);
 
@@ -6563,7 +4176,7 @@ function applyDashboardRoleVisibilityMatrix(){
       'dashUsersCard','dashProductsCard','dashOutOfStockCard','dashInventoryCard','dashCsvUploadCard',
       'dashBalanceRequestsCard','dashSalesTodayCard','dashDailyCutCard','dashMonthlyReportCard','dashQuarantineCard',
       'dashDistributorCard','dashAdminPanelsCardMainFinal','adminPanelsCardPhase1','adminPanelsPanelPhase1',
-      'adminMenuBtn','adminSalesMenuBtn','ownerAnnouncementsMenuBtn','panicResetMenuBtn'
+      'adminMenuBtn','adminSalesMenuBtn','panicResetMenuBtn'
     ].forEach(id=>{
       const el=document.getElementById(id);
       if(el) el.classList.add('hidden');

@@ -4,3 +4,4 @@ database.sqlite
 database_danada.sqlite
 tienda
 *.sqlite
+*.db
