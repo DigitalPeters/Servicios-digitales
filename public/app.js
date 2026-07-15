@@ -388,10 +388,50 @@ function calculateReportRefundInfo(report){
 async function replaceReportedAccountAuto(reportId){
   try{
     if(!confirm('¿Reemplazar esta cuenta usando una cuenta disponible del inventario automático?')) return;
-    const data = await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify({})});
+
+    let reportedAccountId = 0;
+    try {
+      const comboData = await api('/api/admin/account-reports/'+reportId+'/order-accounts');
+      const accounts = Array.isArray(comboData?.accounts) ? comboData.accounts : [];
+      if (accounts.length === 1) {
+        reportedAccountId = Number(accounts[0]?.id || 0);
+      } else if (accounts.length > 1) {
+        const list = accounts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | Estado: ${a.status||'n/a'}`).join('\n');
+        const ans = prompt('Selecciona qué cuenta/plataforma del combo será reemplazada:\n\n'+list);
+        if(ans===null) throw new Error('Reemplazo cancelado');
+        const idx = Number(ans)-1;
+        if(!Number.isInteger(idx)||idx<0||idx>=accounts.length) throw new Error('Opción inválida');
+        reportedAccountId = Number(accounts[idx]?.id || 0);
+      }
+    } catch (e) {
+      if (e?.message) throw e;
+    }
+
+    const query = reportedAccountId ? ('?reported_account_id='+reportedAccountId) : '';
+    const optionsData = await api('/api/admin/account-reports/'+reportId+'/replacement-options'+query);
+    const options = Array.isArray(optionsData?.options) ? optionsData.options : [];
+    if(!options.length) throw new Error('No hay cuentas disponibles para esa plataforma. Captura manualmente una cuenta.');
+
+    const list = options.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`).join('\n');
+    const pick = prompt('Selecciona la cuenta disponible para entregar:\n\n'+list);
+    if(pick===null) throw new Error('Reemplazo cancelado');
+    const idx = Number(pick)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=options.length) throw new Error('Opción inválida');
+
+    const body = {
+      manual:false,
+      replacement_account_id: Number(options[idx].id)
+    };
+    if(reportedAccountId) body.reported_account_id = reportedAccountId;
+
+    const data = await api('/api/admin/account-reports/'+reportId+'/replace',{method:'POST',body:JSON.stringify(body)});
     showMessage(data.message||'Cuenta reemplazada desde inventario');
+    if(data?.delivered_account_data && typeof window.showReplacementCopyBox === 'function'){
+      window.showReplacementCopyBox(data.delivered_account_data);
+    }
     await loadAccountReports();
     if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
+    if(typeof loadAdminOrders === 'function') await loadAdminOrders();
   }catch(e){showMessage(e.message||'Error reemplazando cuenta','error')}
 }
 
@@ -448,9 +488,13 @@ async function submitReplaceManual(reportId){
     });
 
     showMessage(data.message||'Cuenta reemplazada manualmente');
+    if(data?.delivered_account_data && typeof window.showReplacementCopyBox === 'function'){
+      window.showReplacementCopyBox(data.delivered_account_data);
+    }
     document.getElementById('replaceManualModal')?.remove();
     await loadAccountReports();
     if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
+    if(typeof loadAdminOrders === 'function') await loadAdminOrders();
   }catch(e){
     showMessage(e.message||'Error aplicando reemplazo manual','error');
   }
@@ -2586,6 +2630,7 @@ window.buyProduct = async function(productId){
     </div>`;
     document.body.appendChild(box);
   }
+  window.showReplacementCopyBox = showCopyBox;
 
   window.copyReplacementTextStable=async function(){
     const text=document.getElementById('replacementCopyText')?.value||'';
@@ -4063,6 +4108,253 @@ function ensureVendorDashboardCards(){
   });
 }
 
+const __miniBannerCarouselState = {
+  timer: null,
+  index: 0,
+  direction: 1,
+  total: 0
+};
+
+function stopMiniBannerCarousel(){
+  if(__miniBannerCarouselState.timer){
+    clearInterval(__miniBannerCarouselState.timer);
+    __miniBannerCarouselState.timer = null;
+  }
+}
+
+function applyMiniBannerCarouselPosition(){
+  const track = document.getElementById('dashboardMiniBannersTrack');
+  if(!track) return;
+  track.style.transform = `translateX(-${__miniBannerCarouselState.index * 100}%)`;
+
+  document.querySelectorAll('.mini-banner-dot').forEach((dot, i) => {
+    dot.classList.toggle('active', i === __miniBannerCarouselState.index);
+  });
+}
+
+function goToMiniBannerSlide(index){
+  const total = Number(__miniBannerCarouselState.total || 0);
+  if(total <= 0) return;
+  __miniBannerCarouselState.index = Math.max(0, Math.min(total - 1, Number(index || 0)));
+  applyMiniBannerCarouselPosition();
+}
+
+function startMiniBannerCarousel(total){
+  stopMiniBannerCarousel();
+  __miniBannerCarouselState.total = Number(total || 0);
+  __miniBannerCarouselState.index = 0;
+  __miniBannerCarouselState.direction = 1;
+  applyMiniBannerCarouselPosition();
+
+  if(__miniBannerCarouselState.total <= 1) return;
+
+  __miniBannerCarouselState.timer = setInterval(() => {
+    const last = __miniBannerCarouselState.total - 1;
+    if(__miniBannerCarouselState.direction > 0){
+      if(__miniBannerCarouselState.index >= last){
+        __miniBannerCarouselState.direction = -1;
+        __miniBannerCarouselState.index = Math.max(0, last - 1);
+      }else{
+        __miniBannerCarouselState.index += 1;
+      }
+    } else {
+      if(__miniBannerCarouselState.index <= 0){
+        __miniBannerCarouselState.direction = 1;
+        __miniBannerCarouselState.index = Math.min(last, 1);
+      }else{
+        __miniBannerCarouselState.index -= 1;
+      }
+    }
+    applyMiniBannerCarouselPosition();
+  }, 4200);
+}
+
+function renderMiniBannersStrip(items){
+  const strip = document.getElementById('dashboardMiniBannersStrip');
+  if(!strip) return;
+  const rows = Array.isArray(items) ? items : [];
+  if(!rows.length){
+    stopMiniBannerCarousel();
+    strip.classList.add('hidden');
+    strip.innerHTML = '';
+    return;
+  }
+
+  const slides = rows.map(b => {
+    const img = safeText(String(b.image_url || ''));
+    const title = safeText(String(b.title || 'Mini banner'));
+    const link = String(b.link_url || '').trim();
+    if(link){
+      const safeHref = safeText(link);
+      return `<a class="dashboard-mini-banner-slide" href="${safeHref}" target="_blank" rel="noopener noreferrer"><span class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" />${title ? `<span class="mini-banner-caption">${title}</span>` : ''}</span></a>`;
+    }
+    return `<div class="dashboard-mini-banner-slide"><div class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" />${title ? `<span class="mini-banner-caption">${title}</span>` : ''}</div></div>`;
+  }).join('');
+
+  const dots = rows.length > 1
+    ? `<div class="mini-banner-dots">${rows.map((_, i)=>`<button class="mini-banner-dot ${i===0?'active':''}" type="button" onclick="goToMiniBannerSlide(${i})" aria-label="Ir al banner ${i+1}"></button>`).join('')}</div>`
+    : '';
+
+  strip.innerHTML = `
+    <div id="dashboardMiniBannersCarousel" class="dashboard-mini-banners-carousel">
+      <div id="dashboardMiniBannersTrack" class="dashboard-mini-banners-track">${slides}</div>
+    </div>
+    ${dots}
+  `;
+  strip.classList.remove('hidden');
+  startMiniBannerCarousel(rows.length);
+
+  const carousel = document.getElementById('dashboardMiniBannersCarousel');
+  if(carousel && rows.length > 1){
+    carousel.onmouseenter = () => stopMiniBannerCarousel();
+    carousel.onmouseleave = () => startMiniBannerCarousel(rows.length);
+  }
+}
+
+window.goToMiniBannerSlide = goToMiniBannerSlide;
+
+async function loadMiniBannersStrip(){
+  if(!currentUser) return;
+  try {
+    const data = await api('/api/mini-banners');
+    renderMiniBannersStrip(data?.banners || []);
+  } catch(e){
+    console.warn('No se pudieron cargar mini banners', e);
+    renderMiniBannersStrip([]);
+  }
+}
+
+function fileToDataUrlMiniBanner(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderMiniBannerAdminList(items){
+  const box = document.getElementById('miniBannerAdminList');
+  if(!box) return;
+  const rows = Array.isArray(items) ? items : [];
+  box.innerHTML = rows.length ? rows.map(b => `
+    <div class="mini-banner-admin-item">
+      <img src="${safeText(String(b.image_url||''))}" alt="Banner" />
+      <div>
+        <div><b>${safeText(String(b.title||'Sin título'))}</b></div>
+        <div class="small-text">${safeText(String(b.link_url||'')) || 'Sin enlace'}</div>
+        <div class="mini-banner-admin-actions" style="margin-top:8px">
+          <button class="outline-btn" onclick="toggleMiniBannerActive(${Number(b.id)}, ${b.active ? 'false' : 'true'})">${b.active ? 'Desactivar' : 'Activar'}</button>
+          <button class="danger-btn" onclick="deleteMiniBanner(${Number(b.id)})">Eliminar</button>
+        </div>
+      </div>
+    </div>
+  `).join('') : 'No hay mini banners registrados.';
+}
+
+async function refreshMiniBannerAdminList(){
+  try {
+    const data = await api('/api/admin/mini-banners');
+    renderMiniBannerAdminList(data?.banners || []);
+  } catch(e){
+    showMessage(e.message || 'Error cargando mini banners', 'error');
+  }
+}
+
+window.createMiniBanner = async function(){
+  try {
+    const file = document.getElementById('miniBannerImage')?.files?.[0] || null;
+    if(!file) throw new Error('Selecciona una imagen');
+    const title = (document.getElementById('miniBannerTitle')?.value || '').trim();
+    const link_url = (document.getElementById('miniBannerLink')?.value || '').trim();
+    const active = !!document.getElementById('miniBannerActive')?.checked;
+    const image_data = await fileToDataUrlMiniBanner(file);
+
+    await api('/api/admin/mini-banners', {
+      method:'POST',
+      body: JSON.stringify({ title, link_url, active, image_data })
+    });
+
+    showMessage('Mini banner guardado');
+    const imageInput = document.getElementById('miniBannerImage');
+    const titleInput = document.getElementById('miniBannerTitle');
+    const linkInput = document.getElementById('miniBannerLink');
+    if(imageInput) imageInput.value = '';
+    if(titleInput) titleInput.value = '';
+    if(linkInput) linkInput.value = '';
+
+    await refreshMiniBannerAdminList();
+    await loadMiniBannersStrip();
+  } catch(e){
+    showMessage(e.message || 'Error guardando mini banner', 'error');
+  }
+};
+
+window.deleteMiniBanner = async function(id){
+  try {
+    if(!confirm('¿Eliminar mini banner?')) return;
+    await api('/api/admin/mini-banners/'+id, { method:'DELETE' });
+    showMessage('Mini banner eliminado');
+    await refreshMiniBannerAdminList();
+    await loadMiniBannersStrip();
+  } catch(e){
+    showMessage(e.message || 'Error eliminando mini banner', 'error');
+  }
+};
+
+window.toggleMiniBannerActive = async function(id, nextActive){
+  try {
+    await api('/api/admin/mini-banners/'+id, {
+      method:'PATCH',
+      body: JSON.stringify({ active: nextActive === true || nextActive === 'true' })
+    });
+    await refreshMiniBannerAdminList();
+    await loadMiniBannersStrip();
+  } catch(e){
+    showMessage(e.message || 'Error actualizando mini banner', 'error');
+  }
+};
+
+window.openMiniBannerManager = async function(){
+  if(!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin'){
+    showMessage('Solo admin puede administrar mini banners', 'error');
+    return;
+  }
+
+  const old = document.getElementById('miniBannerManagerModal');
+  if(old) old.remove();
+
+  const html = `
+    <div id="miniBannerManagerModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:860px; width:95%">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <h3 style="margin:0">Mini banners del dashboard</h3>
+          <button class="outline-btn" style="width:auto" onclick="document.getElementById('miniBannerManagerModal')?.remove()">Cerrar</button>
+        </div>
+        <p class="small-text">Estos banners aparecen entre la barra superior y el dashboard.</p>
+        <div class="row">
+          <div>
+            <label class="field-label">Imagen</label>
+            <input id="miniBannerImage" type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" />
+            <label class="field-label">Título (opcional)</label>
+            <input id="miniBannerTitle" placeholder="Texto corto" />
+            <label class="field-label">Enlace (opcional)</label>
+            <input id="miniBannerLink" placeholder="https://..." />
+            <label class="checkbox-row"><input type="checkbox" id="miniBannerActive" checked /> Activo</label>
+            <button class="green-btn" onclick="createMiniBanner()">Guardar mini banner</button>
+          </div>
+          <div>
+            <h4 style="margin-top:0">Banners actuales</h4>
+            <div id="miniBannerAdminList" class="mini-banner-admin-list">Cargando...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+  await refreshMiniBannerAdminList();
+};
+
 function resetScrollToTop(){
   try{ window.scrollTo({ top: 0, behavior: 'smooth' }); }catch(_){ window.scrollTo(0,0); }
   const content=document.getElementById('main-content') || document.getElementById('appSection');
@@ -4151,7 +4443,8 @@ function applyDashboardRoleVisibilityMatrix(){
     'dashBalanceRequestsCard',
     'dashQuarantineCard',
     'dashExpiringCard',
-    'dashSalesTodayCard'
+    'dashSalesTodayCard',
+    'dashMiniBannersCard'
   ];
 
   const distOnlyButtons=['btn-dist-usuarios','btn-dist-precios','btn-dist-ganancias'];
@@ -4326,6 +4619,7 @@ if(__showSectionBeforeRoleMatrix){
     applyDashboardRoleVisibilityMatrix();
     if(sectionName==='dashboard'){
       resetScrollToTop();
+      loadMiniBannersStrip();
       actualizarConteosDashboard();
       if(currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
         loadExpiringCount();
@@ -4339,6 +4633,7 @@ if(__loadAppBeforeRoleMatrix){
   loadApp = async function(){
     await __loadAppBeforeRoleMatrix();
     applyDashboardRoleVisibilityMatrix();
+    loadMiniBannersStrip();
     actualizarConteosDashboard();
   };
 }

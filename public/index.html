@@ -61,6 +61,7 @@
 </div>
 
       <section id="section-dashboard" class="section active dashboard-premium">
+        <div id="dashboardMiniBannersStrip" class="dashboard-mini-banners hidden"></div>
         <!--<div id="dashboardGlobalActionsBar" class="dashboard-command-bar menu-acciones-globales panel">
           <button class="menu-btn active" data-section="dashboard" onclick="showSection('dashboard')">◴ Dashboard</button>
           <button id="accountMenuBtn" class="menu-btn" data-section="account" onclick="showSection('account')">👤 Mi Perfil / Contraseña</button>
@@ -176,6 +177,7 @@
               </div>
           </div>
           <div id="dashSalesTodayCard" class="dash-card clickable hidden" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div id="count-financiero" class="dash-value">$<span id="statSalesToday">0.00</span></div></div></div>
+          <div id="dashMiniBannersCard" class="dash-card clickable hidden" onclick="openMiniBannerManager()"><div class="dash-icon">🖼️</div><div><div class="dash-label">Mini banners</div><div class="small-text">Cargar y administrar</div></div></div>
           <div id="dashDailyCutCard" class="dash-card clickable hidden" onclick="openDailyCut()"><div class="dash-icon">🧾</div><div><div class="dash-label">Corte diario</div><div class="small-text">Ventas, costos y utilidad</div></div></div>
           <div id="dashMonthlyReportCard" class="dash-card clickable hidden" onclick="scrollToMonthlyReport()"><div class="dash-icon">📥</div><div><div class="dash-label">Reporte mensual</div><div class="small-text">Descargar CSV</div></div></div>
           <div id="dashDistributorCard" class="dash-card clickable hidden" onclick="showSection('distributor')"><div class="dash-icon">🏪</div><div><div class="dash-label">Mis vendedores</div><div id="statResellers" class="dash-value">0</div></div></div>

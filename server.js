@@ -9,6 +9,8 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const compression = require("compression"); // <-- NUEVO COMPRESOR
 const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 const codigosRecuperacion = new Map();
@@ -3942,6 +3944,140 @@ app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (r
   } catch (err) {
     console.error("Error dashboard counts:", err.message);
     res.status(500).json({ error: err.message || "Error obteniendo conteos de dashboard" });
+  }
+});
+
+const MINI_BANNERS_FILE = path.join(__dirname, "mini-banners.json");
+
+function readMiniBannersFile() {
+  try {
+    if (!fs.existsSync(MINI_BANNERS_FILE)) return [];
+    const raw = fs.readFileSync(MINI_BANNERS_FILE, "utf8");
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    console.error("Error leyendo mini-banners:", e.message);
+    return [];
+  }
+}
+
+function writeMiniBannersFile(list) {
+  fs.writeFileSync(MINI_BANNERS_FILE, JSON.stringify(list, null, 2), "utf8");
+}
+
+function normalizeMiniBanner(item) {
+  const id = Number(item?.id || 0);
+  const image_url = String(item?.image_url || item?.image_data || "").trim();
+  const title = String(item?.title || "").trim();
+  const link_url = String(item?.link_url || "").trim();
+  const active = item?.active === false || item?.active === 0 || item?.active === "false" ? false : true;
+  const created_at = item?.created_at || new Date().toISOString();
+  return { id, image_url, title, link_url, active, created_at };
+}
+
+app.get("/api/mini-banners", authMiddleware, async (req, res) => {
+  try {
+    const banners = readMiniBannersFile()
+      .map(normalizeMiniBanner)
+      .filter(b => b.id > 0 && b.image_url && b.active)
+      .sort((a, b) => b.id - a.id);
+    res.json({ banners });
+  } catch (err) {
+    console.error("Error cargando mini-banners:", err.message);
+    res.status(500).json({ error: "Error cargando mini-banners" });
+  }
+});
+
+app.get("/api/admin/mini-banners", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const banners = readMiniBannersFile()
+      .map(normalizeMiniBanner)
+      .filter(b => b.id > 0 && b.image_url)
+      .sort((a, b) => b.id - a.id);
+    res.json({ banners });
+  } catch (err) {
+    console.error("Error cargando mini-banners admin:", err.message);
+    res.status(500).json({ error: "Error cargando mini-banners" });
+  }
+});
+
+app.post("/api/admin/mini-banners", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const imageData = String(req.body?.image_data || req.body?.image_url || "").trim();
+    const title = String(req.body?.title || "").trim();
+    const linkUrl = String(req.body?.link_url || "").trim();
+    const active = !(req.body?.active === false || req.body?.active === 0 || req.body?.active === "false");
+
+    if (!imageData) {
+      return res.status(400).json({ error: "La imagen del banner es obligatoria" });
+    }
+
+    if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(imageData) && !/^https?:\/\//i.test(imageData)) {
+      return res.status(400).json({ error: "Formato de imagen inválido" });
+    }
+
+    if (imageData.length > 3_000_000) {
+      return res.status(400).json({ error: "La imagen es demasiado grande" });
+    }
+
+    const current = readMiniBannersFile().map(normalizeMiniBanner);
+    const nextId = current.reduce((max, b) => Math.max(max, Number(b.id || 0)), 0) + 1;
+
+    const banner = {
+      id: nextId,
+      image_url: imageData,
+      title,
+      link_url: linkUrl,
+      active,
+      created_at: new Date().toISOString()
+    };
+
+    current.push(banner);
+    writeMiniBannersFile(current);
+    res.json({ message: "Mini banner guardado", banner });
+  } catch (err) {
+    console.error("Error guardando mini-banner:", err.message);
+    res.status(500).json({ error: "Error guardando mini-banner" });
+  }
+});
+
+app.patch("/api/admin/mini-banners/:id", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!id) return res.status(400).json({ error: "ID inválido" });
+
+    const list = readMiniBannersFile().map(normalizeMiniBanner);
+    const idx = list.findIndex(b => Number(b.id) === id);
+    if (idx < 0) return res.status(404).json({ error: "Banner no encontrado" });
+
+    const next = { ...list[idx] };
+    if (req.body?.title !== undefined) next.title = String(req.body.title || "").trim();
+    if (req.body?.link_url !== undefined) next.link_url = String(req.body.link_url || "").trim();
+    if (req.body?.active !== undefined) next.active = !(req.body.active === false || req.body.active === 0 || req.body.active === "false");
+
+    list[idx] = normalizeMiniBanner(next);
+    writeMiniBannersFile(list);
+    res.json({ message: "Mini banner actualizado", banner: list[idx] });
+  } catch (err) {
+    console.error("Error actualizando mini-banner:", err.message);
+    res.status(500).json({ error: "Error actualizando mini-banner" });
+  }
+});
+
+app.delete("/api/admin/mini-banners/:id", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!id) return res.status(400).json({ error: "ID inválido" });
+
+    const list = readMiniBannersFile().map(normalizeMiniBanner);
+    const next = list.filter(b => Number(b.id) !== id);
+    if (next.length === list.length) return res.status(404).json({ error: "Banner no encontrado" });
+
+    writeMiniBannersFile(next);
+    res.json({ message: "Mini banner eliminado" });
+  } catch (err) {
+    console.error("Error eliminando mini-banner:", err.message);
+    res.status(500).json({ error: "Error eliminando mini-banner" });
   }
 });
 
