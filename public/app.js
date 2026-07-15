@@ -1168,6 +1168,28 @@ async function loadAccountReports() {
   }
 }
 
+async function updateAccountReportStatus(reportId){
+  try{
+    const status = (document.getElementById('reportStatus-'+reportId)?.value || '').trim();
+    const admin_response = (document.getElementById('reportResponse-'+reportId)?.value || '').trim();
+
+    if(!status){
+      throw new Error('Selecciona un veredicto');
+    }
+
+    const data = await api('/api/admin/account-reports/'+reportId+'/status', {
+      method:'PATCH',
+      body: JSON.stringify({ status, admin_response })
+    });
+
+    showMessage(data.message || 'Veredicto guardado correctamente');
+    await loadAccountReports();
+  }catch(e){
+    showMessage(e.message || 'Error guardando veredicto', 'error');
+  }
+}
+window.updateAccountReportStatus = updateAccountReportStatus;
+
 // ===============================
 // FIX: Entrega manual registrada en platform_accounts
 // Al marcar Éxito en un producto manual, permite elegir plataforma registrada
@@ -4108,133 +4130,46 @@ function ensureVendorDashboardCards(){
   });
 }
 
-const __miniBannerCarouselState = {
-  timer: null,
-  index: 0,
-  total: 0,
-  visibleCount: 1,
-  stepPx: 0,
-  resizeBound: false
-};
-
-function getMiniBannerVisibleCount(){
-  return window.matchMedia('(max-width:760px)').matches ? 2 : 1;
-}
-
-function getMiniBannerMaxIndex(){
-  return Math.max(0, Number(__miniBannerCarouselState.total || 0) - Number(__miniBannerCarouselState.visibleCount || 1));
-}
-
-function stopMiniBannerCarousel(){
-  if(__miniBannerCarouselState.timer){
-    clearInterval(__miniBannerCarouselState.timer);
-    __miniBannerCarouselState.timer = null;
-  }
-}
-
-function recalculateMiniBannerCarouselMetrics(){
-  const track = document.getElementById('dashboardMiniBannersTrack');
-  if(!track) return;
-  const slides = Array.from(track.querySelectorAll('.dashboard-mini-banner-slide'));
-  __miniBannerCarouselState.total = slides.length;
-  __miniBannerCarouselState.visibleCount = Math.max(1, getMiniBannerVisibleCount());
-
-  const first = slides[0];
-  const gapText = (getComputedStyle(track).columnGap || getComputedStyle(track).gap || '0').replace('px','').trim();
-  const gap = Number(gapText || 0);
-  __miniBannerCarouselState.stepPx = first ? (first.getBoundingClientRect().width + gap) : 0;
-
-  const maxIndex = getMiniBannerMaxIndex();
-  if(__miniBannerCarouselState.index > maxIndex) __miniBannerCarouselState.index = maxIndex;
-}
-
-function applyMiniBannerCarouselPosition(){
-  const track = document.getElementById('dashboardMiniBannersTrack');
-  if(!track) return;
-  recalculateMiniBannerCarouselMetrics();
-  track.style.transform = `translateX(-${Math.max(0, __miniBannerCarouselState.index * __miniBannerCarouselState.stepPx)}px)`;
-
-  document.querySelectorAll('.mini-banner-dot').forEach((dot, i) => {
-    dot.classList.toggle('active', i === __miniBannerCarouselState.index);
-  });
-}
-
-function goToMiniBannerSlide(index){
-  const maxIndex = getMiniBannerMaxIndex();
-  __miniBannerCarouselState.index = Math.max(0, Math.min(maxIndex, Number(index || 0)));
-  applyMiniBannerCarouselPosition();
-}
-
-function startMiniBannerCarousel(total, resetIndex){
-  stopMiniBannerCarousel();
-  __miniBannerCarouselState.total = Number(total || 0);
-  if(resetIndex) __miniBannerCarouselState.index = 0;
-  applyMiniBannerCarouselPosition();
-
-  if(getMiniBannerMaxIndex() <= 0) return;
-
-  __miniBannerCarouselState.timer = setInterval(() => {
-    const maxIndex = getMiniBannerMaxIndex();
-    __miniBannerCarouselState.index = __miniBannerCarouselState.index >= maxIndex ? 0 : __miniBannerCarouselState.index + 1;
-    applyMiniBannerCarouselPosition();
-  }, 4200);
-}
-
 function renderMiniBannersStrip(items){
   const strip = document.getElementById('dashboardMiniBannersStrip');
   if(!strip) return;
   const rows = Array.isArray(items) ? items : [];
   if(!rows.length){
-    stopMiniBannerCarousel();
     strip.classList.add('hidden');
     strip.innerHTML = '';
     return;
   }
 
-  const slides = rows.map(b => {
+  const renderSlide = (b) => {
     const img = safeText(String(b.image_url || ''));
     const title = safeText(String(b.title || 'Mini banner'));
     const link = String(b.link_url || '').trim();
+    const caption = title ? `<span class="mini-banner-below-title">${title}</span>` : '';
     if(link){
       const safeHref = safeText(link);
-      return `<a class="dashboard-mini-banner-slide" href="${safeHref}" target="_blank" rel="noopener noreferrer"><span class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" />${title ? `<span class="mini-banner-caption">${title}</span>` : ''}</span></a>`;
+      return `<a class="dashboard-mini-banner-slide" href="${safeHref}" target="_blank" rel="noopener noreferrer"><span class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" /></span>${caption}</a>`;
     }
-    return `<div class="dashboard-mini-banner-slide"><div class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" />${title ? `<span class="mini-banner-caption">${title}</span>` : ''}</div></div>`;
-  }).join('');
+    return `<div class="dashboard-mini-banner-slide"><div class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" /></div>${caption}</div>`;
+  };
 
-  const initialVisible = getMiniBannerVisibleCount();
-  const positionsCount = Math.max(1, rows.length - initialVisible + 1);
-  const dots = positionsCount > 1
-    ? `<div class="mini-banner-dots">${Array.from({length: positionsCount}).map((_, i)=>`<button class="mini-banner-dot ${i===0?'active':''}" type="button" onclick="goToMiniBannerSlide(${i})" aria-label="Ir al banner ${i+1}"></button>`).join('')}</div>`
-    : '';
+  const baseSlides = rows.map(renderSlide).join('');
+  const loopEnabled = rows.length > 1;
+  const slides = loopEnabled ? (baseSlides + baseSlides) : baseSlides;
+  const duration = Math.max(16, Number(rows.length || 1) * 5);
 
   strip.innerHTML = `
-    <div id="dashboardMiniBannersCarousel" class="dashboard-mini-banners-carousel">
+    <div id="dashboardMiniBannersCarousel" class="dashboard-mini-banners-carousel ${loopEnabled ? 'is-looping' : ''}" style="--mini-banner-duration:${duration}s">
       <div id="dashboardMiniBannersTrack" class="dashboard-mini-banners-track">${slides}</div>
     </div>
-    ${dots}
   `;
   strip.classList.remove('hidden');
-  startMiniBannerCarousel(rows.length, true);
-
-  if(!__miniBannerCarouselState.resizeBound){
-    __miniBannerCarouselState.resizeBound = true;
-    window.addEventListener('resize', () => {
-      const hasTrack = !!document.getElementById('dashboardMiniBannersTrack');
-      if(!hasTrack) return;
-      applyMiniBannerCarouselPosition();
-      startMiniBannerCarousel(__miniBannerCarouselState.total, false);
-    });
-  }
 
   const carousel = document.getElementById('dashboardMiniBannersCarousel');
-  if(carousel && rows.length > 1){
-    carousel.onmouseenter = () => stopMiniBannerCarousel();
-    carousel.onmouseleave = () => startMiniBannerCarousel(rows.length, false);
+  if(carousel && loopEnabled){
+    carousel.onmouseenter = () => carousel.classList.add('paused');
+    carousel.onmouseleave = () => carousel.classList.remove('paused');
   }
 }
-
-window.goToMiniBannerSlide = goToMiniBannerSlide;
 
 async function loadMiniBannersStrip(){
   if(!currentUser) return;
@@ -4260,12 +4195,21 @@ function renderMiniBannerAdminList(items){
   const box = document.getElementById('miniBannerAdminList');
   if(!box) return;
   const rows = Array.isArray(items) ? items : [];
+  const thumb = (b) => {
+    const src = String(b?.image_url || '').trim();
+    if(src){
+      return `<img src="${safeText(src)}" alt="Banner" />`;
+    }
+    return `<div style="width:80px;height:54px;border-radius:8px;border:1px solid rgba(148,163,184,.35);display:grid;place-items:center;background:rgba(30,41,59,.6);color:#cbd5e1;font-size:11px;font-weight:700">IMG</div>`;
+  };
+
   box.innerHTML = rows.length ? rows.map(b => `
     <div class="mini-banner-admin-item">
-      <img src="${safeText(String(b.image_url||''))}" alt="Banner" />
+      ${thumb(b)}
       <div>
         <div><b>${safeText(String(b.title||'Sin título'))}</b></div>
         <div class="small-text">${safeText(String(b.link_url||'')) || 'Sin enlace'}</div>
+        ${b.has_image ? '' : '<div class="small-text">Miniatura optimizada para carga rápida</div>'}
         <div class="mini-banner-admin-actions" style="margin-top:8px">
           <button class="outline-btn" onclick="toggleMiniBannerActive(${Number(b.id)}, ${b.active ? 'false' : 'true'})">${b.active ? 'Desactivar' : 'Activar'}</button>
           <button class="danger-btn" onclick="deleteMiniBanner(${Number(b.id)})">Eliminar</button>

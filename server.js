@@ -3990,9 +3990,23 @@ app.get("/api/mini-banners", authMiddleware, async (req, res) => {
 
 app.get("/api/admin/mini-banners", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const includeImages = String(req.query.with_images || "0") === "1";
     const banners = readMiniBannersFile()
       .map(normalizeMiniBanner)
       .filter(b => b.id > 0 && b.image_url)
+      .map(b => {
+        const rawImage = String(b.image_url || "");
+        const isDataUrl = /^data:image\//i.test(rawImage);
+        return {
+          id: b.id,
+          title: b.title,
+          link_url: b.link_url,
+          active: b.active,
+          created_at: b.created_at,
+          has_image: !!rawImage,
+          image_url: includeImages ? rawImage : (isDataUrl ? "" : rawImage)
+        };
+      })
       .sort((a, b) => b.id - a.id);
     res.json({ banners });
   } catch (err) {
