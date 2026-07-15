@@ -132,9 +132,6 @@ setTimeout(() => {
 const __oldShowSectionForSalesToday = showSection;
 showSection = function(name){
   __oldShowSectionForSalesToday(name);
-  if(name==='dashboard' && currentUser?.role==='admin'){
-    loadSalesReport(true);
-  }
 };
 
 // Auto-refresh periódico desactivado: las secciones se actualizan solo después de acciones.
@@ -459,8 +456,48 @@ async function submitReplaceManual(reportId){
   }
 }
 
+// Reembolso proporcional para reportes de falla
+async function refundReportedAccount(reportId, orderCreatedAt){
+  try{
+    const dateLabel = orderCreatedAt ? `\nFecha del pedido: ${String(orderCreatedAt).slice(0,10)}` : '';
+    if(!confirm(`¿Aplicar reembolso proporcional a este reporte?${dateLabel}`)) return;
+
+    const data = await api('/api/admin/account-reports/'+reportId+'/refund-proportional', {
+      method:'POST',
+      body: JSON.stringify({})
+    });
+
+    showMessage(data.message || 'Reembolso proporcional aplicado');
+    await loadAccountReports();
+    if(typeof loadUsers === 'function') await loadUsers();
+  }catch(e){
+    showMessage(e.message || 'Error aplicando reembolso proporcional', 'error');
+  }
+}
+
+// Reembolso completo para reportes de falla
+async function refundFullReportedAccount(reportId){
+  try{
+    if(!confirm('¿Aplicar reembolso completo a este reporte?')) return;
+
+    const data = await api('/api/admin/account-reports/'+reportId+'/refund-full', {
+      method:'POST',
+      body: JSON.stringify({})
+    });
+
+    showMessage(data.message || 'Reembolso completo aplicado');
+    await loadAccountReports();
+    if(typeof loadUsers === 'function') await loadUsers();
+  }catch(e){
+    showMessage(e.message || 'Error aplicando reembolso completo', 'error');
+  }
+}
+
 window.replaceReportedAccountManual = replaceReportedAccountManual;
 window.submitReplaceManual = submitReplaceManual;
+window.replaceReportedAccountAuto = replaceReportedAccountAuto;
+window.refundReportedAccount = refundReportedAccount;
+window.refundFullReportedAccount = refundFullReportedAccount;
 
 
 
@@ -2163,11 +2200,9 @@ setTimeout(() => {
     hideDashboardSalesExtraCards();
   }
 
-  const prevOpenSalesReportFixed = typeof openSalesReport === 'function' ? openSalesReport : null;
   openSalesReport = goToSalesReportSamePage;
   window.openSalesReport = goToSalesReportSamePage;
 
-  const prevOpenSalesReportFinalFixed = typeof openSalesReportFinal === 'function' ? openSalesReportFinal : null;
   openSalesReportFinal = goToSalesReportSamePage;
   window.openSalesReportFinal = goToSalesReportSamePage;
 
@@ -2176,9 +2211,7 @@ setTimeout(() => {
     loadApp = async function(){
       const result = await prevLoadAppVentasFix();
       bindVentasHoyButton();
-      setTimeout(bindVentasHoyButton, 500);
-      setTimeout(bindVentasHoyButton, 1500);
-      setTimeout(bindVentasHoyButton, 3000);
+      setTimeout(bindVentasHoyButton, 700);
       return result;
     };
   }
@@ -2202,9 +2235,7 @@ setTimeout(() => {
     };
   }
 
-  setTimeout(bindVentasHoyButton, 300);
-  setTimeout(bindVentasHoyButton, 1200);
-  setTimeout(bindVentasHoyButton, 2500);
+  setTimeout(bindVentasHoyButton, 500);
 })();
 
 
@@ -2237,8 +2268,7 @@ setTimeout(() => {
     loadApp = async function(){
       const result = await oldLoadAppRoleLabels();
       applyRoleLabels();
-      setTimeout(applyRoleLabels, 400);
-      setTimeout(applyRoleLabels, 1200);
+      setTimeout(applyRoleLabels, 700);
       return result;
     };
   }
@@ -2252,8 +2282,7 @@ setTimeout(() => {
     };
   }
 
-  setTimeout(applyRoleLabels, 500);
-  setTimeout(applyRoleLabels, 1500);
+  setTimeout(applyRoleLabels, 800);
 })();
 
 
@@ -2794,142 +2823,6 @@ window.buyProduct = async function(productId){
   }
 
   setTimeout(fixVisibleXProducts, 1200);
-  setInterval(fixVisibleXProducts, 4000);
-})();
-
-
-
-// ===============================
-// BOTÓN COPIAR EN RESPUESTA DE FALLOS - 2026-06-09 02:38:18
-// Agrega botón para copiar la cuenta de reemplazo en el área del usuario.
-// ===============================
-(function(){
-  function extractReplacementTextFromCard(card){
-    if (!card) return '';
-    const txt = card.innerText || '';
-    const marker = 'Respuesta del admin:';
-    const idx = txt.indexOf(marker);
-    if (idx >= 0) return txt.slice(idx + marker.length).trim();
-    return txt.trim();
-  }
-
-  window.copyFailureResponseText = async function(btn){
-    try {
-      const card = btn.closest('.item') || btn.closest('.report-card') || btn.closest('.card') || btn.parentElement;
-      let text = '';
-
-      const textarea = card ? card.querySelector('textarea') : null;
-      if (textarea) text = textarea.value || textarea.textContent || '';
-
-      if (!text) {
-        const responseBox = card ? Array.from(card.querySelectorAll('div, p, pre')).find(el => 
-          (el.innerText || '').toLowerCase().includes('respuesta del admin') ||
-          (el.innerText || '').toLowerCase().includes('cuenta de streaming entregada')
-        ) : null;
-        text = responseBox ? responseBox.innerText : extractReplacementTextFromCard(card);
-      }
-
-      text = String(text || '').trim();
-      if (!text) throw new Error('No encontré datos para copiar');
-
-      await navigator.clipboard.writeText(text);
-      showMessage('Datos copiados');
-    } catch(e) {
-      try {
-        const card = btn.closest('.item') || btn.closest('.report-card') || btn.closest('.card') || btn.parentElement;
-        const text = extractReplacementTextFromCard(card);
-        const tmp = document.createElement('textarea');
-        tmp.value = text;
-        document.body.appendChild(tmp);
-        tmp.focus();
-        tmp.select();
-        document.execCommand('copy');
-        tmp.remove();
-        showMessage('Datos copiados');
-      } catch(err) {
-        showMessage('No se pudo copiar', 'error');
-      }
-    }
-  };
-
-  function addCopyButtonsToFailureResponses(){
-    const section = document.getElementById('section-failureResponses') ||
-                    document.getElementById('section-accountResponses') ||
-                    document.getElementById('section-reportResponses') ||
-                    document.querySelector('section:not(.hidden)');
-
-    const possibleCards = Array.from(document.querySelectorAll('.item, .report-card, .card, .panel div'));
-
-    possibleCards.forEach(card => {
-      const text = card.innerText || '';
-      const isFailureResponse = text.includes('Respuesta del admin') &&
-        (
-          text.toLowerCase().includes('cuenta reemplazada') ||
-          text.toLowerCase().includes('cuenta de streaming entregada') ||
-          text.toLowerCase().includes('correo:') ||
-          text.toLowerCase().includes('contraseña:')
-        );
-
-      if (!isFailureResponse) return;
-      if (card.querySelector('.copy-failure-response-btn')) return;
-
-      const btn = document.createElement('button');
-      btn.className = 'outline-btn copy-failure-response-btn';
-      btn.type = 'button';
-      btn.style.marginTop = '12px';
-      btn.textContent = '📋 Copiar cuenta de reemplazo';
-      btn.onclick = function(ev){
-        ev.preventDefault();
-        ev.stopPropagation();
-        copyFailureResponseText(btn);
-      };
-
-      card.appendChild(btn);
-    });
-  }
-
-  const oldLoadMyAccountReportsCopyFix = typeof loadMyAccountReports === 'function' ? loadMyAccountReports : null;
-  if (oldLoadMyAccountReportsCopyFix) {
-    window.loadMyAccountReports = async function(){
-      const result = await oldLoadMyAccountReportsCopyFix();
-      setTimeout(addCopyButtonsToFailureResponses, 100);
-      setTimeout(addCopyButtonsToFailureResponses, 600);
-      return result;
-    };
-    loadMyAccountReports = window.loadMyAccountReports;
-  }
-
-  const oldShowSectionCopyFix = typeof showSection === 'function' ? showSection : null;
-  if (oldShowSectionCopyFix) {
-    window.showSection = function(name){
-      const result = oldShowSectionCopyFix(name);
-      if (
-        name === 'failureResponses' ||
-        name === 'responses' ||
-        name === 'accountResponses' ||
-        name === 'reportResponses' ||
-        name === 'reports'
-      ) {
-        setTimeout(addCopyButtonsToFailureResponses, 150);
-        setTimeout(addCopyButtonsToFailureResponses, 800);
-      }
-      return result;
-    };
-    showSection = window.showSection;
-  }
-
-  const oldLoadAppCopyFix = typeof loadApp === 'function' ? loadApp : null;
-  if (oldLoadAppCopyFix) {
-    window.loadApp = async function(){
-      const result = await oldLoadAppCopyFix();
-      setTimeout(addCopyButtonsToFailureResponses, 800);
-      return result;
-    };
-    loadApp = window.loadApp;
-  }
-
-  setTimeout(addCopyButtonsToFailureResponses, 1000);
-  setInterval(addCopyButtonsToFailureResponses, 3000);
 })();
 
 
@@ -3051,8 +2944,7 @@ window.buyProduct = async function(productId){
   if (prevLoadMyReportsCopyUnique) {
     window.loadMyAccountReports = async function(){
       const result = await prevLoadMyReportsCopyUnique();
-      setTimeout(addSingleCopyButtons, 150);
-      setTimeout(addSingleCopyButtons, 700);
+      setTimeout(addSingleCopyButtons, 300);
       return result;
     };
     loadMyAccountReports = window.loadMyAccountReports;
@@ -3062,8 +2954,7 @@ window.buyProduct = async function(productId){
   if (prevShowSectionCopyUnique) {
     window.showSection = function(name){
       const result = prevShowSectionCopyUnique(name);
-      setTimeout(addSingleCopyButtons, 200);
-      setTimeout(addSingleCopyButtons, 900);
+      setTimeout(addSingleCopyButtons, 300);
       return result;
     };
     showSection = window.showSection;
@@ -3080,7 +2971,6 @@ window.buyProduct = async function(productId){
   }
 
   setTimeout(addSingleCopyButtons, 1000);
-  setInterval(cleanDuplicateCopyButtons, 3000);
 })();
 
 
@@ -4432,11 +4322,14 @@ const __showSectionBeforeRoleMatrix = typeof showSection === 'function' ? showSe
 if(__showSectionBeforeRoleMatrix){
   showSection = function(name){
     __showSectionBeforeRoleMatrix(name);
-    if(name==='dashboard') resetScrollToTop();
+    const sectionName = String(name || '').trim();
     applyDashboardRoleVisibilityMatrix();
-    actualizarConteosDashboard();
-    if(name==='dashboard' && currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
-      loadExpiringCount();
+    if(sectionName==='dashboard'){
+      resetScrollToTop();
+      actualizarConteosDashboard();
+      if(currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
+        loadExpiringCount();
+      }
     }
   };
 }
@@ -4451,9 +4344,11 @@ if(__loadAppBeforeRoleMatrix){
 }
 
 setInterval(()=>{
-  applyDashboardRoleVisibilityMatrix();
+  if(!currentUser) return;
+  const dashboardActive = !!document.getElementById('section-dashboard')?.classList.contains('active');
+  if(!dashboardActive) return;
   actualizarConteosDashboard();
-}, 1500);
+}, 12000);
 
 // Navegación final por tarjetas: separa panel admin de distribuidor.
 openUsersFromDashboard = function(){

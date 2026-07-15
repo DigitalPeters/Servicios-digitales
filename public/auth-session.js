@@ -71,6 +71,10 @@ async function loadApp() {
   }
 
   try {
+    if (typeof applyDashboardRoleVisibilityMatrix === 'function') {
+      applyDashboardRoleVisibilityMatrix();
+    }
+
     document.getElementById('authSection')?.classList.add('hidden');
     document.getElementById('appSection')?.classList.remove('hidden');
 
