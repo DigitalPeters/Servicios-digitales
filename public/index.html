@@ -40,7 +40,7 @@
   <div class="topbar">
 
     <div class="topbar-left-actions">
-        <button class="topbar-home-btn" onclick="cambiarSeccion('dashboard')">
+      <button class="topbar-home-btn" onclick="goHomeHardReload()">
             🏠 Inicio
         </button>
         <span id="topUserName" class="topbar-user">Usuario</span>
@@ -74,9 +74,6 @@
           <button id="distributorEarningsBtn" class="menu-btn hidden" data-section="distributorEarnings" onclick="showSection('distributorEarnings')">💵 Ganancias</button>
           <button id="logoutMenuBtn" class="dashboard-utility-btn dashboard-logout-btn" onclick="logout()">🚪 Cerrar sesión</button>
         </div>-->
-        <h1 class="section-title" onclick="reloadDashboard()" style="cursor:pointer">
-  Dashboard 🔄
-</h1>
 <div class="grid-cards">
 
   <div class="dash-card clickable" onclick="showSection('account')">

@@ -1618,6 +1618,14 @@
         font-size:11px;
         padding:6px 8px;
     }
+
+    #appSection .main{
+      padding-top:82px !important;
+    }
+
+    #section-dashboard .dashboard-mini-banners{
+      margin-top:6px;
+    }
 }
 
 /* El fondo oscuro que bloquea el panel trasero */

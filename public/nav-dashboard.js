@@ -25,6 +25,17 @@ function cambiarSeccion(name) {
   showSection(map[key] || name);
 }
 
+function goHomeHardReload() {
+  try {
+    if (typeof showSection === 'function') showSection('dashboard');
+    const url = new URL(window.location.href);
+    url.searchParams.set('_r', String(Date.now()));
+    window.location.replace(url.pathname + url.search + url.hash);
+  } catch (e) {
+    window.location.reload();
+  }
+}
+
 async function reloadDashboard() {
   if (!currentUser || currentUser.role !== 'admin') return;
 
