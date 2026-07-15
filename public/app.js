@@ -4111,9 +4111,19 @@ function ensureVendorDashboardCards(){
 const __miniBannerCarouselState = {
   timer: null,
   index: 0,
-  direction: 1,
-  total: 0
+  total: 0,
+  visibleCount: 1,
+  stepPx: 0,
+  resizeBound: false
 };
+
+function getMiniBannerVisibleCount(){
+  return window.matchMedia('(max-width:760px)').matches ? 2 : 1;
+}
+
+function getMiniBannerMaxIndex(){
+  return Math.max(0, Number(__miniBannerCarouselState.total || 0) - Number(__miniBannerCarouselState.visibleCount || 1));
+}
 
 function stopMiniBannerCarousel(){
   if(__miniBannerCarouselState.timer){
@@ -4122,10 +4132,27 @@ function stopMiniBannerCarousel(){
   }
 }
 
+function recalculateMiniBannerCarouselMetrics(){
+  const track = document.getElementById('dashboardMiniBannersTrack');
+  if(!track) return;
+  const slides = Array.from(track.querySelectorAll('.dashboard-mini-banner-slide'));
+  __miniBannerCarouselState.total = slides.length;
+  __miniBannerCarouselState.visibleCount = Math.max(1, getMiniBannerVisibleCount());
+
+  const first = slides[0];
+  const gapText = (getComputedStyle(track).columnGap || getComputedStyle(track).gap || '0').replace('px','').trim();
+  const gap = Number(gapText || 0);
+  __miniBannerCarouselState.stepPx = first ? (first.getBoundingClientRect().width + gap) : 0;
+
+  const maxIndex = getMiniBannerMaxIndex();
+  if(__miniBannerCarouselState.index > maxIndex) __miniBannerCarouselState.index = maxIndex;
+}
+
 function applyMiniBannerCarouselPosition(){
   const track = document.getElementById('dashboardMiniBannersTrack');
   if(!track) return;
-  track.style.transform = `translateX(-${__miniBannerCarouselState.index * 100}%)`;
+  recalculateMiniBannerCarouselMetrics();
+  track.style.transform = `translateX(-${Math.max(0, __miniBannerCarouselState.index * __miniBannerCarouselState.stepPx)}px)`;
 
   document.querySelectorAll('.mini-banner-dot').forEach((dot, i) => {
     dot.classList.toggle('active', i === __miniBannerCarouselState.index);
@@ -4133,38 +4160,22 @@ function applyMiniBannerCarouselPosition(){
 }
 
 function goToMiniBannerSlide(index){
-  const total = Number(__miniBannerCarouselState.total || 0);
-  if(total <= 0) return;
-  __miniBannerCarouselState.index = Math.max(0, Math.min(total - 1, Number(index || 0)));
+  const maxIndex = getMiniBannerMaxIndex();
+  __miniBannerCarouselState.index = Math.max(0, Math.min(maxIndex, Number(index || 0)));
   applyMiniBannerCarouselPosition();
 }
 
-function startMiniBannerCarousel(total){
+function startMiniBannerCarousel(total, resetIndex){
   stopMiniBannerCarousel();
   __miniBannerCarouselState.total = Number(total || 0);
-  __miniBannerCarouselState.index = 0;
-  __miniBannerCarouselState.direction = 1;
+  if(resetIndex) __miniBannerCarouselState.index = 0;
   applyMiniBannerCarouselPosition();
 
-  if(__miniBannerCarouselState.total <= 1) return;
+  if(getMiniBannerMaxIndex() <= 0) return;
 
   __miniBannerCarouselState.timer = setInterval(() => {
-    const last = __miniBannerCarouselState.total - 1;
-    if(__miniBannerCarouselState.direction > 0){
-      if(__miniBannerCarouselState.index >= last){
-        __miniBannerCarouselState.direction = -1;
-        __miniBannerCarouselState.index = Math.max(0, last - 1);
-      }else{
-        __miniBannerCarouselState.index += 1;
-      }
-    } else {
-      if(__miniBannerCarouselState.index <= 0){
-        __miniBannerCarouselState.direction = 1;
-        __miniBannerCarouselState.index = Math.min(last, 1);
-      }else{
-        __miniBannerCarouselState.index -= 1;
-      }
-    }
+    const maxIndex = getMiniBannerMaxIndex();
+    __miniBannerCarouselState.index = __miniBannerCarouselState.index >= maxIndex ? 0 : __miniBannerCarouselState.index + 1;
     applyMiniBannerCarouselPosition();
   }, 4200);
 }
@@ -4191,8 +4202,10 @@ function renderMiniBannersStrip(items){
     return `<div class="dashboard-mini-banner-slide"><div class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" />${title ? `<span class="mini-banner-caption">${title}</span>` : ''}</div></div>`;
   }).join('');
 
-  const dots = rows.length > 1
-    ? `<div class="mini-banner-dots">${rows.map((_, i)=>`<button class="mini-banner-dot ${i===0?'active':''}" type="button" onclick="goToMiniBannerSlide(${i})" aria-label="Ir al banner ${i+1}"></button>`).join('')}</div>`
+  const initialVisible = getMiniBannerVisibleCount();
+  const positionsCount = Math.max(1, rows.length - initialVisible + 1);
+  const dots = positionsCount > 1
+    ? `<div class="mini-banner-dots">${Array.from({length: positionsCount}).map((_, i)=>`<button class="mini-banner-dot ${i===0?'active':''}" type="button" onclick="goToMiniBannerSlide(${i})" aria-label="Ir al banner ${i+1}"></button>`).join('')}</div>`
     : '';
 
   strip.innerHTML = `
@@ -4202,12 +4215,22 @@ function renderMiniBannersStrip(items){
     ${dots}
   `;
   strip.classList.remove('hidden');
-  startMiniBannerCarousel(rows.length);
+  startMiniBannerCarousel(rows.length, true);
+
+  if(!__miniBannerCarouselState.resizeBound){
+    __miniBannerCarouselState.resizeBound = true;
+    window.addEventListener('resize', () => {
+      const hasTrack = !!document.getElementById('dashboardMiniBannersTrack');
+      if(!hasTrack) return;
+      applyMiniBannerCarouselPosition();
+      startMiniBannerCarousel(__miniBannerCarouselState.total, false);
+    });
+  }
 
   const carousel = document.getElementById('dashboardMiniBannersCarousel');
   if(carousel && rows.length > 1){
     carousel.onmouseenter = () => stopMiniBannerCarousel();
-    carousel.onmouseleave = () => startMiniBannerCarousel(rows.length);
+    carousel.onmouseleave = () => startMiniBannerCarousel(rows.length, false);
   }
 }
 
