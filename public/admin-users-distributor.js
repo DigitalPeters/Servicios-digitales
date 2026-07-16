@@ -1,6 +1,47 @@
 async function loadUsersDistributorLegacy(){allUsers=await api('/api/admin/users');statUsers.textContent=allUsers.length;adminUsersCount.textContent=allUsers.length;balanceUserSelect.innerHTML='<option value="">Selecciona usuario</option>'+allUsers.map(u=>`<option value="${u.id}">${safeText(u.name)} (${safeText(u.email)}) - $${formatMoney(u.balance)}</option>`).join('');balanceUserSelect.onchange=()=>{balanceUserId.value=balanceUserSelect.value};usersList.innerHTML=allUsers.map(u=>`<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${safeText(u.role)}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p></div>`).join('')||'No hay usuarios.'}
 async function addBalanceDistributorLegacy(){try{const data=await api('/api/admin/add-balance',{method:'POST',body:JSON.stringify({user_id:Number(balanceUserId.value),amount:balanceAmount.value,note:balanceNote.value})});showMessage(data.message||'Saldo agregado');balanceAmount.value=balanceNote.value='';if(typeof window.loadUsers==='function')await window.loadUsers();}catch(e){showMessage(e.message,'error');}}
 
+async function adjustAdminUserBalance(mode){
+  const userId = Number(document.getElementById('balanceUserId')?.value || 0);
+  const amountRaw = (document.getElementById('balanceAmount')?.value || '').trim();
+  const note = (document.getElementById('balanceNote')?.value || '').trim();
+  const amount = Number(amountRaw);
+
+  if(!userId || !amountRaw){
+    showMessage('Selecciona usuario y cantidad', 'error');
+    return;
+  }
+
+  if(!Number.isFinite(amount) || amount <= 0){
+    showMessage('La cantidad debe ser mayor a 0', 'error');
+    return;
+  }
+
+  try{
+    const endpoint = mode === 'remove' ? '/api/admin/remove-balance' : '/api/admin/add-balance';
+    const data = await api(endpoint, {
+      method:'POST',
+      body: JSON.stringify({
+        user_id: userId,
+        amount,
+        note
+      })
+    });
+
+    showMessage(data.message || (mode === 'remove' ? 'Saldo descontado' : 'Saldo agregado'));
+    const amountInput = document.getElementById('balanceAmount');
+    const noteInput = document.getElementById('balanceNote');
+    if(amountInput) amountInput.value = '';
+    if(noteInput) noteInput.value = '';
+    if(typeof window.loadUsers === 'function') await window.loadUsers();
+  }catch(e){
+    showMessage(e.message || 'Error ajustando saldo', 'error');
+  }
+}
+
+window.addBalance = function(){ return adjustAdminUserBalance('add'); };
+window.removeBalance = function(){ return adjustAdminUserBalance('remove'); };
+
 function isDistributorUser(){
   return currentUser && (currentUser.role === 'admin' || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
 }

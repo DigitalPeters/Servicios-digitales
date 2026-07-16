@@ -2675,6 +2675,52 @@ app.post("/api/admin/add-balance", authMiddleware, adminMiddleware, async (req, 
   }
 });
 
+// ADMIN: QUITAR SALDO
+app.post("/api/admin/remove-balance", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { user_id, amount, note } = req.body;
+
+    if (!user_id || !amount) {
+      return res.status(400).json({ error: "ID de usuario y cantidad son obligatorios" });
+    }
+
+    const amountNumber = Number(amount);
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      return res.status(400).json({ error: "La cantidad debe ser mayor a 0" });
+    }
+
+    const targetResult = await pool.query(
+      `SELECT id, balance
+       FROM users
+       WHERE id = $1 AND ($2::int IS NULL OR owner_user_id = $2)
+       LIMIT 1`,
+      [user_id, req.isPanelAdmin ? req.user.id : null]
+    );
+
+    const target = targetResult.rows[0];
+    if (!target) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const currentBalance = Number(target.balance || 0);
+    if (currentBalance < amountNumber) {
+      return res.status(400).json({ error: `Saldo insuficiente para descontar. Saldo actual: $${currentBalance.toFixed(2)}` });
+    }
+
+    await pool.query(
+      `UPDATE users SET balance = balance - $1 WHERE id = $2`,
+      [amountNumber, user_id]
+    );
+
+    res.json({
+      message: `Saldo descontado correctamente${note ? ": " + note : ""}`
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error descontando saldo" });
+  }
+});
+
 
 // USUARIO: SOLICITAR CARGA DE SALDO
 app.post("/api/balance-requests", authMiddleware, async (req, res) => {

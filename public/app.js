@@ -626,7 +626,11 @@ function ensureComboCreateControls(){
 function hasAccountDelivery(order){
   const text=getAccountTextFromOrder(order);
   if(!text)return false;
-  return /Cuenta de Streaming|Combo Streaming|Cuenta entregada|Correo:\s*|📧\s*Correo/i.test(text) && /Contraseña:\s*|🔐\s*Contraseña/i.test(text);
+  const hasHeader = /Cuenta de Streaming Entregada|Entrega Digital Inmediata|Combo Streaming|Cuenta entregada/i.test(text);
+  const hasEmail = /(?:Correo|📧\s*Correo):\s*[^\s\n]+/i.test(text);
+  const hasPassword = /(?:Contraseña|Password|🔐\s*Contraseña):\s*[^\n]*/i.test(text);
+  const hasAccessLink = /(?:Enlace de acceso\/descarga|URL para código\/soporte|🔗\s*(?:Enlace|URL))/i.test(text);
+  return hasHeader || hasEmail || hasPassword || hasAccessLink;
 }
 
 function getWarrantyInfoFromOrder(o){
