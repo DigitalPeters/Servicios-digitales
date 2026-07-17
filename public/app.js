@@ -383,9 +383,14 @@ function calculateReportRefundInfo(report){
   return {daysUsed,daysRemaining,refund};
 }
 
+const __reportActionBusy = new Set();
+const __reportEvidenceCache = {};
+
 
 // Reemplazo automático desde inventario
 async function replaceReportedAccountAuto(reportId){
+  if(__reportActionBusy.has(Number(reportId))) return;
+  __reportActionBusy.add(Number(reportId));
   try{
     if(!confirm('¿Reemplazar esta cuenta usando una cuenta disponible del inventario automático?')) return;
 
@@ -433,6 +438,7 @@ async function replaceReportedAccountAuto(reportId){
     if(typeof loadPlatformInventory === 'function') await loadPlatformInventory();
     if(typeof loadAdminOrders === 'function') await loadAdminOrders();
   }catch(e){showMessage(e.message||'Error reemplazando cuenta','error')}
+  finally{__reportActionBusy.delete(Number(reportId));}
 }
 
 // Reemplazo manual con formulario modal
@@ -460,6 +466,8 @@ function replaceReportedAccountManual(reportId){
 }
 
 async function submitReplaceManual(reportId){
+  if(__reportActionBusy.has(Number(reportId))) return;
+  __reportActionBusy.add(Number(reportId));
   try{
     const account_email=(document.getElementById('rm_email')?.value||'').trim();
     const account_password=(document.getElementById('rm_password')?.value||'').trim();
@@ -498,10 +506,13 @@ async function submitReplaceManual(reportId){
   }catch(e){
     showMessage(e.message||'Error aplicando reemplazo manual','error');
   }
+  finally{__reportActionBusy.delete(Number(reportId));}
 }
 
 // Reembolso proporcional para reportes de falla
 async function refundReportedAccount(reportId, orderCreatedAt){
+  if(__reportActionBusy.has(Number(reportId))) return;
+  __reportActionBusy.add(Number(reportId));
   try{
     const dateLabel = orderCreatedAt ? `\nFecha del pedido: ${String(orderCreatedAt).slice(0,10)}` : '';
     if(!confirm(`¿Aplicar reembolso proporcional a este reporte?${dateLabel}`)) return;
@@ -517,10 +528,13 @@ async function refundReportedAccount(reportId, orderCreatedAt){
   }catch(e){
     showMessage(e.message || 'Error aplicando reembolso proporcional', 'error');
   }
+  finally{__reportActionBusy.delete(Number(reportId));}
 }
 
 // Reembolso completo para reportes de falla
 async function refundFullReportedAccount(reportId){
+  if(__reportActionBusy.has(Number(reportId))) return;
+  __reportActionBusy.add(Number(reportId));
   try{
     if(!confirm('¿Aplicar reembolso completo a este reporte?')) return;
 
@@ -535,6 +549,7 @@ async function refundFullReportedAccount(reportId){
   }catch(e){
     showMessage(e.message || 'Error aplicando reembolso completo', 'error');
   }
+  finally{__reportActionBusy.delete(Number(reportId));}
 }
 
 window.replaceReportedAccountManual = replaceReportedAccountManual;
@@ -1131,7 +1146,7 @@ function renderAdminReportCompactFinal(r){
       <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
       <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
-      ${r.evidence_image ? `<div class="order-proof-row"><p style="margin:5px 0"><b>Evidencia adjunta:</b></p>${renderAttachmentButtons(r.evidence_image)}<div class="proof-preview"><img src="${safeText(r.evidence_image)}" alt="Evidencia"></div></div>` : ''}
+      ${Number(r.has_evidence || 0) === 1 ? `<div class="order-proof-row"><p style="margin:5px 0"><b>Evidencia adjunta:</b></p><button class="outline-btn" style="width:auto" onclick="openReportEvidenceModal(${r.id})">👁️ Ver evidencia</button></div>` : ''}
 <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       <div class="two-row">
@@ -1158,6 +1173,11 @@ async function loadAccountReports() {
 
   try {
     const reports = await api('/api/admin/account-reports');
+    (reports || []).forEach(r => {
+      if (r && r.id && r.evidence_image) {
+        __reportEvidenceCache[r.id] = r.evidence_image;
+      }
+    });
     const pending = reports.filter(r => String(r.status || '').toLowerCase() === 'pendiente');
     
     const stat = document.getElementById('statReports');
@@ -1172,7 +1192,41 @@ async function loadAccountReports() {
   }
 }
 
+async function openReportEvidenceModal(reportId){
+  try{
+    let evidence = __reportEvidenceCache[reportId] || '';
+    if(!evidence){
+      const data = await api('/api/admin/account-reports/'+reportId+'/evidence');
+      evidence = String(data?.evidence_image || '').trim();
+      if(evidence) __reportEvidenceCache[reportId] = evidence;
+    }
+    if(!evidence) throw new Error('Este reporte no tiene evidencia adjunta');
+
+    const old = document.getElementById('reportEvidenceModal');
+    if(old) old.remove();
+
+    const html = `
+      <div id="reportEvidenceModal" class="modal-overlay">
+        <div class="modal-card" style="max-width:840px; width:95%">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <h3 style="margin:0">Evidencia del reporte #${reportId}</h3>
+            <button class="outline-btn" style="width:auto" onclick="document.getElementById('reportEvidenceModal')?.remove()">Cerrar</button>
+          </div>
+          <div class="proof-preview" style="margin-top:12px"><img src="${safeText(evidence)}" alt="Evidencia reporte" /></div>
+          <div style="margin-top:10px"><a class="outline-btn" style="display:inline-block;width:auto" href="${safeText(evidence)}" target="_blank" rel="noopener noreferrer">Abrir en pestaña nueva</a></div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }catch(e){
+    showMessage(e.message || 'No se pudo abrir evidencia', 'error');
+  }
+}
+window.openReportEvidenceModal = openReportEvidenceModal;
+
 async function updateAccountReportStatus(reportId){
+  if(__reportActionBusy.has(Number(reportId))) return;
+  __reportActionBusy.add(Number(reportId));
   try{
     const status = (document.getElementById('reportStatus-'+reportId)?.value || '').trim();
     const admin_response = (document.getElementById('reportResponse-'+reportId)?.value || '').trim();
@@ -1191,6 +1245,7 @@ async function updateAccountReportStatus(reportId){
   }catch(e){
     showMessage(e.message || 'Error guardando veredicto', 'error');
   }
+  finally{__reportActionBusy.delete(Number(reportId));}
 }
 window.updateAccountReportStatus = updateAccountReportStatus;
 
@@ -3230,27 +3285,7 @@ async function forzarIngresoManual(reportId) {
   }
 }
 
-// Inyector: Agrega el botón morado a todos los reportes automáticamente
-setInterval(() => {
-  const bloquesFallas = document.querySelectorAll('.item, .card, tr');
-  bloquesFallas.forEach(bloque => {
-    const texto = bloque.innerHTML;
-    if ((texto.includes('Reporte') || texto.includes('Falla')) && !bloque.querySelector('.btn-ingreso-manual')) {
-      const idEncontrado = texto.match(/#(\d+)/);
-      const reportId = idEncontrado ? idEncontrado[1] : null;
-      const contenedor = bloque.querySelector('.order-data, td:last-child') || bloque;
-      
-      if (reportId && contenedor) {
-        const btn = document.createElement('button');
-        btn.className = 'btn-ingreso-manual';
-        btn.innerHTML = '⚡ Ingreso Manual';
-        btn.style.cssText = 'background: #9333ea; color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; margin-left: 8px; border: none; cursor: pointer; display: inline-block; font-weight: bold; margin-top: 6px;';
-        btn.onclick = () => forzarIngresoManual(reportId);
-        contenedor.appendChild(btn);
-      }
-    }
-  });
-}, 2000);
+// Inyector desactivado: el barrido global cada 2s degradaba el rendimiento del panel admin.
 // ==========================================
 // RECUPERACIÓN DE CONTRASEÑA
 // ==========================================

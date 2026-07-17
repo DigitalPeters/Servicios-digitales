@@ -3361,7 +3361,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.reported_account_id,
         account_reports.refund_amount,
         account_reports.resolution_type,
-        account_reports.evidence_image, /* <--- CÁMBIALO PARA QUE COINCIDA */
+        CASE WHEN COALESCE(account_reports.evidence_image, '') <> '' THEN 1 ELSE 0 END AS has_evidence,
         users.name AS customer_name,
         users.email AS customer_email,
         orders.amount AS order_amount,
@@ -3383,6 +3383,29 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando reportes de cuenta" });
+  }
+});
+
+app.get("/api/admin/account-reports/:reportId/evidence", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId || 0);
+    if (!reportId) return res.status(400).json({ error: "ID de reporte inválido" });
+
+    const result = await pool.query(
+      `SELECT evidence_image
+       FROM account_reports
+       WHERE id = $1
+       LIMIT 1`,
+      [reportId]
+    );
+
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Reporte no encontrado" });
+
+    res.json({ evidence_image: row.evidence_image || "" });
+  } catch (err) {
+    console.error("Error cargando evidencia de reporte:", err.message);
+    res.status(500).json({ error: "Error cargando evidencia" });
   }
 });
 
