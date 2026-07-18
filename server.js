@@ -10,6 +10,7 @@ const cors = require("cors");
 const compression = require("compression"); // <-- NUEVO COMPRESOR
 const nodemailer = require("nodemailer");
 const fs = require("fs");
+const fsp = fs.promises;
 const path = require("path");
 
 const app = express();
@@ -4017,21 +4018,71 @@ app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (r
 });
 
 const MINI_BANNERS_FILE = path.join(__dirname, "mini-banners.json");
+let miniBannersCache = null;
+let miniBannersLoadPromise = null;
+let miniBannersMutationQueue = Promise.resolve();
 
-function readMiniBannersFile() {
+function cloneMiniBannersList(list) {
+  return (Array.isArray(list) ? list : []).map(item => ({ ...item }));
+}
+
+async function readMiniBannersFile() {
+  if (miniBannersCache) return cloneMiniBannersList(miniBannersCache);
+  if (miniBannersLoadPromise) return cloneMiniBannersList(await miniBannersLoadPromise);
+
+  miniBannersLoadPromise = (async () => {
+    try {
+      const raw = await fsp.readFile(MINI_BANNERS_FILE, "utf8");
+      const list = JSON.parse(raw);
+      miniBannersCache = Array.isArray(list) ? list : [];
+    } catch (e) {
+      if (e?.code !== "ENOENT") {
+        console.error("Error leyendo mini-banners:", e.message);
+      }
+      miniBannersCache = [];
+    }
+    return miniBannersCache;
+  })();
+
   try {
-    if (!fs.existsSync(MINI_BANNERS_FILE)) return [];
-    const raw = fs.readFileSync(MINI_BANNERS_FILE, "utf8");
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list : [];
-  } catch (e) {
-    console.error("Error leyendo mini-banners:", e.message);
-    return [];
+    return cloneMiniBannersList(await miniBannersLoadPromise);
+  } finally {
+    miniBannersLoadPromise = null;
   }
 }
 
-function writeMiniBannersFile(list) {
-  fs.writeFileSync(MINI_BANNERS_FILE, JSON.stringify(list, null, 2), "utf8");
+async function persistMiniBannersFile(list) {
+  const cleanList = cloneMiniBannersList(list);
+  const tempFile = `${MINI_BANNERS_FILE}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(tempFile, JSON.stringify(cleanList), "utf8");
+  try {
+    await fsp.rename(tempFile, MINI_BANNERS_FILE);
+  } catch (err) {
+    // En Windows rename no siempre reemplaza un archivo existente.
+    if (["EEXIST", "EPERM", "ENOTEMPTY"].includes(err?.code)) {
+      await fsp.unlink(MINI_BANNERS_FILE).catch(() => {});
+      await fsp.rename(tempFile, MINI_BANNERS_FILE);
+    } else {
+      await fsp.unlink(tempFile).catch(() => {});
+      throw err;
+    }
+  }
+  miniBannersCache = cleanList;
+}
+
+function mutateMiniBannersFile(mutator) {
+  const operation = miniBannersMutationQueue.then(async () => {
+    const current = await readMiniBannersFile();
+    const result = await mutator(current);
+    if (!result || !Array.isArray(result.list)) {
+      throw new Error("Mutación de mini banners inválida");
+    }
+    await persistMiniBannersFile(result.list);
+    return result.value;
+  });
+
+  miniBannersMutationQueue = operation.catch(() => {});
+  return operation;
 }
 
 function normalizeMiniBanner(item) {
@@ -4046,7 +4097,7 @@ function normalizeMiniBanner(item) {
 
 app.get("/api/mini-banners", authMiddleware, async (req, res) => {
   try {
-    const banners = readMiniBannersFile()
+    const banners = (await readMiniBannersFile())
       .map(normalizeMiniBanner)
       .filter(b => b.id > 0 && b.image_url && b.active)
       .sort((a, b) => b.id - a.id);
@@ -4060,7 +4111,7 @@ app.get("/api/mini-banners", authMiddleware, async (req, res) => {
 app.get("/api/admin/mini-banners", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const includeImages = String(req.query.with_images || "0") === "1";
-    const banners = readMiniBannersFile()
+    const banners = (await readMiniBannersFile())
       .map(normalizeMiniBanner)
       .filter(b => b.id > 0 && b.image_url)
       .map(b => {
@@ -4099,24 +4150,25 @@ app.post("/api/admin/mini-banners", authMiddleware, adminMiddleware, async (req,
       return res.status(400).json({ error: "Formato de imagen inválido" });
     }
 
-    if (imageData.length > 3_000_000) {
-      return res.status(400).json({ error: "La imagen es demasiado grande" });
+    if (/^data:image\//i.test(imageData) && imageData.length > 1_500_000) {
+      return res.status(400).json({ error: "La imagen es demasiado grande. Usa una imagen menor a 1 MB." });
     }
 
-    const current = readMiniBannersFile().map(normalizeMiniBanner);
-    const nextId = current.reduce((max, b) => Math.max(max, Number(b.id || 0)), 0) + 1;
+    const banner = await mutateMiniBannersFile(currentRaw => {
+      const current = currentRaw.map(normalizeMiniBanner);
+      const nextId = current.reduce((max, b) => Math.max(max, Number(b.id || 0)), 0) + 1;
+      const created = {
+        id: nextId,
+        image_url: imageData,
+        title,
+        link_url: linkUrl,
+        active,
+        created_at: new Date().toISOString()
+      };
+      current.push(created);
+      return { list: current, value: created };
+    });
 
-    const banner = {
-      id: nextId,
-      image_url: imageData,
-      title,
-      link_url: linkUrl,
-      active,
-      created_at: new Date().toISOString()
-    };
-
-    current.push(banner);
-    writeMiniBannersFile(current);
     res.json({ message: "Mini banner guardado", banner });
   } catch (err) {
     console.error("Error guardando mini-banner:", err.message);
@@ -4129,19 +4181,27 @@ app.patch("/api/admin/mini-banners/:id", authMiddleware, adminMiddleware, async 
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: "ID inválido" });
 
-    const list = readMiniBannersFile().map(normalizeMiniBanner);
-    const idx = list.findIndex(b => Number(b.id) === id);
-    if (idx < 0) return res.status(404).json({ error: "Banner no encontrado" });
+    const updatedBanner = await mutateMiniBannersFile(currentRaw => {
+      const list = currentRaw.map(normalizeMiniBanner);
+      const idx = list.findIndex(b => Number(b.id) === id);
+      if (idx < 0) {
+        const error = new Error("Banner no encontrado");
+        error.statusCode = 404;
+        throw error;
+      }
 
-    const next = { ...list[idx] };
-    if (req.body?.title !== undefined) next.title = String(req.body.title || "").trim();
-    if (req.body?.link_url !== undefined) next.link_url = String(req.body.link_url || "").trim();
-    if (req.body?.active !== undefined) next.active = !(req.body.active === false || req.body.active === 0 || req.body.active === "false");
+      const next = { ...list[idx] };
+      if (req.body?.title !== undefined) next.title = String(req.body.title || "").trim();
+      if (req.body?.link_url !== undefined) next.link_url = String(req.body.link_url || "").trim();
+      if (req.body?.active !== undefined) next.active = !(req.body.active === false || req.body.active === 0 || req.body.active === "false");
 
-    list[idx] = normalizeMiniBanner(next);
-    writeMiniBannersFile(list);
-    res.json({ message: "Mini banner actualizado", banner: list[idx] });
+      list[idx] = normalizeMiniBanner(next);
+      return { list, value: list[idx] };
+    });
+
+    res.json({ message: "Mini banner actualizado", banner: updatedBanner });
   } catch (err) {
+    if (err?.statusCode === 404) return res.status(404).json({ error: err.message });
     console.error("Error actualizando mini-banner:", err.message);
     res.status(500).json({ error: "Error actualizando mini-banner" });
   }
@@ -4152,13 +4212,20 @@ app.delete("/api/admin/mini-banners/:id", authMiddleware, adminMiddleware, async
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: "ID inválido" });
 
-    const list = readMiniBannersFile().map(normalizeMiniBanner);
-    const next = list.filter(b => Number(b.id) !== id);
-    if (next.length === list.length) return res.status(404).json({ error: "Banner no encontrado" });
+    await mutateMiniBannersFile(currentRaw => {
+      const list = currentRaw.map(normalizeMiniBanner);
+      const next = list.filter(b => Number(b.id) !== id);
+      if (next.length === list.length) {
+        const error = new Error("Banner no encontrado");
+        error.statusCode = 404;
+        throw error;
+      }
+      return { list: next, value: true };
+    });
 
-    writeMiniBannersFile(next);
     res.json({ message: "Mini banner eliminado" });
   } catch (err) {
+    if (err?.statusCode === 404) return res.status(404).json({ error: err.message });
     console.error("Error eliminando mini-banner:", err.message);
     res.status(500).json({ error: "Error eliminando mini-banner" });
   }

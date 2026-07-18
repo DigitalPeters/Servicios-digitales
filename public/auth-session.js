@@ -55,6 +55,7 @@ function logout() {
   localStorage.removeItem('token');
   token = null;
   currentUser = null;
+  document.documentElement.classList.remove('session-token-present');
   document.getElementById('authSection').classList.remove('hidden');
   document.getElementById('appSection').classList.add('hidden');
   showMessage('Sesión cerrada');
@@ -62,6 +63,10 @@ function logout() {
 
 async function loadApp() {
   if (!token) return;
+
+  // Solo una sesión nueva debe abrir el dashboard. Las recargas de datos internas
+  // no deben sacar al usuario de la sección que está consultando.
+  const shouldOpenDashboard = !currentUser;
   try {
     currentUser = await api('/api/me');
   } catch (e) {
@@ -75,6 +80,7 @@ async function loadApp() {
       applyDashboardRoleVisibilityMatrix();
     }
 
+    document.documentElement.classList.remove('session-token-present');
     document.getElementById('authSection')?.classList.add('hidden');
     document.getElementById('appSection')?.classList.remove('hidden');
 
@@ -96,6 +102,13 @@ async function loadApp() {
       };
     }
 
+    // La navegación inicial ocurre antes de las consultas pesadas. Así, si el
+    // usuario abre otra sección mientras cargan los datos, loadApp no lo devuelve
+    // al dashboard cuando esas consultas terminan.
+    if (shouldOpenDashboard && typeof showSection === 'function') {
+      showSection('dashboard');
+    }
+
     await Promise.allSettled([
       typeof loadProducts === 'function' ? loadProducts() : Promise.resolve(),
       typeof loadMyOrders === 'function' ? loadMyOrders() : Promise.resolve(),
@@ -115,9 +128,26 @@ async function loadApp() {
       ]);
     }
 
-    if (typeof showSection === 'function') showSection('dashboard');
   } catch (e) {
     console.error('Error inicializando panel (sesion preservada):', e);
     showMessage('Se inicio sesion, pero hubo un error cargando algunos paneles.', 'error');
   }
+}
+
+// Iniciar la sesión una sola vez, después de que app.js y los demás módulos
+// hayan terminado de registrar sus funciones y hooks.
+let __initialSessionBootStarted = false;
+function startInitialSessionBoot() {
+  if (__initialSessionBootStarted || !token) return;
+  __initialSessionBootStarted = true;
+  const loader = typeof window.loadApp === 'function' ? window.loadApp : loadApp;
+  Promise.resolve(loader()).catch(error => {
+    console.error('Error en el arranque inicial de sesión:', error);
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startInitialSessionBoot, { once: true });
+} else {
+  setTimeout(startInitialSessionBoot, 0);
 }

@@ -4,30 +4,99 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Servicios Digitales Peters</title>
-  <link rel="stylesheet" href="styles.css?v=1781154937616">
+  <script>
+    try {
+      if (localStorage.getItem('token')) {
+        document.documentElement.classList.add('session-token-present');
+      }
+    } catch (e) {}
+  </script>
+  <style>
+    html.session-token-present #authSection { display: none !important; }
+  </style>
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <div id="message" class="message"></div>
 
   <div id="authSection" class="auth-page">
-    <div class="auth-card">
-      <div class="auth-logo">P</div>
-      <h1>Servicios Digitales Peters</h1>
-      <div class="tabs">
-        <button id="loginTab" class="tab-btn active" onclick="showAuth('login')">Iniciar sesión</button>
-        <button id="registerTab" class="tab-btn" onclick="showAuth('register')">Crear cuenta</button>
-      </div>
-      <div id="loginForm">
-        <label class="field-label">Correo</label><input id="loginEmail" placeholder="Correo" />
-        <label class="field-label">Contraseña</label><input id="loginPassword" type="password" placeholder="Contraseña" />
-        <button class="primary-btn" onclick="login()">Iniciar sesión</button>
-      </div>
-      <div id="registerForm" class="hidden">
-        <label class="field-label">Nombre</label><input id="registerName" placeholder="Nombre" />
-        <label class="field-label">Correo</label><input id="registerEmail" placeholder="Correo" />
-        <label class="field-label">Contraseña</label><input id="registerPassword" type="password" placeholder="Contraseña" />
-        <button class="primary-btn" onclick="register()">Crear cuenta</button>
-      </div>
+    <div class="auth-shell">
+      <section class="auth-showcase" aria-label="Servicios Digitales Peters">
+        <div class="auth-showcase-glow auth-showcase-glow-one"></div>
+        <div class="auth-showcase-glow auth-showcase-glow-two"></div>
+        <div class="auth-brand-lockup">
+          <div class="auth-brand-mark" aria-hidden="true">P</div>
+          <div>
+            <div class="auth-brand-name">Servicios Digitales</div>
+            <div class="auth-brand-surname">Peters</div>
+          </div>
+        </div>
+        <div class="auth-showcase-content">
+          <span class="auth-kicker">Plataforma de distribución digital</span>
+          <h2>Administra, vende y entrega desde un solo lugar.</h2>
+          <p>Accede a tu panel para consultar productos, pedidos, saldo, inventario y soporte según tu rol.</p>
+          <div class="auth-benefits">
+            <div class="auth-benefit"><span>✓</span><div><b>Entrega organizada</b><small>Pedidos e información centralizados.</small></div></div>
+            <div class="auth-benefit"><span>✓</span><div><b>Acceso por roles</b><small>Funciones específicas para cada usuario.</small></div></div>
+            <div class="auth-benefit"><span>✓</span><div><b>Operación segura</b><small>Tu sesión permanece protegida.</small></div></div>
+          </div>
+        </div>
+        <div class="auth-showcase-footer">Panel privado · Acceso exclusivo para usuarios registrados</div>
+      </section>
+
+      <section class="auth-card" aria-labelledby="authWelcomeTitle">
+        <div class="auth-mobile-brand">
+          <div class="auth-brand-mark" aria-hidden="true">P</div>
+          <div><b>Servicios Digitales</b><span>Peters</span></div>
+        </div>
+        <div class="auth-form-heading">
+          <span class="auth-eyebrow">Acceso al sistema</span>
+          <h1 id="authWelcomeTitle">Bienvenido</h1>
+          <p>Ingresa tus datos o crea una cuenta para comenzar.</p>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Opciones de acceso">
+          <button id="loginTab" class="tab-btn active" type="button" role="tab" aria-selected="true" onclick="showAuth('login')">Iniciar sesión</button>
+          <button id="registerTab" class="tab-btn" type="button" role="tab" aria-selected="false" onclick="showAuth('register')">Crear cuenta</button>
+        </div>
+
+        <form id="loginForm" class="auth-form" onsubmit="event.preventDefault(); login();">
+          <label class="auth-field-label" for="loginEmail">Correo electrónico</label>
+          <div class="auth-input-wrap">
+            <span class="auth-input-icon" aria-hidden="true">@</span>
+            <input id="loginEmail" type="email" inputmode="email" autocomplete="username" placeholder="nombre@correo.com" required />
+          </div>
+          <label class="auth-field-label" for="loginPassword">Contraseña</label>
+          <div class="auth-input-wrap auth-password-wrap">
+            <span class="auth-input-icon" aria-hidden="true">●</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Escribe tu contraseña" required />
+            <button class="auth-password-toggle" type="button" onclick="toggleAuthPassword('loginPassword', this)" aria-label="Mostrar contraseña">Ver</button>
+          </div>
+          <button id="loginSubmitBtn" class="primary-btn auth-submit" type="submit"><span>Iniciar sesión</span><span aria-hidden="true">→</span></button>
+        </form>
+
+        <form id="registerForm" class="auth-form hidden" onsubmit="event.preventDefault(); register();">
+          <label class="auth-field-label" for="registerName">Nombre completo</label>
+          <div class="auth-input-wrap">
+            <span class="auth-input-icon" aria-hidden="true">◉</span>
+            <input id="registerName" autocomplete="name" placeholder="Tu nombre" required />
+          </div>
+          <label class="auth-field-label" for="registerEmail">Correo electrónico</label>
+          <div class="auth-input-wrap">
+            <span class="auth-input-icon" aria-hidden="true">@</span>
+            <input id="registerEmail" type="email" inputmode="email" autocomplete="email" placeholder="nombre@correo.com" required />
+          </div>
+          <label class="auth-field-label" for="registerPassword">Contraseña</label>
+          <div class="auth-input-wrap auth-password-wrap">
+            <span class="auth-input-icon" aria-hidden="true">●</span>
+            <input id="registerPassword" type="password" autocomplete="new-password" placeholder="Escribe una contraseña" required />
+            <button class="auth-password-toggle" type="button" onclick="toggleAuthPassword('registerPassword', this)" aria-label="Mostrar contraseña">Ver</button>
+          </div>
+          <button id="registerSubmitBtn" class="primary-btn auth-submit" type="submit"><span>Crear mi cuenta</span><span aria-hidden="true">→</span></button>
+        </form>
+
+        <div class="auth-security-note"><span aria-hidden="true">◆</span> Conexión segura y acceso controlado por permisos.</div>
+      </section>
     </div>
   </div>
 
@@ -40,7 +109,7 @@
   <div class="topbar">
 
     <div class="topbar-left-actions">
-      <button class="topbar-home-btn" onclick="goHomeHardReload()">
+      <button type="button" class="topbar-home-btn" onclick="return goHomeHardReload()">
             🏠 Inicio
         </button>
         <span id="topUserName" class="topbar-user">Usuario</span>
@@ -159,7 +228,7 @@
           <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="count-pedidos" class="dash-value"><span id="statOrders">0</span></div></div></div>
           <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="count-fallas_reportadas" class="dash-value"><span id="statReports">0</span></div></div></div>
           <div id="dashBalanceRequestsCard" class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo pendiente</div><div id="count-carga_pendiente" class="dash-value"><span id="statBalanceRequests">0</span></div></div></div>
-          <div id="dashQuarantineCard" class="dash-card clickable" onclick="openQuarantineFromDashboard()">
+          <div id="dashQuarantineCard" class="dash-card clickable">
             <div class="dash-icon">🚨</div>
             <div>
               <div class="dash-label">🚨 Cuentas en Cuarentena</div>
@@ -605,14 +674,14 @@
 </div>
 
 <script src="shared-utils.js?v=1"></script>
-<script src="auth-session.js?v=1"></script>
-<script src="nav-dashboard.js?v=1"></script>
+<script src="auth-session.js?v=2"></script>
+<script src="nav-dashboard.js?v=3"></script>
 <script src="product-shop.js?v=1"></script>
-<script src="user-orders-balance.js?v=1"></script>
+<script src="user-orders-balance.js?v=2"></script>
 <script src="admin-commerce.js?v=1"></script>
 <script src="dashboard-stock-alerts.js?v=1"></script>
-<script src="app.js?v=3"></script>
-<script src="admin-users-distributor.js?v=5"></script>
+<script src="app.js?v=8"></script>
+<script src="admin-users-distributor.js?v=6"></script>
 
   <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
     <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>
@@ -657,8 +726,6 @@
 
 <!-- FIX CONTABILIZAR HISTORICO X2 COMO CUENTAS VENDIDAS - 2026-06-09 02:27:10 -->
 
-<!-- BOTON COPIAR RESPUESTA DE FALLOS - 2026-06-09 02:38:18 -->
-
-<!-- FIX BOTON COPIAR UNICO RESPUESTA FALLOS - 2026-06-09 03:02:58 -->
+<!-- REEMPLAZO REPORTABLE CON COPIAR DATOS Y REPORTAR FALLA - 2026-07-18 -->
 
 <!-- FIX SALDO PENDIENTE Y NOTIFICACIONES - 2026-06-09 04:01:41 -->

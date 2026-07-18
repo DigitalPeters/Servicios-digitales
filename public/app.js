@@ -11,65 +11,134 @@ function canAccessInventoryHistory(){
   );
 }
 
-function showSection(name) {
+const SECTION_ALIASES = Object.freeze({
+  reportsMenu: 'reports-menu',
+  failureResponses: 'failure-responses',
+  accountResponses: 'failure-responses',
+  reportResponses: 'failure-responses',
+  store: 'shop'
+});
+
+const __sectionHooks = new Set();
+const __sectionLoadPromises = new Map();
+let __sectionNavigationLocked = false;
+let __lastSectionName = '';
+let __sectionUnlockTimer = null;
+
+function normalizeSectionName(name){
   const targetName = String(name || '').trim();
-  if (!targetName) return;
-  const normalizedName = ({
-    reportsMenu: 'reports-menu',
-    failureResponses: 'failure-responses',
-    accountResponses: 'failure-responses',
-    reportResponses: 'failure-responses',
-    store: 'shop'
-  })[targetName] || targetName;
+  return SECTION_ALIASES[targetName] || targetName;
+}
 
-  let sec = document.getElementById('section-' + normalizedName);
-  if (!sec && (normalizedName === 'reports-menu' || normalizedName === 'failure-responses')) {
-    if (typeof ensureReportMenuFinal === 'function') ensureReportMenuFinal();
-    sec = document.getElementById('section-' + normalizedName);
-  }
-  if (!sec) return;
+function registerSectionHook(handler){
+  if(typeof handler !== 'function') return function(){};
+  __sectionHooks.add(handler);
+  return function unregisterSectionHook(){ __sectionHooks.delete(handler); };
+}
+window.registerSectionHook = registerSectionHook;
 
-  if (normalizedName === 'inventory-history' && !canAccessInventoryHistory()) {
-    if (typeof showMessage === 'function') showMessage('Solo el distribuidor puede acceder al historial de inventario', 'error');
-    if (typeof __showSectionBeforeRoleMatrix === 'function') {
-      __showSectionBeforeRoleMatrix('dashboard');
+function runSectionHooks(sectionName){
+  __sectionHooks.forEach(handler => {
+    try{
+      handler(sectionName);
+    }catch(error){
+      console.warn('Error en acción posterior de navegación', sectionName, error);
     }
-    return;
+  });
+}
+
+function runSectionLoadOnce(key, loader){
+  if(typeof loader !== 'function') return Promise.resolve();
+  if(__sectionLoadPromises.has(key)) return __sectionLoadPromises.get(key);
+
+  const task = Promise.resolve()
+    .then(loader)
+    .catch(error => {
+      console.warn('Error cargando sección', key, error);
+    })
+    .finally(() => {
+      __sectionLoadPromises.delete(key);
+    });
+
+  __sectionLoadPromises.set(key, task);
+  return task;
+}
+
+function showSection(name) {
+  let normalizedName = normalizeSectionName(name);
+  if(!normalizedName) return false;
+
+  if(normalizedName === 'admin' && typeof isAnyAdminUserPanel === 'function' && !isAnyAdminUserPanel()){
+    normalizedName = 'dashboard';
   }
 
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  sec.classList.add('active');
+  if(normalizedName === 'inventory-history' && !canAccessInventoryHistory()){
+    if(typeof showMessage === 'function'){
+      showMessage('Solo el distribuidor puede acceder al historial de inventario', 'error');
+    }
+    normalizedName = 'dashboard';
+  }
 
-  document.querySelectorAll('.menu-btn')
-    .forEach(b => b.classList.toggle('active', b.dataset.section === normalizedName));
+  if((normalizedName === 'reports-menu' || normalizedName === 'failure-responses') && typeof ensureReportMenuFinal === 'function'){
+    ensureReportMenuFinal();
+  }
+
+  const section = document.getElementById('section-' + normalizedName);
+  if(!section) return false;
+
+  // Evita dobles clics y llamadas repetidas a la misma sección sin crear nuevas capas.
+  if(__sectionNavigationLocked && normalizedName === __lastSectionName) return true;
+  __sectionNavigationLocked = true;
+  __lastSectionName = normalizedName;
+  if(__sectionUnlockTimer) clearTimeout(__sectionUnlockTimer);
+  __sectionUnlockTimer = setTimeout(() => {
+    __sectionNavigationLocked = false;
+  }, 120);
+
+  document.querySelectorAll('.section').forEach(item => item.classList.remove('active'));
+  section.classList.add('active');
+
+  document.querySelectorAll('.menu-btn').forEach(button => {
+    button.classList.toggle('active', button.dataset.section === normalizedName);
+  });
 
   document.getElementById('sidebar')?.classList.remove('show');
 
-  if (normalizedName === 'shop') {
-    if (!allProducts.length && typeof loadProducts === 'function') {
-      loadProducts();
-    } else if (typeof renderShopHome === 'function') {
-      renderShopHome();
-    }
-  }
-  if (normalizedName === 'orders') loadMyOrders();
+  if(typeof applyRentedAdminLayout === 'function') applyRentedAdminLayout();
 
-  if (normalizedName === 'admin' && currentUser?.role === 'admin') {
-    if (typeof loadUsers === 'function') loadUsers();
-    loadAdminProducts();
-    loadAdminOrders();
-    loadSalesReport();
-    loadPlatformInventory();
-    loadAccountReports();
+  if(normalizedName === 'shop' && typeof loadProducts === 'function'){
+    runSectionLoadOnce('shop', () => loadProducts());
   }
 
-  if (normalizedName === 'alerts') loadExpiringAlerts();
-
-  // --- SECCIÓN DASHBOARD ---
-  if (normalizedName === 'dashboard' && currentUser?.role === 'admin') {
-    loadExpiringCount();
+  if(normalizedName === 'orders' && typeof loadMyOrders === 'function'){
+    runSectionLoadOnce('orders', () => loadMyOrders());
   }
-} // <--- Esta es la ÚNICA llave que cierra toda la función
+
+  if(normalizedName === 'balance' && typeof loadBankInfoForPanel === 'function'){
+    runSectionLoadOnce('balance', () => loadBankInfoForPanel());
+  }
+
+  if(normalizedName === 'alerts' && typeof loadExpiringAlerts === 'function'){
+    runSectionLoadOnce('alerts', () => loadExpiringAlerts());
+  }
+
+  if(normalizedName === 'admin' && typeof isAnyAdminUserPanel === 'function' && isAnyAdminUserPanel()){
+    runSectionLoadOnce('admin', async () => {
+      const rentedPanel = typeof isPanelAdminRented === 'function' && isPanelAdminRented();
+      await Promise.allSettled([
+        !rentedPanel && typeof loadUsers === 'function' ? loadUsers() : Promise.resolve(),
+        typeof loadAdminProducts === 'function' ? loadAdminProducts() : Promise.resolve(),
+        !rentedPanel && typeof loadBalanceRequests === 'function' ? loadBalanceRequests() : Promise.resolve(),
+        !rentedPanel && typeof loadAccountReports === 'function' ? loadAccountReports() : Promise.resolve(),
+        !rentedPanel && typeof loadSalesReport === 'function' ? loadSalesReport(true) : Promise.resolve()
+      ]);
+      if(typeof applyRentedAdminLayout === 'function') applyRentedAdminLayout();
+    });
+  }
+
+  runSectionHooks(normalizedName);
+  return true;
+}
 
 async function loadUsers(){
   const box = document.getElementById('usersList');
@@ -129,10 +198,7 @@ setTimeout(() => {
 // ===============================
 
 
-const __oldShowSectionForSalesToday = showSection;
-showSection = function(name){
-  __oldShowSectionForSalesToday(name);
-};
+// La navegación se administra únicamente desde showSection y sus hooks registrados.
 
 // Auto-refresh periódico desactivado: las secciones se actualizan solo después de acciones.
 // setInterval(()=>{
@@ -769,27 +835,6 @@ function renderInventoryHistorySummary(events) {
 
   document.getElementById('inventoryEmail').textContent = firstEvent.cuenta_madre || '-';
   document.getElementById('inventoryProfile').textContent = firstEvent.profile_name || '-';
-  const __finalShowSectionBase = typeof showSection === 'function' ? showSection : null;
-  if(__finalShowSectionBase){
-    let __showSectionLock = false;
-    let __lastSectionName = '';
-    showSection = function(name){
-      const sectionName = String(name || '').trim();
-      if(!sectionName) return;
-      if(__showSectionLock && sectionName === __lastSectionName) return;
-      __lastSectionName = sectionName;
-      __showSectionLock = true;
-      try{
-        __finalShowSectionBase(sectionName);
-      } finally {
-        setTimeout(()=>{ __showSectionLock = false; }, 120);
-      }
-      if(sectionName === 'admin'){
-        setTimeout(()=>{ if(typeof window.loadAdminUsersPanelFinal === 'function') window.loadAdminUsersPanelFinal(); }, 60);
-        setTimeout(()=>{ if(typeof window.loadAdminUsersPanelFinal === 'function') window.loadAdminUsersPanelFinal(); }, 320);
-      }
-    };
-  }
   document.getElementById('inventoryPlatform').textContent = firstEvent.platform || firstEvent.product_name || '-';
   document.getElementById('inventoryStatus').textContent = estado;
   document.getElementById('inventoryEntered').textContent = fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-';
@@ -960,8 +1005,8 @@ setTimeout(() => {
   initInventoryHistoryModalBehavior();
 }, 100);
 
-loadApp();
-
+// El arranque de sesión se ejecuta al terminar de cargar todos los módulos.
+// No iniciar loadApp aquí: este archivo aún continúa instalando hooks y mejoras.
 
 // ===============================
 // FIX REAL: Pedidos pendientes + Auto refresh
@@ -1033,13 +1078,9 @@ if(__originalLoadProductsForPending){
   }
 }
 
-const __originalShowSectionForPending = typeof showSection === 'function' ? showSection : null;
-if(__originalShowSectionForPending){
-  showSection = function(name){
-    __originalShowSectionForPending(name);
-    ensureManualPendingCard();
-  }
-}
+registerSectionHook(function manualPendingSectionHook(name){
+  if(name === 'dashboard' || name === 'admin') ensureManualPendingCard();
+});
 
 async function autoRefreshPanel(){
   if(__autoRefreshRunning || !currentUser || document.hidden) return;
@@ -1408,6 +1449,7 @@ async function loadMyFailureResponsesFinal(){
   if(!box) return;
   try{
     const reports=await api('/api/my-account-reports');
+    if(typeof cacheMyAccountReports === 'function') cacheMyAccountReports(reports);
     if(!Array.isArray(reports) || !reports.length){
       box.innerHTML='Todavía no tienes reportes de falla.';
       return;
@@ -1425,6 +1467,7 @@ async function loadMyFailureResponsesFinal(){
           <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
           <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinal(r.status))}</span></p>
           <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
+          ${typeof renderReplacementReportActions === 'function' ? renderReplacementReportActions(r) : ''}
         </div>
       </div>`).join('');
   }catch(e){
@@ -1445,14 +1488,12 @@ async function loadMyFailureResponsesFinal(){
     document.head.appendChild(st);
   }
 
-  const previousShow=typeof showSection==='function'?showSection:null;
-  if(previousShow){
-    showSection=function(name){
+  registerSectionHook(function reportsSectionHook(name){
+    if(name === 'reports-menu' || name === 'reports' || name === 'failure-responses'){
       ensureReportMenuFinal();
-      previousShow(name);
-      if(name==='failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
-    };
-  }
+    }
+    if(name === 'failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
+  });
 
   setTimeout(()=>{ensureReportMenuFinal();},300);
   setTimeout(()=>{ensureReportMenuFinal();},1200);
@@ -1717,15 +1758,11 @@ function copyAdminPanelInfoPhase1(panelId){
 }
 
 (function(){
-  const previousShowPhase1=typeof showSection==='function'?showSection:null;
-  if(previousShowPhase1){
-    showSection=function(name){
-      previousShowPhase1(name);
-      if(name==='admin' && isAdminUserSafe()){
-        setTimeout(()=>{ensureAdminPanelsPhase1UI();loadAdminPanelsPhase1();},120);
-      }
-    };
-  }
+  registerSectionHook(function adminPanelsPhase1SectionHook(name){
+    if(name === 'admin' && isAdminUserSafe()){
+      setTimeout(()=>{ensureAdminPanelsPhase1UI();loadAdminPanelsPhase1();},120);
+    }
+  });
 
   setTimeout(()=>{
     if(isAdminUserSafe()){
@@ -1788,48 +1825,6 @@ if(userCard) userCard.classList.remove('hidden');
   }
 
 }
-
-const __showSectionBeforeRentedAdmin = typeof showSection === 'function' ? showSection : null;
-showSection = function(name){
-  if(name === 'admin' && !isAnyAdminUserPanel()) name = 'dashboard';
-
-  const targetName = String(name || '').trim();
-  if(!targetName) return;
-  const normalizedName = ({
-    reportsMenu: 'reports-menu',
-    failureResponses: 'failure-responses',
-    accountResponses: 'failure-responses',
-    reportResponses: 'failure-responses',
-    store: 'shop'
-  })[targetName] || targetName;
-
-  let sec=document.getElementById('section-'+normalizedName);
-  if(!sec && (normalizedName==='reports-menu' || normalizedName==='failure-responses')){
-    if(typeof ensureReportMenuFinal==='function') ensureReportMenuFinal();
-    sec=document.getElementById('section-'+normalizedName);
-  }
-  if(!sec) return;
-
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  sec.classList.add('active');
-  document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active', b.dataset.section===normalizedName));
-  document.getElementById('sidebar')?.classList.remove('show');
-
-  applyRentedAdminLayout();
-
-  if(normalizedName==='shop' && typeof loadProducts==='function') loadProducts();
-  if(normalizedName==='orders' && typeof loadMyOrders==='function') loadMyOrders();
-  if(normalizedName==='balance' && typeof loadBankInfoForPanel==='function') loadBankInfoForPanel();
-  if(normalizedName==='admin' && isAnyAdminUserPanel()){
-    Promise.allSettled([
-      !isPanelAdminRented() && typeof loadUsers==='function' ? loadUsers() : Promise.resolve(),
-      typeof loadAdminProducts==='function' ? loadAdminProducts() : Promise.resolve(),
-      !isPanelAdminRented() && typeof loadBalanceRequests==='function' ? loadBalanceRequests() : Promise.resolve(),
-      !isPanelAdminRented() && typeof loadAccountReports==='function' ? loadAccountReports() : Promise.resolve(),
-      !isPanelAdminRented() && typeof loadSalesReport==='function' ? loadSalesReport(true) : Promise.resolve()
-    ]).then(()=>applyRentedAdminLayout());
-  }
-};
 
 function scrollToAdmin(id){
   if(!isAnyAdminUserPanel()) return showSection('dashboard');
@@ -2231,14 +2226,11 @@ setTimeout(() => {
     };
   }
 
-  const prevShowSection = typeof showSection === 'function' ? showSection : null;
-  if(prevShowSection){
-    showSection = function(name){
-      const result = prevShowSection(name);
+  registerSectionHook(function dashboardAdjustmentsSectionHook(name){
+    if(name === 'dashboard' || name === 'admin'){
       setTimeout(applyDashboardFinalAdjustments,120);
-      return result;
-    };
-  }
+    }
+  });
 
   const prevLoadApp = typeof loadApp === 'function' ? loadApp : null;
   if(prevLoadApp){
@@ -2341,14 +2333,9 @@ setTimeout(() => {
     };
   }
 
-  const prevShowSectionVentasFix = typeof showSection === 'function' ? showSection : null;
-  if (prevShowSectionVentasFix) {
-    showSection = function(name){
-      const result = prevShowSectionVentasFix(name);
-      setTimeout(bindVentasHoyButton, 180);
-      return result;
-    };
-  }
+  registerSectionHook(function ventasHoySectionHook(name){
+    if(name === 'dashboard' || name === 'admin') setTimeout(bindVentasHoyButton, 180);
+  });
 
   const prevLoadSalesReportVentasFix = typeof loadSalesReport === 'function' ? loadSalesReport : null;
   if (prevLoadSalesReportVentasFix) {
@@ -2525,16 +2512,9 @@ setTimeout(() => {
       return result;
     };
   }
-  const oldShowSectionHierarchy = typeof showSection === 'function' ? showSection : null;
-  if (oldShowSectionHierarchy) {
-    showSection = function(name){
-      const result = oldShowSectionHierarchy(name);
-      if (name === 'admin') {
-        setTimeout(renderUsersWithHierarchy, 250);
-      }
-      return result;
-    };
-  }
+  registerSectionHook(function usersHierarchySectionHook(name){
+    if(name === 'admin') setTimeout(renderUsersWithHierarchy, 250);
+  });
   setTimeout(renderUsersWithHierarchy, 600);
 })();
 
@@ -2662,6 +2642,9 @@ window.buyProduct = async function(productId){
     loadReportableAccounts();
   }
 
+  window.loadReportableAccountsStable = loadReportableAccounts;
+  window.ensureReportSelectStable = ensureReportSelect;
+
   window.onSelectReportAccountStable=function(){
     const opt=document.getElementById('reporteCuentaSelect')?.selectedOptions?.[0];
     const email=opt?.getAttribute('data-email')||'';
@@ -2770,16 +2753,10 @@ window.buyProduct = async function(productId){
   };
   replaceReportedAccount=window.replaceReportedAccount;
 
-  const oldShow=typeof showSection==='function'?showSection:null;
-  if(oldShow){
-    window.showSection=function(name){
-      const r=oldShow(name);
-      if(name==='reports') setTimeout(ensureReportSelect,150);
-      if(name==='shop' || name==='store') setTimeout(removeMultiQtyUI,250);
-      return r;
-    };
-    showSection=window.showSection;
-  }
+  registerSectionHook(function reportsAndShopSectionHook(name){
+    if(name === 'reports') setTimeout(ensureReportSelect,150);
+    if(name === 'shop') setTimeout(removeMultiQtyUI,250);
+  });
 
   const oldLoad=typeof loadApp==='function'?loadApp:null;
   if(oldLoad){
@@ -2953,152 +2930,7 @@ window.buyProduct = async function(productId){
 
 
 
-// ===============================
-// FIX BOTÓN COPIAR ÚNICO EN RESPUESTA DE FALLOS - 2026-06-09 03:02:58
-// Evita botones duplicados y deja solo uno por reporte abierto.
-// ===============================
-(function(){
-  function getFailureReportCard(el){
-    return el.closest('.item') || el.closest('.report-card') || el.closest('.card') || el.closest('.panel') || el.parentElement;
-  }
-
-  function cleanDuplicateCopyButtons(){
-    const buttons = Array.from(document.querySelectorAll('.copy-failure-response-btn'));
-    const seenCards = new Set();
-
-    buttons.forEach(btn => {
-      const card = getFailureReportCard(btn);
-      if (!card) {
-        btn.remove();
-        return;
-      }
-
-      // Si el card no contiene respuesta real, quitar botón.
-      const txt = (card.innerText || '').toLowerCase();
-      const hasResponse = txt.includes('respuesta del admin') || txt.includes('cuenta de streaming entregada') || txt.includes('cuenta reemplazada');
-      if (!hasResponse) {
-        btn.remove();
-        return;
-      }
-
-      // Solo un botón por card.
-      if (seenCards.has(card)) {
-        btn.remove();
-      } else {
-        seenCards.add(card);
-      }
-    });
-  }
-
-  function extractReplacementText(card){
-    if (!card) return '';
-    const full = card.innerText || '';
-    const marker = 'Respuesta del admin:';
-    const idx = full.indexOf(marker);
-    if (idx >= 0) {
-      let text = full.slice(idx + marker.length).trim();
-      text = text.replace(/📋\s*Copiar cuenta de reemplazo/gi, '').trim();
-      return text;
-    }
-    return full.replace(/📋\s*Copiar cuenta de reemplazo/gi, '').trim();
-  }
-
-  window.copyFailureResponseText = async function(btn){
-    const card = getFailureReportCard(btn);
-    const text = extractReplacementText(card);
-
-    if (!text) {
-      showMessage('No encontré datos para copiar', 'error');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(text);
-      showMessage('Datos copiados');
-    } catch(e) {
-      const tmp = document.createElement('textarea');
-      tmp.value = text;
-      document.body.appendChild(tmp);
-      tmp.focus();
-      tmp.select();
-      document.execCommand('copy');
-      tmp.remove();
-      showMessage('Datos copiados');
-    }
-  };
-
-  function addSingleCopyButtons(){
-    cleanDuplicateCopyButtons();
-
-    const cards = Array.from(document.querySelectorAll('.item, .report-card, .card'));
-    cards.forEach(card => {
-      const text = card.innerText || '';
-      const lower = text.toLowerCase();
-
-      const isReplacement =
-        lower.includes('respuesta del admin') &&
-        (
-          lower.includes('cuenta reemplazada') ||
-          lower.includes('cuenta de streaming entregada') ||
-          lower.includes('correo:') ||
-          lower.includes('contraseña:')
-        );
-
-      if (!isReplacement) return;
-
-      // No agregar si ya hay botón en este card.
-      if (card.querySelector(':scope > .copy-failure-response-btn') || card.querySelector('.copy-failure-response-btn')) return;
-
-      const btn = document.createElement('button');
-      btn.className = 'outline-btn copy-failure-response-btn';
-      btn.type = 'button';
-      btn.style.marginTop = '12px';
-      btn.textContent = '📋 Copiar cuenta de reemplazo';
-      btn.onclick = function(ev){
-        ev.preventDefault();
-        ev.stopPropagation();
-        copyFailureResponseText(btn);
-      };
-
-      card.appendChild(btn);
-    });
-
-    cleanDuplicateCopyButtons();
-  }
-
-  const prevLoadMyReportsCopyUnique = typeof loadMyAccountReports === 'function' ? loadMyAccountReports : null;
-  if (prevLoadMyReportsCopyUnique) {
-    window.loadMyAccountReports = async function(){
-      const result = await prevLoadMyReportsCopyUnique();
-      setTimeout(addSingleCopyButtons, 300);
-      return result;
-    };
-    loadMyAccountReports = window.loadMyAccountReports;
-  }
-
-  const prevShowSectionCopyUnique = typeof showSection === 'function' ? showSection : null;
-  if (prevShowSectionCopyUnique) {
-    window.showSection = function(name){
-      const result = prevShowSectionCopyUnique(name);
-      setTimeout(addSingleCopyButtons, 300);
-      return result;
-    };
-    showSection = window.showSection;
-  }
-
-  const prevLoadAppCopyUnique = typeof loadApp === 'function' ? loadApp : null;
-  if (prevLoadAppCopyUnique) {
-    window.loadApp = async function(){
-      const result = await prevLoadAppCopyUnique();
-      setTimeout(addSingleCopyButtons, 1000);
-      return result;
-    };
-    loadApp = window.loadApp;
-  }
-
-  setTimeout(addSingleCopyButtons, 1000);
-})();
-
+// Los botones de reemplazo ahora se renderizan directamente en cada reporte.
 
 
 // ===============================
@@ -3230,23 +3062,11 @@ window.buyProduct = async function(productId){
     loadAccountReports = window.loadAccountReports;
   }
 
-const prevShowSectionSaldoNotify = showSection;
-
-showSection = function(name){
-    const result = prevShowSectionSaldoNotify(name);
-
-    setTimeout(bindSaldoPendienteCard, 200);
-
-    if(name === 'admin')
-        setTimeout(addNotifyButtons, 400);
-
-    // NUEVO
-    if(name === 'dashboard' && currentUser?.role === 'admin'){
-        setTimeout(loadExpiringCount, 300);
-    }
-
-    return result;
-}
+registerSectionHook(function saldoAndNotificationsSectionHook(name){
+    if(name === 'dashboard' || name === 'balance') setTimeout(bindSaldoPendienteCard, 200);
+    if(name === 'admin') setTimeout(addNotifyButtons, 400);
+    if(name === 'dashboard' && currentUser?.role === 'admin') setTimeout(loadExpiringCount, 300);
+});
 });  
 
 
@@ -3669,28 +3489,62 @@ async function checkQuarantineAccounts() {
   }
 }
 
-function openQuarantineFromDashboard() {
-  console.log('openQuarantineFromDashboard invoked, currentUser:', currentUser);
+let quarantineOpenRequest = null;
+
+async function openQuarantineFromDashboard() {
   if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) {
-    console.warn('Acceso a cuarentena denegado: usuario no autenticado o sin permisos');
     showMessage('No autorizado para abrir cuarentena', 'error');
     return;
   }
 
-  fetch('/api/admin/accounts/quarantine', {
-    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-  })
-    .then(r => r.json())
-    .then(list => {
-      const quarantineList = Array.isArray(list) ? list : [];
-      const stat = document.getElementById('statExpiring');
-      if (stat) stat.textContent = String(quarantineList.length);
-      showQuarantineModal(quarantineList);
-    })
+  // Si el usuario hace doble clic mientras la primera consulta sigue activa,
+  // reutilizamos la misma solicitud y evitamos abrir/renderizar el modal dos veces.
+  if (quarantineOpenRequest) return quarantineOpenRequest;
+
+  const dashCard = document.getElementById('dashQuarantineCard');
+  if (dashCard) dashCard.setAttribute('aria-busy', 'true');
+
+  quarantineOpenRequest = (async () => {
+    const response = await fetch('/api/admin/accounts/quarantine', {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+
+    if (!response.ok) {
+      let message = 'No se pudo consultar la cuarentena.';
+      try {
+        const errorData = await response.json();
+        if (errorData && errorData.error) message = errorData.error;
+      } catch (_) {}
+      throw new Error(message);
+    }
+
+    const list = await response.json();
+    const quarantineList = Array.isArray(list) ? list : [];
+    const stat = document.getElementById('statExpiring');
+    if (stat) stat.textContent = String(quarantineList.length);
+    showQuarantineModal(quarantineList);
+  })()
     .catch(err => {
       console.error('Error abriendo cuarentena:', err);
+      showMessage(err.message || 'No se pudo abrir la cuarentena.', 'error');
+    })
+    .finally(() => {
+      if (dashCard) dashCard.removeAttribute('aria-busy');
+      quarantineOpenRequest = null;
     });
+
+  return quarantineOpenRequest;
 }
+
+function bindQuarantineDashboardCard() {
+  const dashCard = document.getElementById('dashQuarantineCard');
+  if (!dashCard || dashCard.dataset.quarantineClickBound === '1') return;
+
+  dashCard.dataset.quarantineClickBound = '1';
+  dashCard.addEventListener('click', openQuarantineFromDashboard);
+}
+
+document.addEventListener('DOMContentLoaded', bindQuarantineDashboardCard);
 
 function showQuarantineModal(list) {
   console.log('showQuarantineModal called, list length:', Array.isArray(list)?list.length:0);
@@ -4005,39 +3859,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Respaldo de click para tarjeta de cuarentena.
-// Si el handler principal no quedó enlazado tras una recarga parcial,
-// este listener ejecuta la misma apertura del modal.
-document.addEventListener('click', (ev) => {
-  try {
-    const target = ev.target && ev.target.closest ? ev.target.closest('#dashQuarantineCard') : null;
-    if (!target) return;
-    console.log('Dashboard: abrir modal de cuarentena (listener de respaldo)');
-
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) {
-      console.warn('Cuarentena: acceso denegado');
-      showMessage('No autorizado para abrir cuarentena', 'error');
-      return;
-    }
-
-    // Ejecutar la misma petición que openQuarantineFromDashboard
-    fetch('/api/admin/accounts/quarantine', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } })
-      .then(r => r.json())
-      .then(list => {
-        const quarantineList = Array.isArray(list) ? list : [];
-        const stat = document.getElementById('statExpiring');
-        if (stat) stat.textContent = String(quarantineList.length);
-        try { showQuarantineModal(quarantineList); }
-        catch(e){ console.error('Cuarentena: error mostrando modal', e); }
-      })
-      .catch(err => console.error('Cuarentena: error consultando lista', err));
-
-  } catch (e) {
-    console.error('Cuarentena: fallo al procesar click de respaldo', e);
-  }
-});
-
-
 // ESTA ES LA PARTE QUE MANTIENE TU PANEL SEGURO AL CARGAR
 document.addEventListener('DOMContentLoaded', () => {
   if(document.getElementById('expiringAlertsList')) {
@@ -4169,31 +3990,60 @@ function ensureVendorDashboardCards(){
   });
 }
 
+let __miniBannersDataCache = null;
+let __miniBannersLoadedAt = 0;
+let __miniBannersRequest = null;
+const MINI_BANNERS_CACHE_MS = 5 * 60 * 1000;
+
+function miniBannersSignature(rows){
+  return (Array.isArray(rows) ? rows : []).map(b => [
+    Number(b?.id || 0),
+    String(b?.title || ''),
+    String(b?.link_url || ''),
+    String(b?.created_at || ''),
+    String(b?.image_url || '').length
+  ].join(':')).join('|');
+}
+
 function renderMiniBannersStrip(items){
   const strip = document.getElementById('dashboardMiniBannersStrip');
   if(!strip) return;
   const rows = Array.isArray(items) ? items : [];
+  const signature = miniBannersSignature(rows);
+
   if(!rows.length){
     strip.classList.add('hidden');
-    strip.innerHTML = '';
+    if(strip.dataset.bannerSignature !== signature){
+      strip.innerHTML = '';
+      strip.dataset.bannerSignature = signature;
+    }
     return;
   }
 
-  const renderSlide = (b) => {
+  // Evita reconstruir el carrusel y reiniciar su animación cuando loadApp y
+  // showSection solicitan los mismos banners casi al mismo tiempo.
+  if(strip.dataset.bannerSignature === signature && strip.firstElementChild){
+    strip.classList.remove('hidden');
+    return;
+  }
+
+  const renderSlide = (b, clone = false) => {
     const img = safeText(String(b.image_url || ''));
     const title = safeText(String(b.title || 'Mini banner'));
     const link = String(b.link_url || '').trim();
     const caption = title ? `<span class="mini-banner-below-title">${title}</span>` : '';
+    const image = `<img src="${img}" alt="${title}" width="150" height="150" decoding="async" loading="${clone ? 'lazy' : 'eager'}" draggable="false" />`;
     if(link){
       const safeHref = safeText(link);
-      return `<a class="dashboard-mini-banner-slide" href="${safeHref}" target="_blank" rel="noopener noreferrer"><span class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" /></span>${caption}</a>`;
+      return `<a class="dashboard-mini-banner-slide" href="${safeHref}" target="_blank" rel="noopener noreferrer"><span class="dashboard-mini-banner-item">${image}</span>${caption}</a>`;
     }
-    return `<div class="dashboard-mini-banner-slide"><div class="dashboard-mini-banner-item"><img src="${img}" alt="${title}" /></div>${caption}</div>`;
+    return `<div class="dashboard-mini-banner-slide"><div class="dashboard-mini-banner-item">${image}</div>${caption}</div>`;
   };
 
-  const baseSlides = rows.map(renderSlide).join('');
+  const baseSlides = rows.map(b => renderSlide(b, false)).join('');
   const loopEnabled = rows.length > 1;
-  const slides = loopEnabled ? (baseSlides + baseSlides) : baseSlides;
+  const cloneSlides = loopEnabled ? rows.map(b => renderSlide(b, true)).join('') : '';
+  const slides = baseSlides + cloneSlides;
   const duration = Math.max(16, Number(rows.length || 1) * 5);
 
   strip.innerHTML = `
@@ -4201,6 +4051,7 @@ function renderMiniBannersStrip(items){
       <div id="dashboardMiniBannersTrack" class="dashboard-mini-banners-track">${slides}</div>
     </div>
   `;
+  strip.dataset.bannerSignature = signature;
   strip.classList.remove('hidden');
 
   const carousel = document.getElementById('dashboardMiniBannersCarousel');
@@ -4210,15 +4061,43 @@ function renderMiniBannersStrip(items){
   }
 }
 
-async function loadMiniBannersStrip(){
-  if(!currentUser) return;
-  try {
-    const data = await api('/api/mini-banners');
-    renderMiniBannersStrip(data?.banners || []);
-  } catch(e){
-    console.warn('No se pudieron cargar mini banners', e);
-    renderMiniBannersStrip([]);
+async function loadMiniBannersStrip(options = {}){
+  if(!currentUser) return [];
+  const force = options === true || options?.force === true;
+  const cacheIsFresh = __miniBannersDataCache && (Date.now() - __miniBannersLoadedAt) < MINI_BANNERS_CACHE_MS;
+
+  if(!force && cacheIsFresh){
+    renderMiniBannersStrip(__miniBannersDataCache);
+    return __miniBannersDataCache;
   }
+
+  if(__miniBannersRequest){
+    if(!force) return __miniBannersRequest;
+    // Si el admin acaba de modificar un banner, espera la carga anterior y
+    // realiza después una consulta nueva para no conservar una respuesta vieja.
+    await __miniBannersRequest;
+  }
+
+  __miniBannersRequest = (async () => {
+    try {
+      const data = await api('/api/mini-banners', force ? { cache:'no-store' } : {});
+      __miniBannersDataCache = Array.isArray(data?.banners) ? data.banners : [];
+      __miniBannersLoadedAt = Date.now();
+      renderMiniBannersStrip(__miniBannersDataCache);
+      return __miniBannersDataCache;
+    } catch(e){
+      console.warn('No se pudieron cargar mini banners', e);
+      if(!__miniBannersDataCache){
+        __miniBannersDataCache = [];
+        renderMiniBannersStrip([]);
+      }
+      return __miniBannersDataCache || [];
+    } finally {
+      __miniBannersRequest = null;
+    }
+  })();
+
+  return __miniBannersRequest;
 }
 
 function fileToDataUrlMiniBanner(file){
@@ -4228,6 +4107,72 @@ function fileToDataUrlMiniBanner(file){
     reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
     reader.readAsDataURL(file);
   });
+}
+
+function canvasToBlobMiniBanner(canvas, type, quality){
+  return new Promise(resolve => canvas.toBlob(resolve, type, quality));
+}
+
+async function optimizeMiniBannerFile(file){
+  if(!file) throw new Error('Selecciona una imagen');
+  if(file.size > 8 * 1024 * 1024){
+    throw new Error('La imagen original no puede superar 8 MB');
+  }
+
+  // Conserva GIF animado, pero limita su peso porque no puede comprimirse con canvas.
+  if(String(file.type || '').toLowerCase() === 'image/gif'){
+    if(file.size > 900 * 1024){
+      throw new Error('El GIF debe pesar menos de 900 KB');
+    }
+    return file;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('No se pudo procesar la imagen seleccionada'));
+      img.src = objectUrl;
+    });
+
+    const maxEdge = 480;
+    const naturalWidth = Number(image.naturalWidth || image.width || 0);
+    const naturalHeight = Number(image.naturalHeight || image.height || 0);
+    if(!naturalWidth || !naturalHeight) throw new Error('Dimensiones de imagen inválidas');
+
+    const scale = Math.min(1, maxEdge / Math.max(naturalWidth, naturalHeight));
+    const width = Math.max(1, Math.round(naturalWidth * scale));
+    const height = Math.max(1, Math.round(naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { alpha:true });
+    if(!ctx) throw new Error('El navegador no pudo preparar la imagen');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(image, 0, 0, width, height);
+
+    let blob = await canvasToBlobMiniBanner(canvas, 'image/webp', 0.82);
+    if(!blob || !blob.size){
+      blob = await canvasToBlobMiniBanner(canvas, 'image/jpeg', 0.84);
+    }
+    if(!blob || !blob.size) throw new Error('No se pudo comprimir la imagen');
+
+    if(blob.size > 900 * 1024){
+      const smaller = await canvasToBlobMiniBanner(canvas, 'image/webp', 0.68);
+      if(smaller?.size) blob = smaller;
+    }
+    if(blob.size > 900 * 1024){
+      throw new Error('La imagen sigue siendo demasiado grande después de optimizarla');
+    }
+
+    const extension = blob.type === 'image/jpeg' ? 'jpg' : 'webp';
+    const baseName = String(file.name || 'mini-banner').replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-');
+    return new File([blob], `${baseName}.${extension}`, { type:blob.type, lastModified:Date.now() });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function renderMiniBannerAdminList(items){
@@ -4267,21 +4212,32 @@ async function refreshMiniBannerAdminList(){
   }
 }
 
+let __creatingMiniBanner = false;
 window.createMiniBanner = async function(){
+  if(__creatingMiniBanner) return;
+  const saveButton = document.getElementById('miniBannerSaveButton');
   try {
+    __creatingMiniBanner = true;
+    if(saveButton){
+      saveButton.disabled = true;
+      saveButton.textContent = 'Optimizando...';
+    }
+
     const file = document.getElementById('miniBannerImage')?.files?.[0] || null;
     if(!file) throw new Error('Selecciona una imagen');
     const title = (document.getElementById('miniBannerTitle')?.value || '').trim();
     const link_url = (document.getElementById('miniBannerLink')?.value || '').trim();
     const active = !!document.getElementById('miniBannerActive')?.checked;
-    const image_data = await fileToDataUrlMiniBanner(file);
+    const optimizedFile = await optimizeMiniBannerFile(file);
+    const image_data = await fileToDataUrlMiniBanner(optimizedFile);
 
+    if(saveButton) saveButton.textContent = 'Guardando...';
     await api('/api/admin/mini-banners', {
       method:'POST',
       body: JSON.stringify({ title, link_url, active, image_data })
     });
 
-    showMessage('Mini banner guardado');
+    showMessage('Mini banner optimizado y guardado');
     const imageInput = document.getElementById('miniBannerImage');
     const titleInput = document.getElementById('miniBannerTitle');
     const linkInput = document.getElementById('miniBannerLink');
@@ -4290,9 +4246,15 @@ window.createMiniBanner = async function(){
     if(linkInput) linkInput.value = '';
 
     await refreshMiniBannerAdminList();
-    await loadMiniBannersStrip();
+    await loadMiniBannersStrip({ force:true });
   } catch(e){
     showMessage(e.message || 'Error guardando mini banner', 'error');
+  } finally {
+    __creatingMiniBanner = false;
+    if(saveButton){
+      saveButton.disabled = false;
+      saveButton.textContent = 'Guardar mini banner';
+    }
   }
 };
 
@@ -4302,7 +4264,7 @@ window.deleteMiniBanner = async function(id){
     await api('/api/admin/mini-banners/'+id, { method:'DELETE' });
     showMessage('Mini banner eliminado');
     await refreshMiniBannerAdminList();
-    await loadMiniBannersStrip();
+    await loadMiniBannersStrip({ force:true });
   } catch(e){
     showMessage(e.message || 'Error eliminando mini banner', 'error');
   }
@@ -4315,7 +4277,7 @@ window.toggleMiniBannerActive = async function(id, nextActive){
       body: JSON.stringify({ active: nextActive === true || nextActive === 'true' })
     });
     await refreshMiniBannerAdminList();
-    await loadMiniBannersStrip();
+    await loadMiniBannersStrip({ force:true });
   } catch(e){
     showMessage(e.message || 'Error actualizando mini banner', 'error');
   }
@@ -4342,12 +4304,13 @@ window.openMiniBannerManager = async function(){
           <div>
             <label class="field-label">Imagen</label>
             <input id="miniBannerImage" type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" />
+            <div class="small-text">La imagen se reduce automáticamente a un formato ligero antes de guardarse.</div>
             <label class="field-label">Título (opcional)</label>
             <input id="miniBannerTitle" placeholder="Texto corto" />
             <label class="field-label">Enlace (opcional)</label>
             <input id="miniBannerLink" placeholder="https://..." />
             <label class="checkbox-row"><input type="checkbox" id="miniBannerActive" checked /> Activo</label>
-            <button class="green-btn" onclick="createMiniBanner()">Guardar mini banner</button>
+            <button id="miniBannerSaveButton" class="green-btn" onclick="createMiniBanner()">Guardar mini banner</button>
           </div>
           <div>
             <h4 style="margin-top:0">Banners actuales</h4>
@@ -4374,34 +4337,6 @@ function toggleCardByInnerId(innerId, hidden){
   const card=valueEl ? valueEl.closest('.dash-card') : null;
   if(card) card.classList.toggle('hidden', !!hidden);
 }
-
-// DEBUG: asegurar que la función sea accesible globalmente y escuchar clicks en el card
-document.addEventListener('DOMContentLoaded', () => {
-  try {
-    if (typeof openQuarantineFromDashboard === 'function') {
-      window.openQuarantineFromDashboard = openQuarantineFromDashboard;
-    }
-  } catch (e) { console.warn('No se pudo enlazar openQuarantineFromDashboard globalmente', e); }
-
-  const dashCard = document.getElementById('dashQuarantineCard');
-  if (dashCard) {
-    dashCard.addEventListener('click', (ev) => {
-      console.log('DEBUG: dashQuarantineCard click received', ev);
-      console.log('DEBUG: invoking openQuarantineFromDashboard from listener');
-      try {
-        if (typeof openQuarantineFromDashboard === 'function') {
-          openQuarantineFromDashboard();
-        } else {
-          console.warn('openQuarantineFromDashboard no está definida en el scope global');
-        }
-      } catch (e) {
-        console.error('Error al ejecutar openQuarantineFromDashboard desde listener', e);
-      }
-    });
-  } else {
-    console.log('DEBUG: dashQuarantineCard no existe en DOM al cargar');
-  }
-});
 
 function applyDashboardRoleVisibilityMatrix(){
   if(!currentUser) return;
@@ -4617,22 +4552,17 @@ function actualizarConteosDashboard(){
   applyDashboardRoleVisibilityMatrix();
 }
 
-const __showSectionBeforeRoleMatrix = typeof showSection === 'function' ? showSection : null;
-if(__showSectionBeforeRoleMatrix){
-  showSection = function(name){
-    __showSectionBeforeRoleMatrix(name);
-    const sectionName = String(name || '').trim();
-    applyDashboardRoleVisibilityMatrix();
-    if(sectionName==='dashboard'){
-      resetScrollToTop();
-      loadMiniBannersStrip();
-      actualizarConteosDashboard();
-      if(currentUser && String(currentUser.role || '').toLowerCase()==='admin'){
-        loadExpiringCount();
-      }
+registerSectionHook(function roleMatrixSectionHook(name){
+  applyDashboardRoleVisibilityMatrix();
+  if(name === 'dashboard'){
+    resetScrollToTop();
+    loadMiniBannersStrip();
+    actualizarConteosDashboard();
+    if(currentUser && String(currentUser.role || '').toLowerCase() === 'admin'){
+      loadExpiringCount();
     }
-  };
-}
+  }
+});
 
 const __loadAppBeforeRoleMatrix = typeof loadApp === 'function' ? loadApp : null;
 if(__loadAppBeforeRoleMatrix){

@@ -1,8 +1,29 @@
 function showAuth(type) {
-  document.getElementById('loginForm').classList.toggle('hidden', type !== 'login');
-  document.getElementById('registerForm').classList.toggle('hidden', type !== 'register');
-  document.getElementById('loginTab').classList.toggle('active', type === 'login');
-  document.getElementById('registerTab').classList.toggle('active', type === 'register');
+  const isLogin = type === 'login';
+  document.getElementById('loginForm')?.classList.toggle('hidden', !isLogin);
+  document.getElementById('registerForm')?.classList.toggle('hidden', isLogin);
+
+  const loginTab = document.getElementById('loginTab');
+  const registerTab = document.getElementById('registerTab');
+  loginTab?.classList.toggle('active', isLogin);
+  registerTab?.classList.toggle('active', !isLogin);
+  loginTab?.setAttribute('aria-selected', String(isLogin));
+  registerTab?.setAttribute('aria-selected', String(!isLogin));
+
+  setTimeout(() => {
+    document.getElementById(isLogin ? 'loginEmail' : 'registerName')?.focus();
+  }, 40);
+}
+
+function toggleAuthPassword(inputId, button) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  if (button) {
+    button.textContent = show ? 'Ocultar' : 'Ver';
+    button.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+  }
 }
 
 function toggleSidebar() {
@@ -26,14 +47,23 @@ function cambiarSeccion(name) {
 }
 
 function goHomeHardReload() {
-  try {
-    if (typeof showSection === 'function') showSection('dashboard');
-    const url = new URL(window.location.href);
-    url.searchParams.set('_r', String(Date.now()));
-    window.location.replace(url.pathname + url.search + url.hash);
-  } catch (e) {
-    window.location.reload();
+  // Conservamos el nombre para no cambiar el HTML existente, pero Inicio ya no
+  // recarga la página ni vuelve a mostrar el login. Solo navega al dashboard.
+  document.querySelectorAll('.modal-overlay').forEach(modal => modal.remove());
+  document.body.style.overflow = '';
+  document.getElementById('sidebar')?.classList.remove('show');
+
+  if (typeof showSection === 'function') {
+    showSection('dashboard');
   }
+
+  try {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  } catch (e) {
+    window.scrollTo(0, 0);
+  }
+
+  return false;
 }
 
 async function reloadDashboard() {

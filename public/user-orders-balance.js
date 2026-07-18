@@ -17,9 +17,121 @@ function extractDeliveredAccountEmail(text) {
   return m ? m[1].trim() : '';
 }
 
+
+const __myAccountReportsById = new Map();
+
+function cacheMyAccountReports(reports) {
+  __myAccountReportsById.clear();
+  (Array.isArray(reports) ? reports : []).forEach((report) => {
+    const id = Number(report?.id || 0);
+    if (id > 0) __myAccountReportsById.set(id, report);
+  });
+}
+
+function getMyAccountReportById(reportId) {
+  return __myAccountReportsById.get(Number(reportId)) || null;
+}
+
+function extractReplacementDeliveryData(report) {
+  const response = String(report?.admin_response || '').trim();
+  if (!response) return '';
+
+  const status = String(report?.status || '').toLowerCase();
+  const resolutionType = String(report?.resolution_type || '').toLowerCase();
+  const isReplacement =
+    status === 'reemplazo' ||
+    resolutionType === 'reemplazo' ||
+    /cuenta reemplazada|reemplazo (?:manual )?entregado/i.test(response);
+
+  const hasDeliveredAccount =
+    /Cuenta de Streaming Entregada|Entrega Digital Inmediata|Combo Streaming/i.test(response) ||
+    (/(?:📧\s*)?Correo:\s*[^\s\n]+/i.test(response) && /(?:🔐\s*)?(?:Contraseña|Password):/i.test(response));
+
+  if (!isReplacement || !hasDeliveredAccount) return '';
+
+  const markers = [
+    '🎬 Cuenta de Streaming Entregada',
+    '📄 Entrega Digital Inmediata',
+    '🎁 Combo Streaming',
+    'Cuenta de Streaming Entregada',
+    'Entrega Digital Inmediata',
+    'Combo Streaming'
+  ];
+
+  let start = -1;
+  markers.forEach((marker) => {
+    const index = response.indexOf(marker);
+    if (index >= 0 && (start < 0 || index < start)) start = index;
+  });
+
+  return (start >= 0 ? response.slice(start) : response).trim();
+}
+
+function renderReplacementReportActions(report) {
+  if (!extractReplacementDeliveryData(report)) return '';
+  const reportId = Number(report?.id || 0);
+  if (!reportId) return '';
+
+  return `<div class="replacement-delivery-actions">
+    <button class="copy-account-btn" type="button" onclick="copyReplacementReportData(${reportId})">📋 Copiar datos</button>
+    <button class="copy-account-btn danger-btn" type="button" onclick="reportReplacementAccount(${reportId})">⚠ Reportar falla</button>
+  </div>`;
+}
+
+window.copyReplacementReportData = function copyReplacementReportData(reportId) {
+  const report = getMyAccountReportById(reportId);
+  const data = extractReplacementDeliveryData(report);
+  if (!data) {
+    showMessage('No encontré los datos de la cuenta reemplazada', 'error');
+    return;
+  }
+  copyToClipboard(data, 'Datos de la cuenta reemplazada copiados');
+};
+
+window.reportReplacementAccount = async function reportReplacementAccount(reportId) {
+  const report = getMyAccountReportById(reportId);
+  const data = extractReplacementDeliveryData(report);
+  const email = extractDeliveredAccountEmail(data) || String(report?.email || '').trim();
+  const accountId = Number(report?.reported_account_id || 0);
+
+  if (!report || !email) {
+    showMessage('No pude identificar la cuenta reemplazada para reportarla', 'error');
+    return;
+  }
+
+  showSection('reports');
+
+  if (typeof window.ensureReportSelectStable === 'function') {
+    window.ensureReportSelectStable();
+  }
+  if (typeof window.loadReportableAccountsStable === 'function') {
+    await window.loadReportableAccountsStable();
+  }
+
+  const select = document.getElementById('reporteCuentaSelect');
+  if (select && accountId > 0) {
+    select.value = String(accountId);
+    if (select.value === String(accountId)) {
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  const emailInput = document.getElementById('reporteCorreo');
+  if (emailInput) emailInput.value = email;
+
+  const description = document.getElementById('reporteExplicacion');
+  if (description) {
+    description.value = '';
+    setTimeout(() => description.focus(), 100);
+  }
+
+  showMessage('Cuenta reemplazada seleccionada. Describe la nueva falla.');
+};
+
 async function loadMyReports() {
   try {
     const reports = await api('/api/my-account-reports');
+    cacheMyAccountReports(reports);
     const box = document.getElementById('myReportsList');
     if (!box) return;
     box.innerHTML = reports.length
@@ -32,6 +144,7 @@ async function loadMyReports() {
         <p><b>Falla:</b> ${safeText(r.issue_type)}</p>
         <p><b>Explicación:</b> ${safeText(r.description)}</p>
         <div class="order-data response-text" style="background:#eef2ff; margin-top: 10px;"><b>Respuesta del admin:</b><br>${safeText(r.admin_response || 'En revisión por el administrador...')}</div>
+        ${renderReplacementReportActions(r)}
       </div>
     `
           )
@@ -127,13 +240,16 @@ async function enviarReporteCuenta() {
       });
     }
 
+    const reportedAccountId = Number(document.getElementById('reporteCuentaSelect')?.value || 0);
+
     const data = await api('/api/account-reports', {
       method: 'POST',
       body: JSON.stringify({
         email: correo,
         issue_type: tipo,
         description: explicacion,
-        evidence_image: fotoBase64
+        evidence_image: fotoBase64,
+        ...(reportedAccountId > 0 ? { reported_account_id: reportedAccountId } : {})
       })
     });
 
@@ -141,10 +257,12 @@ async function enviarReporteCuenta() {
 
     if (document.getElementById('reporteCorreo')) document.getElementById('reporteCorreo').value = '';
     if (document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value = '';
+    if (document.getElementById('reporteCuentaSelect')) document.getElementById('reporteCuentaSelect').value = '';
     if (fotoInput) fotoInput.value = '';
 
     if (typeof loadAccountReports === 'function') await loadAccountReports();
-    if (typeof loadMyReports === 'function') loadMyReports();
+    if (typeof loadMyReports === 'function') await loadMyReports();
+    if (typeof loadMyFailureResponsesFinal === 'function') await loadMyFailureResponsesFinal();
   } catch (e) {
     showMessage(e.message, 'error');
   }

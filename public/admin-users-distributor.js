@@ -51,16 +51,14 @@ function isSubadminOnly(){
 
 function installDistributorHooks(){
   if(window.__distributorHooksInstalled) return true;
-  if(typeof window.showSection !== 'function' || typeof window.loadApp !== 'function') return false;
+  if(typeof window.registerSectionHook !== 'function' || typeof window.loadApp !== 'function') return false;
 
-  const __oldShowSectionForDistributor = window.showSection;
-  window.showSection = function(name){
-    __oldShowSectionForDistributor(name);
+  window.registerSectionHook(function distributorSectionHook(name){
     if(name === 'distributor' && isDistributorUser()){
       loadDistributorPanel();
       loadDistributorPrices();
     }
-  };
+  });
 
   const __oldLoadAppForDistributor = window.loadApp;
   window.loadApp = async function(){
