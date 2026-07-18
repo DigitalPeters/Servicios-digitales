@@ -1,9 +1,13 @@
+let __messageClearTimer = null;
+
 function showMessage(text, type = 'success') {
   const msg = document.getElementById('message');
   if (!msg) return;
   msg.innerHTML = `<p class="${type}">${safeText(text)}</p>`;
-  setTimeout(() => {
+  if (__messageClearTimer) clearTimeout(__messageClearTimer);
+  __messageClearTimer = setTimeout(() => {
     msg.innerHTML = '';
+    __messageClearTimer = null;
   }, 4500);
 }
 

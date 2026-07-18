@@ -2,6 +2,7 @@ let currentShopCategory = null;
 
 async function loadProducts() {
   allProducts = await api('/api/products');
+  __productsLoadedOnce = true;
   const statProductsEl = document.getElementById('statProducts');
   const adminProductsCountEl = document.getElementById('adminProductsCount');
   if (statProductsEl) statProductsEl.textContent = String(allProducts.length);

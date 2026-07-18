@@ -1,16 +1,55 @@
-async function loadMyOrders() {
-  myOrders = await api('/api/my-orders');
-  statOrders.textContent = myOrders.length;
+async function loadMyOrders(page = 1) {
+  const requestedPage = Math.max(1, Number(page || 1));
+  const search = String(document.getElementById('myOrdersSearch')?.value || '').trim();
+  const status = String(document.getElementById('myOrdersStatusFilter')?.value || '').trim();
+  const qs = new URLSearchParams({
+    page: String(requestedPage),
+    limit: String(HISTORY_PAGE_LIMIT)
+  });
+  if (search) qs.set('search', search);
+  if (status) qs.set('status', status);
+
+  const payload = await api('/api/my-orders?' + qs.toString());
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const total = Number(payload?.total || 0);
+  const totalPages = Math.max(1, Number(payload?.totalPages || 1));
+  currentMyOrdersPage = Math.max(1, Number(payload?.page || requestedPage));
+
+  if (currentMyOrdersPage > totalPages) {
+    return loadMyOrders(totalPages);
+  }
+
+  myOrders = rows;
+  if (statOrders) statOrders.textContent = total;
   renderMyOrders();
-  recentOrdersList.innerHTML =
-    myOrders
-      .slice(0, 4)
-      .map(
-        (o) =>
-          `<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`
-      )
-      .join('') || 'Sin pedidos recientes.';
+
+  const list = document.getElementById('myOrdersList');
+  if (list && typeof renderTablePager === 'function') {
+    renderTablePager(list, 'myOrdersPaginationControls', currentMyOrdersPage, totalPages, 'goMyOrdersPagePrev', 'goMyOrdersPageNext');
+  }
+
+  if (currentMyOrdersPage === 1 && recentOrdersList) {
+    recentOrdersList.innerHTML =
+      rows.slice(0, 4).map((o) =>
+        `<div class="item"><b>#${o.id}</b> ${safeText(o.product_name)} <span class="status">${safeText(getStatusText(o.status))}</span></div>`
+      ).join('') || 'Sin pedidos recientes.';
+  }
 }
+
+let __myOrdersSearchTimer = null;
+window.scheduleMyOrdersReload = function scheduleMyOrdersReload(){
+  if (__myOrdersSearchTimer) clearTimeout(__myOrdersSearchTimer);
+  __myOrdersSearchTimer = setTimeout(() => {
+    __myOrdersSearchTimer = null;
+    loadMyOrders(1).catch((e) => console.warn('Error filtrando pedidos:', e));
+  }, 280);
+};
+window.goMyOrdersPagePrev = function(){
+  if (currentMyOrdersPage > 1) loadMyOrders(currentMyOrdersPage - 1);
+};
+window.goMyOrdersPageNext = function(){
+  loadMyOrders(currentMyOrdersPage + 1);
+};
 
 function extractDeliveredAccountEmail(text) {
   const m = String(text || '').match(/(?:Correo|📧\s*Correo):\s*([^\n\r\s]+)/i);
@@ -128,37 +167,45 @@ window.reportReplacementAccount = async function reportReplacementAccount(report
   showMessage('Cuenta reemplazada seleccionada. Describe la nueva falla.');
 };
 
-async function loadMyReports() {
+async function loadMyReports(page = currentMyReportsPage) {
   try {
-    const reports = await api('/api/my-account-reports');
+    const requestedPage = Math.max(1, Number(page || 1));
+    const payload = await api(`/api/my-account-reports?page=${requestedPage}&limit=${HISTORY_PAGE_LIMIT}`);
+    const reports = Array.isArray(payload?.rows) ? payload.rows : [];
+    const totalPages = Math.max(1, Number(payload?.totalPages || 1));
+    currentMyReportsPage = Math.max(1, Number(payload?.page || requestedPage));
+    if (currentMyReportsPage > totalPages) return loadMyReports(totalPages);
+
     cacheMyAccountReports(reports);
     const box = document.getElementById('myReportsList');
     if (!box) return;
     box.innerHTML = reports.length
-      ? reports
-          .map(
-            (r) => `
+      ? reports.map((r) => `
       <div class="item">
         <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status)}</span></p>
         <p><b>Correo reportado:</b> ${safeText(r.email)}</p>
         <p><b>Falla:</b> ${safeText(r.issue_type)}</p>
         <p><b>Explicación:</b> ${safeText(r.description)}</p>
+        ${Number(r.has_evidence || 0) === 1 ? `<div class="order-proof-row"><button class="outline-btn" style="width:auto" onclick="openMyReportEvidence(${r.id})">👁️ Ver evidencia</button></div>` : ''}
         <div class="order-data response-text" style="background:#eef2ff; margin-top: 10px;"><b>Respuesta del admin:</b><br>${safeText(r.admin_response || 'En revisión por el administrador...')}</div>
         ${renderReplacementReportActions(r)}
-      </div>
-    `
-          )
-          .join('')
+      </div>`).join('')
       : 'No has reportado fallas.';
+
+    if (typeof renderTablePager === 'function') {
+      renderTablePager(box, 'myReportsPaginationControls', currentMyReportsPage, totalPages, 'goMyReportsPagePrev', 'goMyReportsPageNext');
+    }
   } catch (e) {
     console.warn(e);
   }
 }
+window.goMyReportsPagePrev = function(){ if(currentMyReportsPage > 1) loadMyReports(currentMyReportsPage - 1); };
+window.goMyReportsPageNext = function(){ loadMyReports(currentMyReportsPage + 1); };
 
 function isLikelyAttachmentValue(v) {
   const s = String(v || '').trim();
   if (!s) return false;
-  if (/^data:image\//i.test(s)) return true;
+  if (/^data:(?:image\/|application\/pdf)/i.test(s)) return true;
   if (/^https?:\/\//i.test(s)) return true;
   if (/\.(png|jpe?g|webp|gif|bmp|svg|pdf)(\?|#|$)/i.test(s)) return true;
   return false;
@@ -171,26 +218,95 @@ function isLikelyImageAttachment(v) {
   return false;
 }
 
-function renderAttachmentButtons(url) {
-  const safeUrl = safeText(url || '');
-  return `<div class="proof-actions"><a class="proof-action-btn" href="${safeUrl}" target="_blank" rel="noopener noreferrer">👁️ Ver Imagen</a><a class="proof-action-btn proof-action-download" href="${safeUrl}" download>📥 Descargar Comprobante</a></div>`;
+function isLazyAttachmentDescriptor(value){
+  return Boolean(value && typeof value === 'object' && value.__lazy_attachment === true);
 }
 
-function renderOrderData(data) {
+function renderAttachmentButtons(url) {
+  const safeUrl = safeText(url || '');
+  const label = isLikelyImageAttachment(url) ? '👁️ Ver imagen' : '👁️ Abrir archivo';
+  return `<div class="proof-actions"><a class="proof-action-btn" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a><a class="proof-action-btn proof-action-download" href="${safeUrl}" download>📥 Descargar</a></div>`;
+}
+
+const __lazyMediaCache = new Map();
+
+function closeLazyMediaModal(){
+  document.getElementById('lazyMediaModal')?.remove();
+}
+window.closeLazyMediaModal = closeLazyMediaModal;
+
+function showLazyMediaModal(title, value, meta = {}){
+  closeLazyMediaModal();
+  const safeValue = safeText(value || '');
+  const mime = String(meta.mime_type || '').toLowerCase();
+  const isImage = Boolean(meta.is_image) || mime.startsWith('image/') || /^data:image\//i.test(String(value || ''));
+  const isPdf = Boolean(meta.is_pdf) || mime === 'application/pdf' || /^data:application\/pdf/i.test(String(value || ''));
+  const preview = isImage
+    ? `<img class="lazy-media-image" src="${safeValue}" alt="${safeText(title)}">`
+    : isPdf
+      ? `<iframe class="lazy-media-frame" src="${safeValue}" title="${safeText(title)}"></iframe>`
+      : `<p class="small-text">El archivo está listo para abrirse o descargarse.</p>`;
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="lazyMediaModal" class="modal-overlay">
+      <div class="modal-card lazy-media-card">
+        <div class="panel-head">
+          <h3 style="margin:0">${safeText(title)}</h3>
+          <button class="outline-btn" style="width:auto" onclick="closeLazyMediaModal()">Cerrar</button>
+        </div>
+        <div class="lazy-media-preview">${preview}</div>
+        <div class="proof-actions" style="margin-top:12px">
+          <a class="proof-action-btn" href="${safeValue}" target="_blank" rel="noopener noreferrer">Abrir en pestaña nueva</a>
+          <a class="proof-action-btn proof-action-download" href="${safeValue}" download>📥 Descargar</a>
+        </div>
+      </div>
+    </div>`);
+}
+
+async function openLazyApiMedia(cacheKey, url, title, valueKey = 'value'){
+  try{
+    let payload = __lazyMediaCache.get(cacheKey);
+    if(!payload){
+      payload = await api(url);
+      __lazyMediaCache.set(cacheKey, payload);
+    }
+    const value = String(payload?.[valueKey] || '').trim();
+    if(!value) throw new Error('El archivo ya no está disponible');
+    showLazyMediaModal(title, value, payload);
+  }catch(e){
+    showMessage(e.message || 'No se pudo abrir el archivo', 'error');
+  }
+}
+window.openLazyApiMedia = openLazyApiMedia;
+
+window.openOrderAttachment = function openOrderAttachment(orderId, encodedField){
+  const field = decodeURIComponent(String(encodedField || ''));
+  const query = encodeURIComponent(field);
+  return openLazyApiMedia(`order:${orderId}:${field}`, `/api/orders/${orderId}/attachment?field=${query}`, `Adjunto del pedido #${orderId}`);
+};
+window.openMyReportEvidence = function openMyReportEvidence(reportId){
+  return openLazyApiMedia(`my-report:${reportId}`, `/api/my-account-reports/${reportId}/evidence`, `Evidencia del reporte #${reportId}`, 'evidence_image');
+};
+window.openBalanceRequestProof = function openBalanceRequestProof(requestId, adminMode){
+  const prefix = adminMode ? '/api/admin/balance-requests/' : '/api/my-balance-requests/';
+  return openLazyApiMedia(`balance:${adminMode ? 'admin' : 'my'}:${requestId}`, `${prefix}${requestId}/proof`, `Comprobante de saldo #${requestId}`);
+};
+
+function renderOrderData(data, orderId) {
   const entries = Object.entries(data || {});
   if (!entries.length) return '';
-  return `<div class="order-data"><b>Datos enviados:</b>${entries
-    .map(([k, v]) => {
+  return `<div class="order-data"><b>Datos enviados:</b>${entries.map(([k, v]) => {
+      if (isLazyAttachmentDescriptor(v)) {
+        const encodedField = encodeURIComponent(String(v.field || k));
+        const label = v.is_image ? '👁️ Ver imagen adjunta' : '👁️ Abrir archivo adjunto';
+        return `<div class="order-proof-row"><p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b></p><div class="proof-actions"><button class="proof-action-btn" type="button" onclick="openOrderAttachment(${Number(orderId || 0)}, '${encodedField}')">${label}</button></div></div>`;
+      }
       const value = String(v ?? '').trim();
       if (isLikelyAttachmentValue(value)) {
-        const preview = isLikelyImageAttachment(value)
-          ? `<div class="proof-preview"><img src="${safeText(value)}" alt="Comprobante adjunto"></div>`
-          : '';
-        return `<div class="order-proof-row"><p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b></p>${renderAttachmentButtons(value)}${preview}</div>`;
+        return `<div class="order-proof-row"><p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b></p>${renderAttachmentButtons(value)}</div>`;
       }
       return `<p style="margin:5px 0"><b>${safeText(fieldLabel(k))}:</b> ${safeText(value)}</p>`;
-    })
-    .join('')}</div>`;
+    }).join('')}</div>`;
 }
 
 async function enviarSolicitudSaldo() {
@@ -260,9 +376,9 @@ async function enviarReporteCuenta() {
     if (document.getElementById('reporteCuentaSelect')) document.getElementById('reporteCuentaSelect').value = '';
     if (fotoInput) fotoInput.value = '';
 
-    if (typeof loadAccountReports === 'function') await loadAccountReports();
-    if (typeof loadMyReports === 'function') await loadMyReports();
-    if (typeof loadMyFailureResponsesFinal === 'function') await loadMyFailureResponsesFinal();
+    if (typeof loadAccountReports === 'function') await loadAccountReports(1);
+    if (typeof loadMyReports === 'function') await loadMyReports(1);
+    if (typeof loadMyFailureResponsesFinal === 'function') await loadMyFailureResponsesFinal(1);
   } catch (e) {
     showMessage(e.message, 'error');
   }
@@ -279,20 +395,21 @@ function getBalanceRequestStatusText(status) {
   return statuses[String(status || '').toLowerCase()] || status || 'pendiente';
 }
 
-async function loadBalanceRequests() {
+async function loadBalanceRequests(page = currentAdminBalanceRequestsPage) {
   try {
-    let requests = [];
     if (currentUser?.role === 'admin') {
-      requests = await api('/api/admin/balance-requests');
-      const pending = requests.filter((r) => String(r.status || '').toLowerCase() === 'pendiente');
-      statBalanceRequests.textContent = pending.length;
+      const requestedPage = Math.max(1, Number(page || 1));
+      const payload = await api(`/api/admin/balance-requests?page=${requestedPage}&limit=${HISTORY_PAGE_LIMIT}&status=pendiente`);
+      const requests = Array.isArray(payload?.rows) ? payload.rows : [];
+      const total = Number(payload?.total || 0);
+      const totalPages = Math.max(1, Number(payload?.totalPages || 1));
+      currentAdminBalanceRequestsPage = Math.max(1, Number(payload?.page || requestedPage));
+      if(currentAdminBalanceRequestsPage > totalPages) return loadBalanceRequests(totalPages);
 
+      if(statBalanceRequests) statBalanceRequests.textContent = total;
       const box = document.getElementById('adminBalanceRequestsList');
       if (box) {
-        box.innerHTML = pending.length
-          ? pending
-              .map(
-                (r) => `
+        box.innerHTML = requests.length ? requests.map((r) => `
           <div class="item">
             <p><b>Solicitud:</b> #${r.id}</p>
             <p><b>Cliente:</b> ${safeText(r.customer_name || r.name || 'Cliente')}</p>
@@ -301,38 +418,29 @@ async function loadBalanceRequests() {
             <p><b>Banco:</b> ${safeText(r.bank || r.banco || '')}</p>
             <p><b>Monto:</b> $${formatMoney(r.amount || r.monto)}</p>
             <p><b>Estado:</b> <span class="status">${safeText(getBalanceRequestStatusText(r.status || 'pendiente'))}</span></p>
-
+            ${Number(r.has_proof || 0) === 1 ? `<div class="order-proof-row"><button class="outline-btn" style="width:auto" onclick="openBalanceRequestProof(${r.id}, true)">👁️ Ver comprobante</button></div>` : ''}
             <label class="field-label">Respuesta para el cliente</label>
             <textarea id="balance-response-${r.id}" placeholder="Ejemplo: Saldo aprobado y agregado a tu cuenta.">${safeText(r.admin_response || '')}</textarea>
-
             <div class="two-row">
-              <button class="green-btn" onclick="updateBalanceRequestStatus(${r.id}, 'aprobado')">
-                Aprobar y sumar saldo
-              </button>
-              <button class="danger-btn" onclick="updateBalanceRequestStatus(${r.id}, 'rechazado')">
-                Rechazar
-              </button>
+              <button class="green-btn" onclick="updateBalanceRequestStatus(${r.id}, 'aprobado')">Aprobar y sumar saldo</button>
+              <button class="danger-btn" onclick="updateBalanceRequestStatus(${r.id}, 'rechazado')">Rechazar</button>
             </div>
-          </div>
-        `
-              )
-              .join('')
-          : 'Sin solicitudes pendientes.';
+          </div>`).join('') : 'Sin solicitudes pendientes.';
+        if(typeof renderTablePager === 'function'){
+          renderTablePager(box, 'balanceRequestsPaginationControls', currentAdminBalanceRequestsPage, totalPages, 'goBalanceRequestsPagePrev', 'goBalanceRequestsPageNext');
+        }
       }
     } else {
-      try {
-        requests = await api('/api/my-balance-requests');
-      } catch (_) {
-        requests = [];
-      }
-      const pending = requests.filter((r) => String(r.status || '').toLowerCase() === 'pendiente');
-      statBalanceRequests.textContent = pending.length;
+      const payload = await api('/api/my-balance-requests?page=1&limit=1&status=pendiente');
+      if(statBalanceRequests) statBalanceRequests.textContent = Number(payload?.total || 0);
     }
   } catch (e) {
     console.warn('No se pudieron cargar solicitudes de saldo', e);
-    statBalanceRequests.textContent = '0';
+    if(statBalanceRequests) statBalanceRequests.textContent = '0';
   }
 }
+window.goBalanceRequestsPagePrev = function(){ if(currentAdminBalanceRequestsPage > 1) loadBalanceRequests(currentAdminBalanceRequestsPage - 1); };
+window.goBalanceRequestsPageNext = function(){ loadBalanceRequests(currentAdminBalanceRequestsPage + 1); };
 
 async function updateBalanceRequestStatus(requestId, status) {
   try {
@@ -345,7 +453,7 @@ async function updateBalanceRequestStatus(requestId, status) {
       })
     });
     showMessage(data.message || 'Solicitud de saldo actualizada');
-    await loadBalanceRequests();
+    await loadBalanceRequests(currentAdminBalanceRequestsPage);
     showSection('admin');
     setTimeout(() => scrollToAdmin('adminBalanceRequestsPanel'), 120);
   } catch (e) {

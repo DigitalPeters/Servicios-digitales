@@ -1,6 +1,13 @@
-let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let myOrders=[];let allUsers=[];let adminOrders=[];
+let token=localStorage.getItem('token');let currentUser=null;let allProducts=[];let __productsLoadedOnce=false;let myOrders=[];let allUsers=[];let adminOrders=[];
 let currentInventoryPage = 1;
 let currentOrdersPage = 1;
+let currentMyOrdersPage = 1;
+let currentMyReportsPage = 1;
+let currentFailureResponsesPage = 1;
+let currentAdminAccountReportsPage = 1;
+let currentAdminBalanceRequestsPage = 1;
+let currentUserHistoryPage = 1;
+const HISTORY_PAGE_LIMIT = 20;
 
 function canAccessInventoryHistory(){
   return !!currentUser && (
@@ -24,6 +31,15 @@ const __sectionLoadPromises = new Map();
 let __sectionNavigationLocked = false;
 let __lastSectionName = '';
 let __sectionUnlockTimer = null;
+
+function runAfterNextPaint(handler){
+  if(typeof handler !== 'function') return;
+  if(typeof requestAnimationFrame === 'function'){
+    requestAnimationFrame(() => requestAnimationFrame(handler));
+  }else{
+    Promise.resolve().then(handler);
+  }
+}
 
 function normalizeSectionName(name){
   const targetName = String(name || '').trim();
@@ -145,6 +161,7 @@ async function loadUsers(){
   try{
     const users = await api('/api/admin/users');
     allUsers = Array.isArray(users) ? users : [];
+    window.__adminUsersCacheOwnerId = Number(currentUser?.id || 0);
 
     const statUsersEl = document.getElementById('statUsers');
     if(statUsersEl) statUsersEl.textContent = String(allUsers.length);
@@ -183,14 +200,6 @@ async function loadUsers(){
 }
 
 function getRequiredFieldsFromInput(id){return document.getElementById(id).value.split(',').map(normalizeFieldName).filter(Boolean)}
-// Después de que el código termine de pintar las tablas (innerHTML = ...), agrega esto:
-setTimeout(() => {
-  const target = document.getElementById('salesDetailsList'); // o el ID de tu sección de pedidos
-  if (target) {
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-}, 300); // Espera 300ms a que las tablas terminen de renderizarse antes de saltar
-
 // ===============================
 // FIX REPORTE VENTAS HOY ADMIN
 // El dashboard siempre consulta el día actual del servidor en horario México.
@@ -281,7 +290,7 @@ function updateInventoryPagerInfo(page,totalPages){
 window.loadPlatformInventory = async function(page = currentInventoryPage) {
   if(currentUser?.role !== 'admin') return;
   try {
-    if(!allProducts.length) allProducts = await api('/api/products');
+    if(!__productsLoadedOnce && typeof loadProducts === 'function') await loadProducts();
     populatePlatformProductSelect();
     
     const countEl = document.getElementById('adminPlatformAccountsCount');
@@ -450,7 +459,6 @@ function calculateReportRefundInfo(report){
 }
 
 const __reportActionBusy = new Set();
-const __reportEvidenceCache = {};
 
 
 // Reemplazo automático desde inventario
@@ -746,21 +754,13 @@ function renderWarrantyNotice(o){
 }
 
 function renderMyOrders(){
-  const search=(document.getElementById('myOrdersSearch')?.value||'').toLowerCase().trim();
-  const statusFilter=document.getElementById('myOrdersStatusFilter')?.value||'';
-  let rows=[...(myOrders||[])];
-  rows=rows.filter(o=>{
-    const raw=String(o.delivered_account_data||o.admin_response||'');
-    const email=extractDeliveredAccountEmail(raw);
-    const hay=`${o.id} ${o.product_name||''} ${o.product_category||''} ${email} ${o.status||''}`.toLowerCase();
-    const statusOk=!statusFilter || (statusFilter==='reportado' ? /reporte|falla|reemplazo|reembolso/i.test(raw+String(o.admin_response||'')) : o.status===statusFilter);
-    return statusOk && (!search || hay.includes(search));
-  });
+  const rows=[...(myOrders||[])];
+  if(!myOrdersList) return;
   myOrdersList.innerHTML=rows.map(o=>{
     const data=parseJsonObject(o.order_data);
     const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
     const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`;
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data, o.id)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`;
   }).join('')||'No hay pedidos con esos filtros.';
 }
 
@@ -978,14 +978,13 @@ function closeInventoryHistoryModal() {
 
 function initInventoryHistoryModalBehavior() {
   const modal = document.getElementById('inventoryHistoryModal');
-  if (!modal) return;
+  if (!modal || modal.dataset.historyModalBound === '1') return;
+  modal.dataset.historyModalBound = '1';
   modal.onclick = (event) => {
-    if (event.target === modal) {
-      closeInventoryHistoryModal();
-    }
+    if (event.target === modal) closeInventoryHistoryModal();
   };
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) {
       closeInventoryHistoryModal();
     }
   });
@@ -1000,10 +999,10 @@ function initInventoryHistoryDashboardButton() {
   }
 }
 
-setTimeout(() => {
+registerLoadAppHook(function inventoryHistoryUiLoadAppHook(){
   initInventoryHistoryDashboardButton();
   initInventoryHistoryModalBehavior();
-}, 100);
+}, { name:'inventory-history-ui', order:90 });
 
 // El arranque de sesión se ejecuta al terminar de cargar todos los módulos.
 // No iniciar loadApp aquí: este archivo aún continúa instalando hooks y mejoras.
@@ -1082,42 +1081,6 @@ registerSectionHook(function manualPendingSectionHook(name){
   if(name === 'dashboard' || name === 'admin') ensureManualPendingCard();
 });
 
-async function autoRefreshPanel(){
-  if(__autoRefreshRunning || !currentUser || document.hidden) return;
-  __autoRefreshRunning = true;
-  try{
-    ensureManualPendingCard();
-    if(currentUser.role === 'admin'){
-      await Promise.allSettled([
-        typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
-        typeof loadAccountReports==='function'?loadAccountReports():Promise.resolve(),
-        typeof loadSalesReport==='function'?loadSalesReport(true):Promise.resolve(),
-        typeof loadProducts==='function'?loadProducts():Promise.resolve()
-      ]);
-    }else{
-      await Promise.allSettled([
-        typeof loadMyOrders==='function'?loadMyOrders():Promise.resolve(),
-        typeof loadBalanceRequests==='function'?loadBalanceRequests():Promise.resolve(),
-        typeof loadProducts==='function'?loadProducts():Promise.resolve()
-      ]);
-    }
-  }catch(e){
-    console.warn('Error autoactualizando panel', e);
-  }finally{
-    __autoRefreshRunning = false;
-  }
-}
-
-function startAutoRefreshPanel(){
-  // Solo carga inicial. No hay refresco automático para no interrumpir compras o formularios.
-  ensureManualPendingCard();
-  if(__autoRefreshTimer) clearInterval(__autoRefreshTimer);
-  __autoRefreshTimer = null;
-}
-
-setTimeout(startAutoRefreshPanel, 1200);
-// Auto-refresh por visibilidad desactivado. Las acciones del panel ya recargan su sección al guardar.
-// document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoRefreshPanel(); });
 
 
 
@@ -1209,59 +1172,39 @@ function renderAdminReportCompactFinal(r){
 
    
 
-async function loadAccountReports() {
+async function loadAccountReports(page = currentAdminAccountReportsPage) {
   if (!__isAdminUserFinal()) return;
 
   try {
-    const reports = await api('/api/admin/account-reports');
-    (reports || []).forEach(r => {
-      if (r && r.id && r.evidence_image) {
-        __reportEvidenceCache[r.id] = r.evidence_image;
-      }
-    });
-    const pending = reports.filter(r => String(r.status || '').toLowerCase() === 'pendiente');
-    
+    const requestedPage = Math.max(1, Number(page || 1));
+    const payload = await api(`/api/admin/account-reports?page=${requestedPage}&limit=${HISTORY_PAGE_LIMIT}`);
+    const reports = Array.isArray(payload?.rows) ? payload.rows : [];
+    const totalPages = Math.max(1, Number(payload?.totalPages || 1));
+    currentAdminAccountReportsPage = Math.max(1, Number(payload?.page || requestedPage));
+    if(currentAdminAccountReportsPage > totalPages) return loadAccountReports(totalPages);
+
     const stat = document.getElementById('statReports');
-    if (stat) stat.textContent = pending.length;
-    
+    if (stat) stat.textContent = Number(payload?.pendingTotal || 0);
+
     const box = document.getElementById('adminAccountReportsList');
     if (box) {
       box.innerHTML = reports.length ? reports.map(renderAdminReportCompactFinal).join('') : 'Sin reportes de falla.';
+      if(typeof renderTablePager === 'function'){
+        renderTablePager(box, 'accountReportsPaginationControls', currentAdminAccountReportsPage, totalPages, 'goAccountReportsPagePrev', 'goAccountReportsPageNext');
+      }
     }
   } catch (e) {
     console.warn('Error cargando reportes:', e);
   }
 }
+window.goAccountReportsPagePrev = function(){ if(currentAdminAccountReportsPage > 1) loadAccountReports(currentAdminAccountReportsPage - 1); };
+window.goAccountReportsPageNext = function(){ loadAccountReports(currentAdminAccountReportsPage + 1); };
 
 async function openReportEvidenceModal(reportId){
-  try{
-    let evidence = __reportEvidenceCache[reportId] || '';
-    if(!evidence){
-      const data = await api('/api/admin/account-reports/'+reportId+'/evidence');
-      evidence = String(data?.evidence_image || '').trim();
-      if(evidence) __reportEvidenceCache[reportId] = evidence;
-    }
-    if(!evidence) throw new Error('Este reporte no tiene evidencia adjunta');
-
-    const old = document.getElementById('reportEvidenceModal');
-    if(old) old.remove();
-
-    const html = `
-      <div id="reportEvidenceModal" class="modal-overlay">
-        <div class="modal-card" style="max-width:840px; width:95%">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-            <h3 style="margin:0">Evidencia del reporte #${reportId}</h3>
-            <button class="outline-btn" style="width:auto" onclick="document.getElementById('reportEvidenceModal')?.remove()">Cerrar</button>
-          </div>
-          <div class="proof-preview" style="margin-top:12px"><img src="${safeText(evidence)}" alt="Evidencia reporte" /></div>
-          <div style="margin-top:10px"><a class="outline-btn" style="display:inline-block;width:auto" href="${safeText(evidence)}" target="_blank" rel="noopener noreferrer">Abrir en pestaña nueva</a></div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', html);
-  }catch(e){
-    showMessage(e.message || 'No se pudo abrir evidencia', 'error');
+  if(typeof openLazyApiMedia === 'function'){
+    return openLazyApiMedia(`admin-report:${reportId}`, `/api/admin/account-reports/${reportId}/evidence`, `Evidencia del reporte #${reportId}`, 'evidence_image');
   }
+  showMessage('No se pudo inicializar el visor de evidencia', 'error');
 }
 window.openReportEvidenceModal = openReportEvidenceModal;
 
@@ -1282,7 +1225,7 @@ async function updateAccountReportStatus(reportId){
     });
 
     showMessage(data.message || 'Veredicto guardado correctamente');
-    await loadAccountReports();
+    await loadAccountReports(currentAdminAccountReportsPage);
   }catch(e){
     showMessage(e.message || 'Error guardando veredicto', 'error');
   }
@@ -1353,7 +1296,7 @@ function renderAdminOrderCompactFinal(o){
       <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
       <p><b>Cobrado:</b> ${Number(o.charged||0)===1?'Sí':'No'}</p>
       ${typeof renderWarrantyNotice === 'function' ? renderWarrantyNotice(o) : ''}
-      ${renderOrderData(od)}
+      ${renderOrderData(od, o.id)}
       <label class="field-label">Estado</label>
       <select id="status-${o.id}"><option value="accion_en_espera" ${o.status==='accion_en_espera'?'selected':''}>Acción en espera</option><option value="en_proceso" ${o.status==='en_proceso'?'selected':''}>En proceso</option><option value="exito" ${o.status==='exito'?'selected':''}>Éxito</option><option value="rechazado" ${o.status==='rechazado'?'selected':''}>Rechazado</option></select>
       <label class="field-label">Respuesta para el cliente</label>
@@ -1430,7 +1373,6 @@ function openReportFaultFormFinal(){
 
 function openFailureResponsesFinal(){
   showSection('failure-responses');
-  loadMyFailureResponsesFinal();
 }
 
 function getReportStatusTextFinal(status){
@@ -1444,37 +1386,49 @@ function getReportStatusTextFinal(status){
   return map[String(status||'').toLowerCase()] || status || 'Pendiente';
 }
 
-async function loadMyFailureResponsesFinal(){
+async function loadMyFailureResponsesFinal(page = currentFailureResponsesPage){
   const box=document.getElementById('myFailureResponsesList');
   if(!box) return;
   try{
-    const reports=await api('/api/my-account-reports');
+    const requestedPage=Math.max(1, Number(page||1));
+    const payload=await api(`/api/my-account-reports?page=${requestedPage}&limit=${HISTORY_PAGE_LIMIT}`);
+    const reports=Array.isArray(payload?.rows) ? payload.rows : [];
+    const totalPages=Math.max(1, Number(payload?.totalPages||1));
+    currentFailureResponsesPage=Math.max(1, Number(payload?.page||requestedPage));
+    if(currentFailureResponsesPage > totalPages) return loadMyFailureResponsesFinal(totalPages);
+
     if(typeof cacheMyAccountReports === 'function') cacheMyAccountReports(reports);
-    if(!Array.isArray(reports) || !reports.length){
+    if(!reports.length){
       box.innerHTML='Todavía no tienes reportes de falla.';
-      return;
+    }else{
+      box.innerHTML=reports.map(r=>`
+        <div class="item compact-item">
+          <div class="compact-header" onclick="this.parentNode.classList.toggle('open')">
+            <div class="compact-title">Reporte #${r.id}</div>
+            <div class="compact-meta">${safeText(r.email||'correo reportado')} · ${safeText(getReportStatusTextFinal(r.status))}</div>
+          </div>
+          <div class="compact-details">
+            <p><b>Reporte:</b> #${r.id}</p>
+            <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+            <p><b>Tipo de falla:</b> ${safeText(r.issue_type||'otro')}</p>
+            <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
+            <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinal(r.status))}</span></p>
+            ${Number(r.has_evidence || 0) === 1 ? `<div class="order-proof-row"><button class="outline-btn" style="width:auto" onclick="openMyReportEvidence(${r.id})">👁️ Ver evidencia enviada</button></div>` : ''}
+            <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
+            ${typeof renderReplacementReportActions === 'function' ? renderReplacementReportActions(r) : ''}
+          </div>
+        </div>`).join('');
     }
-    box.innerHTML=reports.map(r=>`
-      <div class="item compact-item">
-        <div class="compact-header" onclick="this.parentNode.classList.toggle('open')">
-          <div class="compact-title">Reporte #${r.id}</div>
-          <div class="compact-meta">${safeText(r.email||'correo reportado')} · ${safeText(getReportStatusTextFinal(r.status))}</div>
-        </div>
-        <div class="compact-details">
-          <p><b>Reporte:</b> #${r.id}</p>
-          <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
-          <p><b>Tipo de falla:</b> ${safeText(r.issue_type||'otro')}</p>
-          <p><b>Explicación enviada:</b> ${safeText(r.description||'')}</p>
-          <p><b>Estado:</b> <span class="status">${safeText(getReportStatusTextFinal(r.status))}</span></p>
-          <div class="order-data response-text"><b>Respuesta del admin:</b><br>${safeText(r.admin_response||'Aún no hay respuesta del admin.')}</div>
-          ${typeof renderReplacementReportActions === 'function' ? renderReplacementReportActions(r) : ''}
-        </div>
-      </div>`).join('');
+    if(typeof renderTablePager === 'function'){
+      renderTablePager(box, 'failureResponsesPaginationControls', currentFailureResponsesPage, totalPages, 'goFailureResponsesPagePrev', 'goFailureResponsesPageNext');
+    }
   }catch(e){
     box.innerHTML='No se pudieron cargar tus respuestas de fallos.';
     console.warn('Error cargando respuestas de fallos', e);
   }
 }
+window.goFailureResponsesPagePrev = function(){ if(currentFailureResponsesPage > 1) loadMyFailureResponsesFinal(currentFailureResponsesPage - 1); };
+window.goFailureResponsesPageNext = function(){ loadMyFailureResponsesFinal(currentFailureResponsesPage + 1); };
 
 (function(){
   const styleId='reportMenuFinalStyle';
@@ -1492,11 +1446,14 @@ async function loadMyFailureResponsesFinal(){
     if(name === 'reports-menu' || name === 'reports' || name === 'failure-responses'){
       ensureReportMenuFinal();
     }
-    if(name === 'failure-responses') setTimeout(()=>loadMyFailureResponsesFinal(),80);
+    if(name === 'failure-responses'){
+      runSectionLoadOnce('failure-responses', () => loadMyFailureResponsesFinal());
+    }
   });
 
-  setTimeout(()=>{ensureReportMenuFinal();},300);
-  setTimeout(()=>{ensureReportMenuFinal();},1200);
+  registerLoadAppHook(function reportMenuUiLoadAppHook(){
+    ensureReportMenuFinal();
+  }, { name:'report-menu-ui', order:95 });
 })();
 
 
@@ -1641,6 +1598,8 @@ async function loadAdminPanelsPhase1(){
   const box=document.getElementById('adminPanelsListPhase1');
   try{
     const panels=await api('/api/admin/admin-panels');
+    window.__adminPanelsPhase1Cache = Array.isArray(panels) ? panels : [];
+    window.__adminPanelsPhase1Loaded = true;
     const count=document.getElementById('adminPanelsCountPhase1');
     if(count) count.textContent=Array.isArray(panels)?panels.length:0;
 
@@ -1694,7 +1653,6 @@ async function loadAdminPanelsPhase1(){
       </tbody>
     </table></div>`;
 
-    window.__adminPanelsPhase1Cache=panels;
   }catch(e){
     if(box) box.innerHTML='No se pudieron cargar los paneles admin.';
     showMessage(e.message||'Error cargando paneles admin','error');
@@ -1760,16 +1718,14 @@ function copyAdminPanelInfoPhase1(panelId){
 (function(){
   registerSectionHook(function adminPanelsPhase1SectionHook(name){
     if(name === 'admin' && isAdminUserSafe()){
-      setTimeout(()=>{ensureAdminPanelsPhase1UI();loadAdminPanelsPhase1();},120);
+      ensureAdminPanelsPhase1UI();
+      runSectionLoadOnce('admin-panels-phase1', () => loadAdminPanelsPhase1());
     }
   });
 
-  setTimeout(()=>{
-    if(isAdminUserSafe()){
-      ensureAdminPanelsPhase1UI();
-      if(document.getElementById('section-admin')?.classList.contains('active')) loadAdminPanelsPhase1();
-    }
-  },1000);
+  registerLoadAppHook(function adminPanelsPhase1LoadAppHook(){
+    if(isAdminUserSafe()) ensureAdminPanelsPhase1UI();
+  }, { name:'admin-panels-phase1-ui', order:105 });
 })();
 
 
@@ -1829,13 +1785,13 @@ if(userCard) userCard.classList.remove('hidden');
 function scrollToAdmin(id){
   if(!isAnyAdminUserPanel()) return showSection('dashboard');
   showSection('admin');
-  setTimeout(()=>{
-    applyRentedAdminLayout();
+  applyRentedAdminLayout();
+  if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') loadAdminOrders(1);
+  if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') loadPlatformInventory(1);
+  runAfterNextPaint(()=>{
     const el=document.getElementById(id);
     if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
-    if(id==='adminOrdersPanel' && typeof loadAdminOrders==='function') loadAdminOrders(1);
-    if(id==='adminPlatformAccountsPanel' && typeof loadPlatformInventory==='function') loadPlatformInventory(1);
-  },160);
+  });
 }
 
 openUsersFromDashboard = function(){
@@ -1869,25 +1825,20 @@ async function loadBankInfoForPanel(){
   }
 }
 
-const __loadAppBeforeRentedAdmin = typeof loadApp === 'function' ? loadApp : null;
-if(__loadAppBeforeRentedAdmin){
-  loadApp = async function(){
-    await __loadAppBeforeRentedAdmin();
-    await loadBankInfoForPanel();
-    applyRentedAdminLayout();
-    if(isPanelAdminRented()){
-      const statUsersEl=document.getElementById('statUsers'); if(statUsersEl) statUsersEl.textContent='0';
-      await Promise.allSettled([
-        typeof loadDistributorPanel==='function'?loadDistributorPanel():Promise.resolve(),
-        typeof loadProducts==='function'?loadProducts():Promise.resolve()
-      ]);
-      applyRentedAdminLayout();
-    }
-  };
-}
+registerLoadAppHook(async function rentedAdminLoadAppHook(){
+  await loadBankInfoForPanel();
+  applyRentedAdminLayout();
 
-setTimeout(()=>{loadBankInfoForPanel();applyRentedAdminLayout();},800);
-setTimeout(()=>applyRentedAdminLayout(),1800);
+  if(isPanelAdminRented()){
+    const statUsersEl=document.getElementById('statUsers');
+    if(statUsersEl) statUsersEl.textContent='0';
+
+    if(typeof loadDistributorPanel==='function'){
+      await loadDistributorPanel();
+    }
+    applyRentedAdminLayout();
+  }
+}, { name:'rented-admin-layout', order:100 });
 
 
 // ===============================
@@ -1944,12 +1895,12 @@ function syncPanelAdminDashboardValuesFinal(){
 function openSalesReportFinal(){
   if(!isAdminAnyFinal()) return;
   showSection('admin');
-  setTimeout(()=>{
-    ensureAdvancedReportsPanelFinal();
+  ensureAdvancedReportsPanelFinal();
+  loadSalesReport(true).then(syncPanelAdminDashboardValuesFinal).catch(()=>{});
+  runAfterNextPaint(()=>{
     const el=document.getElementById('adminSalesReportPanel');
     if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
-    loadSalesReport(true).then(syncPanelAdminDashboardValuesFinal).catch(()=>{});
-  },140);
+  });
 }
 if(typeof openSalesReport === 'function'){
   openSalesReport = openSalesReportFinal;
@@ -2001,7 +1952,10 @@ async function loadHistoryUsersFinal(){
   const sel=document.getElementById('historyUserSelectFinal');
   if(!sel) return;
   try{
-    const users=await api('/api/admin/users');
+    const cacheBelongsToCurrentAdmin = Number(window.__adminUsersCacheOwnerId || 0) === Number(currentUser?.id || 0);
+    const users = cacheBelongsToCurrentAdmin && Array.isArray(allUsers)
+      ? allUsers
+      : await api('/api/admin/users');
     sel.innerHTML='<option value="">Selecciona usuario</option>'+users.map(u=>`<option value="${u.id}">#${u.id} ${safeText(u.name||'Usuario')} · ${safeText(u.email||'')}</option>`).join('');
   }catch(e){
     sel.innerHTML='<option value="">Error cargando usuarios</option>';
@@ -2026,17 +1980,32 @@ async function searchRecordsByDateFinal(){
     renderRecordsTableFinal(type, data.records||[]);
   }catch(e){ showMessage(e.message||'Error buscando registros','error'); }
 }
-async function loadUserHistoryFinal(){
+async function loadUserHistoryFinal(page = 1){
   try{
     const userId=document.getElementById('historyUserSelectFinal')?.value || '';
     const start=document.getElementById('historyStartDateFinal')?.value || '';
     const end=document.getElementById('historyEndDateFinal')?.value || '';
-    const qs=new URLSearchParams({user_id:userId});
+    const requestedPage=Math.max(1, Number(page||1));
+    const qs=new URLSearchParams({
+      user_id:userId,
+      page:String(requestedPage),
+      limit:String(HISTORY_PAGE_LIMIT)
+    });
     if(start && end){ qs.set('start_date',start); qs.set('end_date',end); }
     const data=await api('/api/admin/user-history?'+qs.toString());
+    const totalPages=Math.max(1, Number(data?.totalPages||1));
+    currentUserHistoryPage=Math.max(1, Number(data?.page||requestedPage));
+    if(currentUserHistoryPage > totalPages) return loadUserHistoryFinal(totalPages);
     renderRecordsTableFinal('orders', data.records||[]);
+    const box=document.getElementById('advancedReportsResultFinal');
+    if(box && typeof renderTablePager === 'function'){
+      renderTablePager(box, 'userHistoryPaginationControls', currentUserHistoryPage, totalPages, 'goUserHistoryPagePrev', 'goUserHistoryPageNext');
+    }
   }catch(e){ showMessage(e.message||'Error cargando historial','error'); }
 }
+window.goUserHistoryPagePrev=function(){ if(currentUserHistoryPage>1) loadUserHistoryFinal(currentUserHistoryPage-1); };
+window.goUserHistoryPageNext=function(){ loadUserHistoryFinal(currentUserHistoryPage+1); };
+
 async function downloadMonthlyReport(){
   try{
     if(!isAdminAnyFinal()) return;
@@ -2076,44 +2045,24 @@ if(__applyRentedLayoutBeforeFinal){
     }
   };
 }
-const __loadAppBeforeReportsFinal = typeof loadApp === 'function' ? loadApp : null;
+registerLoadAppHook(async function advancedReportsLoadAppHook(){
+  if(!isAdminAnyFinal()) return;
 
-if (__loadAppBeforeReportsFinal) {
+  ensurePanelAdminDashboardCardsFinal();
+  const advancedPanelAlreadyExisted = !!document.getElementById('advancedReportsPanelFinal');
+  ensureAdvancedReportsPanelFinal();
 
-  loadApp = async function () {
-    await __loadAppBeforeReportsFinal();
-
-    console.log('ROLE:', currentUser?.role);
-    console.log('IS_PANEL_ADMIN:', currentUser?.is_panel_admin);
-    console.log('IS_RENTED:', isPanelAdminRented());
-    console.log('IS_MAIN_ADMIN:', isMainAdminPrincipal());
-    console.log('CURRENT_USER:', currentUser);
-
-    if (isAdminAnyFinal()) {
-      ensurePanelAdminDashboardCardsFinal();
-      ensureAdvancedReportsPanelFinal();
-
-      await Promise.allSettled([
-        loadSalesReport(true),
-        loadHistoryUsersFinal()
-      ]);
-
-      if (typeof applyRentedAdminLayout === 'function')
-        applyRentedAdminLayout();
-
-      syncPanelAdminDashboardValuesFinal();
-    }
-  };
-
-}
-
-setTimeout(() => {
-  if (isAdminAnyFinal()) {
-    ensurePanelAdminDashboardCardsFinal();
-    ensureAdvancedReportsPanelFinal();
-    loadSalesReport(true).catch(() => {});
+  // Si el panel acaba de crearse, ensureAdvancedReportsPanelFinal ya carga el
+  // selector una vez. Si ya existía, actualizarlo aquí sin duplicar la petición.
+  if(advancedPanelAlreadyExisted){
+    await loadHistoryUsersFinal();
   }
-}, 1200);
+
+  if(typeof applyRentedAdminLayout === 'function'){
+    applyRentedAdminLayout();
+  }
+  syncPanelAdminDashboardValuesFinal();
+}, { name:'advanced-admin-reports', order:200 });
 
 // ===============================
 // AJUSTE FINAL: Ventas hoy despliega resumen + Paneles admin en dashboard principal
@@ -2171,11 +2120,11 @@ setTimeout(() => {
       card.onclick=function(){
         if(typeof ensureAdminPanelsPhase1UI === 'function') ensureAdminPanelsPhase1UI();
         if(typeof showSection === 'function') showSection('admin');
-        setTimeout(()=>{
-          if(typeof loadAdminPanelsPhase1 === 'function') loadAdminPanelsPhase1();
+        if(typeof loadAdminPanelsPhase1 === 'function') loadAdminPanelsPhase1();
+        runAfterNextPaint(()=>{
           const panel=document.getElementById('adminPanelsPanelPhase1');
           if(panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
-        },180);
+        });
       };
       grid.appendChild(card);
     }
@@ -2184,18 +2133,37 @@ setTimeout(() => {
     updateAdminPanelsCountFinal();
   }
 
+  let adminPanelsCountRequest = null;
   async function updateAdminPanelsCountFinal(){
     if(!isMainGlobalAdminFinal()) return;
     const el=document.getElementById('statAdminPanelsMainFinal');
-    try{
-      const panels=await api('/api/admin/admin-panels');
-      if(el) el.textContent = Array.isArray(panels) ? panels.length : 0;
+    const applyCount=(panels)=>{
+      const count=Array.isArray(panels) ? panels.length : 0;
+      if(el) el.textContent = count;
       const old=document.getElementById('adminPanelsCountPhase1');
-      if(old) old.textContent = Array.isArray(panels) ? panels.length : 0;
-    }catch(e){
-      if(el && !el.textContent) el.textContent='0';
-      console.warn('No se pudo contar paneles admin', e);
+      if(old) old.textContent = count;
+    };
+
+    if(window.__adminPanelsPhase1Loaded){
+      applyCount(window.__adminPanelsPhase1Cache || []);
+      return;
     }
+    if(adminPanelsCountRequest) return adminPanelsCountRequest;
+
+    adminPanelsCountRequest=(async()=>{
+      try{
+        const panels=await api('/api/admin/admin-panels');
+        window.__adminPanelsPhase1Cache=Array.isArray(panels) ? panels : [];
+        window.__adminPanelsPhase1Loaded=true;
+        applyCount(window.__adminPanelsPhase1Cache);
+      }catch(e){
+        if(el && !el.textContent) el.textContent='0';
+        console.warn('No se pudo contar paneles admin', e);
+      }finally{
+        adminPanelsCountRequest=null;
+      }
+    })();
+    return adminPanelsCountRequest;
   }
 
   function applyDashboardFinalAdjustments(){
@@ -2227,34 +2195,21 @@ setTimeout(() => {
   }
 
   registerSectionHook(function dashboardAdjustmentsSectionHook(name){
-    if(name === 'dashboard' || name === 'admin'){
-      setTimeout(applyDashboardFinalAdjustments,120);
-    }
+    if(name === 'dashboard' || name === 'admin') applyDashboardFinalAdjustments();
   });
 
-  const prevLoadApp = typeof loadApp === 'function' ? loadApp : null;
-  if(prevLoadApp){
-    loadApp = async function(){
-      const result = await prevLoadApp();
-      applyDashboardFinalAdjustments();
-      // Mantener cerrado el resumen hasta que el usuario toque Ventas hoy.
-      salesDetailsExpandedFinal = false;
-      setSalesDetailCardsFinal(false);
-      setTimeout(applyDashboardFinalAdjustments,400);
-      setTimeout(applyDashboardFinalAdjustments,1200);
-      setTimeout(applyDashboardFinalAdjustments,2500);
-      return result;
-    };
-  }
+  registerLoadAppHook(function dashboardAdjustmentsLoadAppHook(){
+    // Mantener cerrado el resumen hasta que el usuario toque Ventas hoy.
+    salesDetailsExpandedFinal = false;
+    applyDashboardFinalAdjustments();
+    setSalesDetailCardsFinal(false);
+  }, { name:'dashboard-final-adjustments', order:300 });
 
   window.toggleSalesTodayDetailsFinal = function(){
     salesDetailsExpandedFinal = !salesDetailsExpandedFinal;
     setSalesDetailCardsFinal(salesDetailsExpandedFinal);
   };
 
-  setTimeout(applyDashboardFinalAdjustments,500);
-  setTimeout(applyDashboardFinalAdjustments,1500);
-  setTimeout(applyDashboardFinalAdjustments,3000);
 })();
 
 
@@ -2288,16 +2243,15 @@ setTimeout(() => {
         try { await loadSalesReport(true); } catch(e) { console.warn('No se pudo cargar reporte de ventas', e); }
       }
 
-      setTimeout(() => {
+      runAfterNextPaint(() => {
         const target = document.getElementById('adminSalesReportPanel');
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 160);
+      });
     } catch(e) {
       console.error('Error abriendo Ventas hoy', e);
     }
 
-    setTimeout(hideDashboardSalesExtraCards, 250);
-    setTimeout(hideDashboardSalesExtraCards, 900);
+    hideDashboardSalesExtraCards();
   }
 
   function bindVentasHoyButton(){
@@ -2323,18 +2277,12 @@ setTimeout(() => {
   openSalesReportFinal = goToSalesReportSamePage;
   window.openSalesReportFinal = goToSalesReportSamePage;
 
-  const prevLoadAppVentasFix = typeof loadApp === 'function' ? loadApp : null;
-  if (prevLoadAppVentasFix) {
-    loadApp = async function(){
-      const result = await prevLoadAppVentasFix();
-      bindVentasHoyButton();
-      setTimeout(bindVentasHoyButton, 700);
-      return result;
-    };
-  }
+  registerLoadAppHook(function salesTodayButtonLoadAppHook(){
+    bindVentasHoyButton();
+  }, { name:'sales-today-button', order:400 });
 
   registerSectionHook(function ventasHoySectionHook(name){
-    if(name === 'dashboard' || name === 'admin') setTimeout(bindVentasHoyButton, 180);
+    if(name === 'dashboard' || name === 'admin') bindVentasHoyButton();
   });
 
   const prevLoadSalesReportVentasFix = typeof loadSalesReport === 'function' ? loadSalesReport : null;
@@ -2347,7 +2295,6 @@ setTimeout(() => {
     };
   }
 
-  setTimeout(bindVentasHoyButton, 500);
 })();
 
 
@@ -2375,15 +2322,9 @@ setTimeout(() => {
     });
   }
 
-  const oldLoadAppRoleLabels = typeof loadApp === 'function' ? loadApp : null;
-  if (oldLoadAppRoleLabels) {
-    loadApp = async function(){
-      const result = await oldLoadAppRoleLabels();
-      applyRoleLabels();
-      setTimeout(applyRoleLabels, 700);
-      return result;
-    };
-  }
+  registerLoadAppHook(function roleLabelsLoadAppHook(){
+    applyRoleLabels();
+  }, { name:'role-labels', order:500 });
 
   const oldLoadUsersRoleLabels = typeof loadUsers === 'function' ? loadUsers : null;
   if (oldLoadUsersRoleLabels) {
@@ -2394,7 +2335,6 @@ setTimeout(() => {
     };
   }
 
-  setTimeout(applyRoleLabels, 800);
 })();
 
 
@@ -2513,9 +2453,8 @@ setTimeout(() => {
     };
   }
   registerSectionHook(function usersHierarchySectionHook(name){
-    if(name === 'admin') setTimeout(renderUsersWithHierarchy, 250);
+    if(name === 'admin') renderUsersWithHierarchy();
   });
-  setTimeout(renderUsersWithHierarchy, 600);
 })();
 
 if(typeof window.adminSetUserEnabled !== 'function'){
@@ -2566,13 +2505,67 @@ if(typeof window.adminDeleteUser !== 'function'){
   }
 
 // Compra individual; no cambia el abrir/cerrar del producto.
+// Después de comprar solo se refrescan los datos afectados: saldo, pedidos y stock.
+const __purchaseRequestsInFlight = new Set();
+
+function applyCurrentUserPurchaseSnapshot(user){
+  if(!user || typeof user !== 'object') return;
+  currentUser = { ...(currentUser || {}), ...user };
+
+  const formattedBalance = formatMoney(currentUser.balance);
+  const userBalanceEl = document.getElementById('userBalance');
+  const topUserBalanceEl = document.getElementById('topUserBalance');
+  if(userBalanceEl) userBalanceEl.textContent = formattedBalance;
+  if(topUserBalanceEl) topUserBalanceEl.textContent = formattedBalance;
+}
+
+async function refreshAfterPurchase(){
+  const runOnce = typeof runSectionLoadOnce === 'function'
+    ? runSectionLoadOnce
+    : function(_key, loader){ return Promise.resolve().then(loader); };
+
+  const tasks = [
+    runOnce('orders', () => typeof loadMyOrders === 'function' ? loadMyOrders() : Promise.resolve()),
+    runOnce('shop', () => typeof loadProducts === 'function' ? loadProducts() : Promise.resolve()),
+    runOnce('purchase-user-summary', async () => {
+      const freshUser = await api('/api/me');
+      applyCurrentUserPurchaseSnapshot(freshUser);
+    })
+  ];
+
+  // Si el comprador es un administrador, refrescar solamente el reporte de hoy
+  // para actualizar las graficas; nunca volver a ejecutar loadApp completo.
+  if(currentUser?.role === 'admin' && typeof loadSalesReport === 'function'){
+    tasks.push(runOnce('sales-report-after-purchase', () => loadSalesReport(true)));
+  }
+
+  const results = await Promise.allSettled(tasks);
+  const errors = results
+    .filter(result => result.status === 'rejected')
+    .map(result => result.reason);
+
+  if(errors.length){
+    console.warn('La compra se completó, pero algunos datos no pudieron refrescarse de inmediato:', errors);
+  }
+}
+
+window.refreshAfterPurchase = refreshAfterPurchase;
+
 window.buyProduct = async function(productId){
+  const purchaseKey = String(productId);
+  if(__purchaseRequestsInFlight.has(purchaseKey)){
+    showMessage('Esta compra ya se está procesando. Espera un momento.');
+    return;
+  }
+
   try {
-    const product = (window.allProducts || []).find(p=>Number(p.id)===Number(productId)) ||
+    const product = (allProducts || []).find(p=>Number(p.id)===Number(productId)) ||
       await api('/api/products').then(ps=>ps.find(p=>Number(p.id)===Number(productId)));
     if(!product) throw new Error('Producto no encontrado');
 
     if(!confirm(`Vas a comprar: ${product.name}\nCosto: $${formatMoney(product.price)}\n\n¿Confirmas la compra?`)) return;
+
+    __purchaseRequestsInFlight.add(purchaseKey);
 
     const fields = parseJsonArray(product.required_fields);
     const order_data = {};
@@ -2608,10 +2601,15 @@ window.buyProduct = async function(productId){
     if (typeof closeProductModal === 'function') closeProductModal();
     showMessage(data.message || 'Compra realizada');
     if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
-    await loadApp();
+
+    // Ir a pedidos inmediatamente. showSection ya inicia la carga de pedidos y
+    // refreshAfterPurchase reutiliza esa misma promesa para no duplicar consultas.
     showSection('orders');
+    void refreshAfterPurchase();
   } catch(e) {
     showMessage(e.message || 'Error comprando producto','error');
+  } finally {
+    __purchaseRequestsInFlight.delete(purchaseKey);
   }
 };
 
@@ -2754,23 +2752,14 @@ window.buyProduct = async function(productId){
   replaceReportedAccount=window.replaceReportedAccount;
 
   registerSectionHook(function reportsAndShopSectionHook(name){
-    if(name === 'reports') setTimeout(ensureReportSelect,150);
-    if(name === 'shop') setTimeout(removeMultiQtyUI,250);
+    if(name === 'reports') ensureReportSelect();
+    if(name === 'shop') removeMultiQtyUI();
   });
 
-  const oldLoad=typeof loadApp==='function'?loadApp:null;
-  if(oldLoad){
-    window.loadApp=async function(){
-      const r=await oldLoad();
-      setTimeout(ensureReportSelect,600);
-      setTimeout(removeMultiQtyUI,900);
-      return r;
-    };
-    loadApp=window.loadApp;
-  }
-
-  setTimeout(removeMultiQtyUI,800);
-  setTimeout(ensureReportSelect,800);
+  registerLoadAppHook(function reportsAndShopLoadAppHook(){
+    ensureReportSelect();
+    removeMultiQtyUI();
+  }, { name:'reports-and-shop-ui', order:600 });
 })();
 
 
@@ -2907,8 +2896,7 @@ window.buyProduct = async function(productId){
   if (oldLoadDashboardStatsMergeX) {
     window.loadDashboardStats = async function(){
       const result = await oldLoadDashboardStatsMergeX();
-      setTimeout(fixVisibleXProducts, 200);
-      setTimeout(fixVisibleXProducts, 900);
+      fixVisibleXProducts();
       return result;
     };
     loadDashboardStats = window.loadDashboardStats;
@@ -2918,14 +2906,12 @@ window.buyProduct = async function(productId){
   if (oldLoadSalesReportMergeX) {
     window.loadSalesReport = async function(...args){
       const result = await oldLoadSalesReportMergeX(...args);
-      setTimeout(fixVisibleXProducts, 200);
-      setTimeout(fixVisibleXProducts, 900);
+      fixVisibleXProducts();
       return result;
     };
     loadSalesReport = window.loadSalesReport;
   }
 
-  setTimeout(fixVisibleXProducts, 1200);
 })();
 
 
@@ -3045,8 +3031,8 @@ window.buyProduct = async function(productId){
   if (prevLoadBalanceRequestsNotify) {
     window.loadBalanceRequests = async function(){
       const result = await prevLoadBalanceRequestsNotify();
-      setTimeout(addNotifyButtons, 150);
-      setTimeout(bindSaldoPendienteCard, 200);
+      addNotifyButtons();
+      bindSaldoPendienteCard();
       return result;
     };
     loadBalanceRequests = window.loadBalanceRequests;
@@ -3056,16 +3042,15 @@ window.buyProduct = async function(productId){
   if (prevLoadAccountReportsNotify) {
     window.loadAccountReports = async function(){
       const result = await prevLoadAccountReportsNotify();
-      setTimeout(addNotifyButtons, 150);
+      addNotifyButtons();
       return result;
     };
     loadAccountReports = window.loadAccountReports;
   }
 
 registerSectionHook(function saldoAndNotificationsSectionHook(name){
-    if(name === 'dashboard' || name === 'balance') setTimeout(bindSaldoPendienteCard, 200);
-    if(name === 'admin') setTimeout(addNotifyButtons, 400);
-    if(name === 'dashboard' && currentUser?.role === 'admin') setTimeout(loadExpiringCount, 300);
+    if(name === 'dashboard' || name === 'balance') bindSaldoPendienteCard();
+    if(name === 'admin') addNotifyButtons();
 });
 });  
 
@@ -3302,70 +3287,24 @@ async function botonDePanico() {
   }
 }
 
-// Guardias de control de sesión en segundo plano
-let statusVerificado = false;
-let esAdministrador = false;
+// Botón de emergencia sincronizado con la sesión ya cargada.
+// No vuelve a consultar /api/me cada segundo.
+function syncPanicAdminButton(){
+  const button = document.getElementById('adminResetPasswordBtn');
+  if(!button) return;
+  const isAllowed = !!currentUser && (
+    currentUser.role === 'admin' ||
+    currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' ||
+    currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true'
+  );
+  button.classList.toggle('hidden', !isAllowed);
+}
+window.syncPanicAdminButton = syncPanicAdminButton;
 
-// Bucle inteligente: Controla visualmente quién ve el botón en tiempo real
-setInterval(async () => {
-  const token = localStorage.getItem('token');
-  
-  // Si no hay token de sesión (pantalla de login o se cerró sesión)
-  if (!token) {
-    statusVerificado = false;
-    esAdministrador = false;
-    const btnExistente = document.getElementById('btn-panico-admin');
-    if (btnExistente) btnExistente.remove();
-    return;
-  }
+registerLoadAppHook(function panicButtonLoadAppHook(){
+  syncPanicAdminButton();
+}, { name:'panic-button-ui', order:710 });
 
-  // Si hay sesión iniciada pero aún no hemos verificado el rango del usuario
-  if (!statusVerificado) {
-    statusVerificado = true; // Bloqueamos para hacer una única consulta segura
-    try {
-      const res = await fetch('/api/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const usuario = await res.json();
-        // Verificamos si es Admin, Dueño de Panel o Subadmin
-        if (usuario.role === 'admin' || usuario.is_panel_admin || usuario.is_subadmin) {
-          esAdministrador = true;
-        }
-      } else {
-        statusVerificado = false; // Si hubo un fallo de conexión, reintentamos después
-      }
-    } catch (err) {
-      statusVerificado = false;
-    }
-  }
-
-  // Si el bucle ya confirmó que SÍ eres administrador, te dibuja el botón seguro
-  if (esAdministrador) {
-    const menu = document.querySelector('.menu');
-    if (menu && !document.getElementById('btn-panico-admin')) {
-      const btn = document.createElement('button');
-      btn.id = 'btn-panico-admin';
-      btn.className = 'menu-btn'; 
-      btn.style.cssText = 'background: #dc2626 !important; color: white !important; font-weight: bold !important; margin-top: 25px !important; border: 2px solid #7f1d1d !important; cursor: pointer !important;';
-      btn.innerHTML = '🚨 Resetear Clave';
-      btn.onclick = botonDePanico;
-      menu.appendChild(btn);
-    }
-  }
-}, 1000);
-// ==========================================
-// INICIO DE GRÁFICAS (PROTEGIDO)
-// ==========================================
-setTimeout(() => {
-  if (localStorage.getItem('token')) {
-    if (typeof cargarGraficas === 'function') {
-      cargarGraficas();
-    } else {
-      console.log("ℹ️ Nota: cargarGraficas no está definida, saltando ejecución.");
-    }
-  }
-}, 2000);
 // ==========================================
 // CAMBIO DE CONTRASEÑA DESDE EL PERFIL
 // ==========================================
@@ -3410,27 +3349,8 @@ async function cambiarMiPassword() {
   }
 }
     
-// ==========================================
-// MODO APP PARA DISTRIBUIDORES (LIMPIO)
-// ==========================================
-setInterval(() => {
-  if (!currentUser) return;
-
-  const role = String(currentUser.role || '').toLowerCase();
-  const accountType = String(currentUser.account_type || '').toLowerCase();
-  const isSubadmin = currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true';
-  const esDistribuidor = (accountType === 'admin_distribuidor' || accountType === 'distribuidor_del_panel' || (role !== 'admin' && isSubadmin));
-
-  const btnUsr = document.getElementById('btn-dist-usuarios');
-  const btnPre = document.getElementById('btn-dist-precios');
-  const btnGan = document.getElementById('btn-dist-ganancias');
-
-  // Solo mostramos los botones si el usuario es distribuidor
-  if (btnUsr) btnUsr.classList.toggle('hidden', !esDistribuidor);
-  if (btnPre) btnPre.classList.toggle('hidden', !esDistribuidor);
-  if (btnGan) btnGan.classList.toggle('hidden', !esDistribuidor);
-
-}, 1000);
+// La visibilidad de los accesos de distribuidor se aplica desde
+// applyDashboardRoleVisibilityMatrix(), sin un sondeo permanente cada segundo.
 
 // ==========================================
 // ACCESO DIRECTO A GANANCIAS (SIN ROMPER NADA)
@@ -3450,43 +3370,52 @@ function irADirectoAGanancias() {
 // ==========================================
 // SISTEMA DE CUARENTENA Y RECUPERACIÓN
 // ==========================================
+let __quarantineCheckPromise = null;
 async function checkQuarantineAccounts() {
   if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) return;
-  try {
-    // 1. Forzar al servidor a revisar si hay cuentas que ya vencieron
-    await fetch('/api/admin/system/check-expirations', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-    });
+  if (__quarantineCheckPromise) return __quarantineCheckPromise;
 
-    // 2. Traer la lista de cuentas atrapadas en cuarentena
-    const res = await fetch('/api/admin/accounts/quarantine', {
-      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-    });
-    const quarantineList = await res.json();
-    const campanaVieja = document.getElementById('btn-cuarentena-alarma');
-    if (campanaVieja) campanaVieja.remove();
+  __quarantineCheckPromise = (async () => {
+    try {
+      // 1. Forzar al servidor a revisar si hay cuentas que ya vencieron
+      await fetch('/api/admin/system/check-expirations', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      });
 
-    const recoverBtn = document.getElementById('btnHistorialId');
-    const count = Array.isArray(quarantineList) ? quarantineList.length : 0;
-    if (recoverBtn) {
-      recoverBtn.textContent = count > 0 ? `♻ Recuperar (${count})` : '♻ Recuperar';
-      recoverBtn.onclick = () => {
-        if (count > 0) showQuarantineModal(quarantineList);
-        else if (typeof window.abrirModalHistorial === 'function') window.abrirModalHistorial();
-      };
+      // 2. Traer la lista de cuentas atrapadas en cuarentena
+      const res = await fetch('/api/admin/accounts/quarantine', {
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      });
+      const quarantineList = await res.json();
+      const campanaVieja = document.getElementById('btn-cuarentena-alarma');
+      if (campanaVieja) campanaVieja.remove();
+
+      const recoverBtn = document.getElementById('btnHistorialId');
+      const count = Array.isArray(quarantineList) ? quarantineList.length : 0;
+      if (recoverBtn) {
+        recoverBtn.textContent = count > 0 ? `♻ Recuperar (${count})` : '♻ Recuperar';
+        recoverBtn.onclick = () => {
+          if (count > 0) showQuarantineModal(quarantineList);
+          else if (typeof window.abrirModalHistorial === 'function') window.abrirModalHistorial();
+        };
+      }
+
+      const stat = document.getElementById('statExpiring');
+      if (stat) stat.textContent = String(count);
+
+      const quarantineCard = document.getElementById('dashQuarantineCard');
+      if (quarantineCard && currentUser && String(currentUser.role || '').toLowerCase() === 'admin') {
+        quarantineCard.classList.remove('hidden');
+      }
+    } catch (err) {
+      console.error("Error en sistema de cuarentena", err);
     }
+  })().finally(() => {
+    __quarantineCheckPromise = null;
+  });
 
-    const stat = document.getElementById('statExpiring');
-    if (stat) stat.textContent = String(count);
-
-    const quarantineCard = document.getElementById('dashQuarantineCard');
-    if (quarantineCard && currentUser && String(currentUser.role || '').toLowerCase() === 'admin') {
-      quarantineCard.classList.remove('hidden');
-    }
-  } catch (err) {
-    console.error("Error en sistema de cuarentena", err);
-  }
+  return __quarantineCheckPromise;
 }
 
 let quarantineOpenRequest = null;
@@ -3544,7 +3473,6 @@ function bindQuarantineDashboardCard() {
   dashCard.addEventListener('click', openQuarantineFromDashboard);
 }
 
-document.addEventListener('DOMContentLoaded', bindQuarantineDashboardCard);
 
 function showQuarantineModal(list) {
   console.log('showQuarantineModal called, list length:', Array.isArray(list)?list.length:0);
@@ -3733,9 +3661,24 @@ async function abrirModalHistorial() {
 // Haz la función global explícitamente
 window.abrirModalHistorial = abrirModalHistorial;
 
-// Configurar el radar: Se ejecuta 3 segundos después de cargar y luego cada 5 minutos
-setTimeout(checkQuarantineAccounts, 3000);
-setInterval(checkQuarantineAccounts, 300000);
+// Un único monitor de cuarentena. Solo trabaja con sesión autorizada y
+// pausa sus consultas cuando la pestaña no está visible.
+let __quarantineMonitorTimer = null;
+function startQuarantineMonitor(){
+  bindQuarantineDashboardCard();
+  if(__quarantineMonitorTimer) clearInterval(__quarantineMonitorTimer);
+  __quarantineMonitorTimer = null;
+
+  if(!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) return;
+  checkQuarantineAccounts();
+  __quarantineMonitorTimer = setInterval(() => {
+    if(!document.hidden) checkQuarantineAccounts();
+  }, 300000);
+}
+
+registerLoadAppHook(function quarantineMonitorLoadAppHook(){
+  startQuarantineMonitor();
+}, { name:'quarantine-monitor', order:720 });
 
 // ==========================================
 // BOTÓN DE EMERGENCIA Y CONTROL DE CELULAR (CENTRADO Y PEQUEÑO)
@@ -3766,11 +3709,6 @@ window.addEventListener('popstate', function(event) {
 function activarHistorialCelular() {
     history.pushState({ panel: "abierto" }, '', '#opcion');
 }
-
-// FORZAR APARICIÓN DEL BOTÓN A LOS 2 SEGUNDOS DE ENTRAR
-setTimeout(() => {
-    mostrarBotonRegresar();
-}, 2000);
 
 async function loadExpiringAlerts() {
   const list = document.getElementById('expiringAlertsList');
@@ -3852,19 +3790,8 @@ async function loadMotherAccountsAlerts() {
   }
 }
 
-// Mantenemos tu EventListener seguro al final
-document.addEventListener('DOMContentLoaded', () => {
-  if(document.getElementById('expiringAlertsList')) {
-    loadExpiringAlerts();
-  }
-});
-
-// ESTA ES LA PARTE QUE MANTIENE TU PANEL SEGURO AL CARGAR
-document.addEventListener('DOMContentLoaded', () => {
-  if(document.getElementById('expiringAlertsList')) {
-    loadExpiringAlerts();
-  }
-});
+// Las alertas se cargan una sola vez al entrar en la sección Alerts,
+// mediante showSection y su deduplicador de cargas en curso.
 
 async function searchGlobalEmail() {
   const input = document.getElementById('globalEmailSearch').value.trim();
@@ -4564,22 +4491,12 @@ registerSectionHook(function roleMatrixSectionHook(name){
   }
 });
 
-const __loadAppBeforeRoleMatrix = typeof loadApp === 'function' ? loadApp : null;
-if(__loadAppBeforeRoleMatrix){
-  loadApp = async function(){
-    await __loadAppBeforeRoleMatrix();
-    applyDashboardRoleVisibilityMatrix();
-    loadMiniBannersStrip();
-    actualizarConteosDashboard();
-  };
-}
+registerLoadAppHook(function roleMatrixLoadAppHook(){
+  // Dashboard ya carga banners y conteos desde showSection('dashboard').
+  // Aquí solo se reaplica la visibilidad después de crear los elementos dinámicos.
+  applyDashboardRoleVisibilityMatrix();
+}, { name:'dashboard-role-matrix', order:700 });
 
-setInterval(()=>{
-  if(!currentUser) return;
-  const dashboardActive = !!document.getElementById('section-dashboard')?.classList.contains('active');
-  if(!dashboardActive) return;
-  actualizarConteosDashboard();
-}, 12000);
 
 // Navegación final por tarjetas: separa panel admin de distribuidor.
 openUsersFromDashboard = function(){
@@ -4859,12 +4776,35 @@ function setupInventoryCsvDownloadTrigger(){
   btn.onclick=function(){ downloadInventoryCsv(); };
 }
 
-setTimeout(setupInventoryCsvUploadFlow, 400);
-setInterval(setupInventoryCsvUploadFlow, 3000);
-setTimeout(setupInventoryCsvDownloadTrigger, 500);
-setInterval(setupInventoryCsvDownloadTrigger, 3000);
-setTimeout(setupExpiringCardAction, 450);
-setInterval(setupExpiringCardAction, 3000);
-setInterval(()=>{
-  if(currentUser && String(currentUser.role || '').toLowerCase()==='admin') loadExpiringCount();
-}, 30000);
+function initializeStaticAdminControls(){
+  setupInventoryCsvUploadFlow();
+  setupInventoryCsvDownloadTrigger();
+  setupExpiringCardAction();
+}
+
+registerLoadAppHook(function staticAdminControlsLoadAppHook(){
+  initializeStaticAdminControls();
+}, { name:'static-admin-controls', order:730 });
+
+registerSectionHook(function staticAdminControlsSectionHook(name){
+  if(name === 'dashboard' || name === 'admin') initializeStaticAdminControls();
+});
+
+let __dashboardRefreshTimer = null;
+function startDashboardRefreshScheduler(){
+  if(__dashboardRefreshTimer) clearInterval(__dashboardRefreshTimer);
+  __dashboardRefreshTimer = null;
+  if(!currentUser) return;
+
+  __dashboardRefreshTimer = setInterval(() => {
+    if(document.hidden) return;
+    const dashboardActive = !!document.getElementById('section-dashboard')?.classList.contains('active');
+    if(!dashboardActive) return;
+    actualizarConteosDashboard();
+    if(String(currentUser.role || '').toLowerCase() === 'admin') loadExpiringCount();
+  }, 30000);
+}
+
+registerLoadAppHook(function dashboardRefreshLoadAppHook(){
+  startDashboardRefreshScheduler();
+}, { name:'dashboard-refresh-scheduler', order:740 });

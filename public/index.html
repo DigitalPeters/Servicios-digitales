@@ -14,7 +14,7 @@
   <style>
     html.session-token-present #authSection { display: none !important; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <div id="message" class="message"></div>
@@ -334,10 +334,10 @@
 
       <section id="section-orders" class="section">
         <div class="panel">
-          <div class="panel-head"><h2>Mis pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadMyOrders()">Actualizar</button></div>
+          <div class="panel-head"><h2>Mis pedidos</h2><button class="outline-btn" style="width:auto" onclick="loadMyOrders(currentMyOrdersPage)">Actualizar</button></div>
           <div class="tools">
-            <input id="myOrdersSearch" placeholder="Buscar por producto, correo o pedido" oninput="renderMyOrders()" />
-            <select id="myOrdersStatusFilter" onchange="renderMyOrders()">
+            <input id="myOrdersSearch" placeholder="Buscar por producto, correo o pedido" oninput="scheduleMyOrdersReload()" />
+            <select id="myOrdersStatusFilter" onchange="loadMyOrders(1)">
               <option value="">Todos los estados</option>
               <option value="exito">Éxito / entregados</option>
               <option value="accion_en_espera">Acción en espera</option>
@@ -407,7 +407,7 @@
   <div class="panel" style="margin-top: 22px;">
     <div class="panel-head">
       <h2>Mis reportes y respuestas</h2>
-      <button class="outline-btn" style="width:auto" onclick="loadMyReports()">Actualizar</button>
+      <button class="outline-btn" style="width:auto" onclick="loadMyReports(currentMyReportsPage)">Actualizar</button>
     </div>
     <div id="myReportsList">Cargando reportes...</div>
   </div>
@@ -506,7 +506,7 @@
           <select id="subadminPriceUserSelect" onchange="loadAdminSubadminPrices()"></select>
           <div id="adminSubadminPricesList">Selecciona un admin distribuidor.</div>
         </div>
-        <div id="adminBalanceRequestsPanel" class="panel"><div class="panel-head"><h2>Solicitudes de saldo pendientes</h2><button class="outline-btn" style="width:auto" onclick="loadBalanceRequests()">Actualizar</button></div><div id="adminBalanceRequestsList">Sin solicitudes pendientes.</div></div>
+        <div id="adminBalanceRequestsPanel" class="panel"><div class="panel-head"><h2>Solicitudes de saldo pendientes</h2><button class="outline-btn" style="width:auto" onclick="loadBalanceRequests(currentAdminBalanceRequestsPage)">Actualizar</button></div><div id="adminBalanceRequestsList">Sin solicitudes pendientes.</div></div>
         <div id="adminAccountReportsPanel" class="panel">
           <div class="panel-head">
             <div>
@@ -673,15 +673,15 @@
   <div id="adminOrdersList"></div>
 </div>
 
-<script src="shared-utils.js?v=1"></script>
-<script src="auth-session.js?v=2"></script>
+<script src="shared-utils.js?v=2"></script>
+<script src="auth-session.js?v=4"></script>
 <script src="nav-dashboard.js?v=3"></script>
-<script src="product-shop.js?v=1"></script>
-<script src="user-orders-balance.js?v=2"></script>
-<script src="admin-commerce.js?v=1"></script>
+<script src="product-shop.js?v=2"></script>
+<script src="user-orders-balance.js?v=3"></script>
+<script src="admin-commerce.js?v=3"></script>
 <script src="dashboard-stock-alerts.js?v=1"></script>
-<script src="app.js?v=8"></script>
-<script src="admin-users-distributor.js?v=6"></script>
+<script src="app.js?v=13"></script>
+<script src="admin-users-distributor.js?v=8"></script>
 
   <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
     <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>

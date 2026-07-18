@@ -324,6 +324,69 @@ function safeJsonObject(value) {
   }
 }
 
+
+function getPaginationParams(req, defaultLimit = 20, maxLimit = 100) {
+  const rawPage = Number(req.query.page || 1);
+  const rawLimit = Number(req.query.limit || defaultLimit);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(maxLimit, Math.floor(rawLimit))
+    : defaultLimit;
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+function buildPaginationPayload(rows, page, limit, total, extra = {}) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  return {
+    rows,
+    page,
+    limit,
+    total: safeTotal,
+    totalPages: Math.max(1, Math.ceil(safeTotal / limit)),
+    ...extra
+  };
+}
+
+function getInlineAttachmentMeta(value, fieldName = "") {
+  const text = String(value || "").trim();
+  const match = text.match(/^data:([^;,]+)(?:;[^,]*)?,/i);
+  if (!match) return null;
+  const mimeType = String(match[1] || "application/octet-stream").toLowerCase();
+  return {
+    __lazy_attachment: true,
+    field: String(fieldName || ""),
+    mime_type: mimeType,
+    is_image: mimeType.startsWith("image/"),
+    is_pdf: mimeType === "application/pdf",
+    encoded_size: text.length
+  };
+}
+
+function summarizeOrderDataForList(rawOrderData) {
+  const original = safeJsonObject(rawOrderData);
+  const summary = {};
+
+  for (const [field, value] of Object.entries(original)) {
+    const attachment = getInlineAttachmentMeta(value, field);
+    summary[field] = attachment || value;
+  }
+
+  return JSON.stringify(summary);
+}
+
+function summarizeOrderRowsForList(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...row,
+    order_data: summarizeOrderDataForList(row.order_data)
+  }));
+}
+
+function getOrderDataFieldValue(rawOrderData, field) {
+  const data = safeJsonObject(rawOrderData);
+  if (!Object.prototype.hasOwnProperty.call(data, field)) return undefined;
+  return data[field];
+}
+
 function normalizeFieldName(name) {
   return String(name || "")
     .trim()
@@ -2409,9 +2472,38 @@ successCount++;
 });
 
 // MIS PEDIDOS
-// MIS PEDIDOS
 app.get("/api/my-orders", authMiddleware, async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req, 20, 100);
+    const search = String(req.query.search || "").trim();
+    const status = String(req.query.status || "").trim().toLowerCase();
+
+    const params = [req.user.id, search, status];
+    const whereSql = `
+      WHERE orders.user_id = $1
+        AND (
+          $2::text = ''
+          OR orders.id::text ILIKE '%' || $2 || '%'
+          OR COALESCE(products.name, '') ILIKE '%' || $2 || '%'
+          OR COALESCE(products.category, '') ILIKE '%' || $2 || '%'
+          OR COALESCE(orders.delivered_account_data, '') ILIKE '%' || $2 || '%'
+          OR COALESCE(orders.admin_response, '') ILIKE '%' || $2 || '%'
+        )
+        AND (
+          $3::text = ''
+          OR ($3 = 'reportado' AND CONCAT(COALESCE(orders.delivered_account_data, ''), ' ', COALESCE(orders.admin_response, '')) ~* 'reporte|falla|reemplazo|reembolso')
+          OR ($3 <> 'reportado' AND lower(COALESCE(orders.status, '')) = $3)
+        )`;
+
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM orders
+       JOIN products ON orders.product_id = products.id
+       ${whereSql}`,
+      params
+    );
+    const total = Number(totalResult.rows[0]?.total || 0);
+
     const result = await pool.query(
       `SELECT
         orders.id,
@@ -2431,15 +2523,71 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
         products.product_type AS product_type
        FROM orders
        JOIN products ON orders.product_id = products.id
-       WHERE orders.user_id = $1
-       ORDER BY orders.id DESC`,
-      [req.user.id]
+       ${whereSql}
+       ORDER BY orders.id DESC
+       LIMIT $4 OFFSET $5`,
+      [...params, limit, offset]
     );
 
-    res.json(result.rows);
+    res.json(buildPaginationPayload(
+      summarizeOrderRowsForList(result.rows),
+      page,
+      limit,
+      total
+    ));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando pedidos" });
+  }
+});
+
+// USUARIO/ADMIN: CARGAR UN ADJUNTO DE PEDIDO SOLO CUANDO SE ABRE
+app.get("/api/orders/:orderId/attachment", authMiddleware, async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId || 0);
+    const field = String(req.query.field || "").trim();
+    if (!orderId || !field) return res.status(400).json({ error: "Adjunto inválido" });
+
+    const result = await pool.query(
+      `SELECT orders.user_id, orders.owner_admin_id, orders.order_data,
+              users.owner_user_id
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       WHERE orders.id = $1
+       LIMIT 1`,
+      [orderId]
+    );
+    const order = result.rows[0];
+    if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
+
+    let allowed = Number(order.user_id) === Number(req.user.id);
+    if (!allowed && String(req.user.role || '').toLowerCase() === 'admin') {
+      const viewer = await getViewerContext(req.user.id);
+      if (viewer?.is_panel_admin) {
+        allowed = Number(order.owner_admin_id || 0) === Number(viewer.id)
+          || Number(order.user_id || 0) === Number(viewer.id)
+          || Number(order.owner_user_id || 0) === Number(viewer.id);
+      } else {
+        allowed = true;
+      }
+    }
+
+    if (!allowed) return res.status(403).json({ error: "No tienes permiso para abrir este adjunto" });
+
+    const value = getOrderDataFieldValue(order.order_data, field);
+    const meta = getInlineAttachmentMeta(value, field);
+    if (!meta) return res.status(404).json({ error: "El adjunto no existe o ya no está disponible" });
+
+    res.json({
+      value,
+      mime_type: meta.mime_type,
+      is_image: meta.is_image,
+      is_pdf: meta.is_pdf,
+      field
+    });
+  } catch (err) {
+    console.error("Error cargando adjunto de pedido:", err.message);
+    res.status(500).json({ error: "Error cargando adjunto" });
   }
 });
 
@@ -2843,24 +2991,72 @@ app.post("/api/user/solicitud-saldo", authMiddleware, async (req, res) => {
 // USUARIO: MIS SOLICITUDES DE SALDO
 app.get("/api/my-balance-requests", authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, amount, bank, reference, account_holder, proof, status, admin_response, created_at, reviewed_at
+    const { page, limit, offset } = getPaginationParams(req, 20, 100);
+    const status = String(req.query.status || "").trim().toLowerCase();
+    const params = [req.user.id, status];
+
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
        FROM balance_requests
        WHERE user_id = $1
-       ORDER BY id DESC`,
-      [req.user.id]
+         AND ($2::text = '' OR lower(COALESCE(status, '')) = $2)`,
+      params
+    );
+    const total = Number(totalResult.rows[0]?.total || 0);
+
+    const result = await pool.query(
+      `SELECT id, amount, bank, reference, account_holder,
+              CASE WHEN COALESCE(proof, '') <> '' THEN 1 ELSE 0 END AS has_proof,
+              status, admin_response, created_at, reviewed_at
+       FROM balance_requests
+       WHERE user_id = $1
+         AND ($2::text = '' OR lower(COALESCE(status, '')) = $2)
+       ORDER BY id DESC
+       LIMIT $3 OFFSET $4`,
+      [...params, limit, offset]
     );
 
-    res.json(result.rows);
+    res.json(buildPaginationPayload(result.rows, page, limit, total));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando solicitudes de saldo" });
   }
 });
 
+app.get("/api/my-balance-requests/:requestId/proof", authMiddleware, async (req, res) => {
+  try {
+    const requestId = Number(req.params.requestId || 0);
+    if (!requestId) return res.status(400).json({ error: "Solicitud inválida" });
+    const result = await pool.query(
+      `SELECT proof FROM balance_requests WHERE id = $1 AND user_id = $2 LIMIT 1`,
+      [requestId, req.user.id]
+    );
+    const proof = String(result.rows[0]?.proof || "").trim();
+    if (!proof) return res.status(404).json({ error: "Esta solicitud no tiene comprobante" });
+    const meta = getInlineAttachmentMeta(proof, "proof");
+    res.json({ value: proof, mime_type: meta?.mime_type || "", is_image: Boolean(meta?.is_image), is_pdf: Boolean(meta?.is_pdf) });
+  } catch (err) {
+    console.error("Error cargando comprobante de saldo:", err.message);
+    res.status(500).json({ error: "Error cargando comprobante" });
+  }
+});
+
 // ADMIN: SOLICITUDES DE SALDO
 app.get("/api/admin/balance-requests", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req, 20, 100);
+    const status = String(req.query.status || "").trim().toLowerCase();
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const params = [ownerId, status];
+    const whereSql = `WHERE ($1::int IS NULL OR balance_requests.owner_admin_id = $1)
+                        AND ($2::text = '' OR lower(COALESCE(balance_requests.status, '')) = $2)`;
+
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM balance_requests ${whereSql}`,
+      params
+    );
+    const total = Number(totalResult.rows[0]?.total || 0);
+
     const result = await pool.query(
       `SELECT
         balance_requests.id,
@@ -2869,7 +3065,7 @@ app.get("/api/admin/balance-requests", authMiddleware, adminMiddleware, async (r
         balance_requests.bank,
         balance_requests.reference,
         balance_requests.account_holder,
-        balance_requests.proof,
+        CASE WHEN COALESCE(balance_requests.proof, '') <> '' THEN 1 ELSE 0 END AS has_proof,
         balance_requests.status,
         balance_requests.admin_response,
         balance_requests.created_at,
@@ -2878,15 +3074,38 @@ app.get("/api/admin/balance-requests", authMiddleware, adminMiddleware, async (r
         users.email AS customer_email
        FROM balance_requests
        JOIN users ON balance_requests.user_id = users.id
-       WHERE ($1::int IS NULL OR balance_requests.owner_admin_id = $1)
-       ORDER BY balance_requests.id DESC`,
-      [req.isPanelAdmin ? req.user.id : null]
+       ${whereSql}
+       ORDER BY balance_requests.id DESC
+       LIMIT $3 OFFSET $4`,
+      [...params, limit, offset]
     );
 
-    res.json(result.rows);
+    res.json(buildPaginationPayload(result.rows, page, limit, total));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando solicitudes de saldo" });
+  }
+});
+
+app.get("/api/admin/balance-requests/:requestId/proof", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const requestId = Number(req.params.requestId || 0);
+    if (!requestId) return res.status(400).json({ error: "Solicitud inválida" });
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const result = await pool.query(
+      `SELECT proof
+       FROM balance_requests
+       WHERE id = $1 AND ($2::int IS NULL OR owner_admin_id = $2)
+       LIMIT 1`,
+      [requestId, ownerId]
+    );
+    const proof = String(result.rows[0]?.proof || "").trim();
+    if (!proof) return res.status(404).json({ error: "Esta solicitud no tiene comprobante" });
+    const meta = getInlineAttachmentMeta(proof, "proof");
+    res.json({ value: proof, mime_type: meta?.mime_type || "", is_image: Boolean(meta?.is_image), is_pdf: Boolean(meta?.is_pdf) });
+  } catch (err) {
+    console.error("Error cargando comprobante de saldo admin:", err.message);
+    res.status(500).json({ error: "Error cargando comprobante" });
   }
 });
 
@@ -3329,24 +3548,66 @@ app.post("/api/user/reporte-cuenta", authMiddleware, createAccountReportHandler)
 // USUARIO: MIS REPORTES DE CUENTA
 app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at, order_id, reported_account_id, refund_amount, resolution_type, evidence_image
-       FROM account_reports
-       WHERE user_id = $1
-       ORDER BY id DESC`,
+    const { page, limit, offset } = getPaginationParams(req, 20, 100);
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM account_reports WHERE user_id = $1`,
       [req.user.id]
     );
+    const total = Number(totalResult.rows[0]?.total || 0);
 
-    res.json(result.rows);
+    const result = await pool.query(
+      `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at,
+              order_id, reported_account_id, refund_amount, resolution_type,
+              CASE WHEN COALESCE(evidence_image, '') <> '' THEN 1 ELSE 0 END AS has_evidence
+       FROM account_reports
+       WHERE user_id = $1
+       ORDER BY id DESC
+       LIMIT $2 OFFSET $3`,
+      [req.user.id, limit, offset]
+    );
+
+    res.json(buildPaginationPayload(result.rows, page, limit, total));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando reportes de cuenta" });
   }
 });
 
+app.get("/api/my-account-reports/:reportId/evidence", authMiddleware, async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId || 0);
+    if (!reportId) return res.status(400).json({ error: "ID de reporte inválido" });
+    const result = await pool.query(
+      `SELECT evidence_image FROM account_reports WHERE id = $1 AND user_id = $2 LIMIT 1`,
+      [reportId, req.user.id]
+    );
+    const evidence = String(result.rows[0]?.evidence_image || "").trim();
+    if (!evidence) return res.status(404).json({ error: "Este reporte no tiene evidencia" });
+    const meta = getInlineAttachmentMeta(evidence, "evidence_image");
+    res.json({ evidence_image: evidence, mime_type: meta?.mime_type || "", is_image: Boolean(meta?.is_image), is_pdf: Boolean(meta?.is_pdf) });
+  } catch (err) {
+    console.error("Error cargando evidencia del usuario:", err.message);
+    res.status(500).json({ error: "Error cargando evidencia" });
+  }
+});
+
 // ADMIN: REPORTES DE CUENTA
 app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req, 20, 100);
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const scopeSql = `($1::int IS NULL OR account_reports.owner_admin_id = $1 OR account_reports.user_id = $1 OR account_reports.user_id IN (SELECT id FROM users WHERE owner_user_id = $1))`;
+
+    const totalsResult = await pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE lower(COALESCE(account_reports.status, '')) = 'pendiente')::int AS pending_total
+       FROM account_reports
+       WHERE ${scopeSql}`,
+      [ownerId]
+    );
+    const total = Number(totalsResult.rows[0]?.total || 0);
+    const pendingTotal = Number(totalsResult.rows[0]?.pending_total || 0);
+
     const result = await pool.query(
       `SELECT
         account_reports.id,
@@ -3377,10 +3638,13 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
        LEFT JOIN orders ON orders.id = account_reports.order_id
        LEFT JOIN products ON products.id = orders.product_id
        LEFT JOIN platform_accounts ON platform_accounts.id = account_reports.reported_account_id
-       ORDER BY account_reports.id DESC`
+       WHERE ${scopeSql}
+       ORDER BY account_reports.id DESC
+       LIMIT $2 OFFSET $3`,
+      [ownerId, limit, offset]
     );
 
-    res.json(result.rows);
+    res.json(buildPaginationPayload(result.rows, page, limit, total, { pendingTotal }));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando reportes de cuenta" });
@@ -3391,19 +3655,20 @@ app.get("/api/admin/account-reports/:reportId/evidence", authMiddleware, adminMi
   try {
     const reportId = Number(req.params.reportId || 0);
     if (!reportId) return res.status(400).json({ error: "ID de reporte inválido" });
-
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
     const result = await pool.query(
       `SELECT evidence_image
        FROM account_reports
        WHERE id = $1
+         AND ($2::int IS NULL OR owner_admin_id = $2 OR user_id = $2 OR user_id IN (SELECT id FROM users WHERE owner_user_id = $2))
        LIMIT 1`,
-      [reportId]
+      [reportId, ownerId]
     );
 
-    const row = result.rows[0];
-    if (!row) return res.status(404).json({ error: "Reporte no encontrado" });
-
-    res.json({ evidence_image: row.evidence_image || "" });
+    const evidence = String(result.rows[0]?.evidence_image || "").trim();
+    if (!evidence) return res.status(404).json({ error: "Este reporte no tiene evidencia adjunta" });
+    const meta = getInlineAttachmentMeta(evidence, "evidence_image");
+    res.json({ evidence_image: evidence, mime_type: meta?.mime_type || "", is_image: Boolean(meta?.is_image), is_pdf: Boolean(meta?.is_pdf) });
   } catch (err) {
     console.error("Error cargando evidencia de reporte:", err.message);
     res.status(500).json({ error: "Error cargando evidencia" });
@@ -3976,7 +4241,7 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
     );
 
     res.json({
-      rows: result.rows,
+      rows: summarizeOrderRowsForList(result.rows),
       page,
       limit,
       total,
@@ -5360,6 +5625,7 @@ app.get("/api/admin/user-history", authMiddleware, adminMiddleware, async (req, 
     const userId = Number(req.query.user_id || 0);
     const startDate = String(req.query.start_date || '').trim();
     const endDate = String(req.query.end_date || '').trim();
+    const { page, limit, offset } = getPaginationParams(req, 20, 100);
     if (!userId) return res.status(400).json({ error: "Selecciona un usuario" });
     const scopeOwnerId = getReportScopeOwnerId(req);
     const params = [userId, scopeOwnerId];
@@ -5368,6 +5634,21 @@ app.get("/api/admin/user-history", authMiddleware, adminMiddleware, async (req, 
       params.push(startDate, endDate);
       dateSql = ' AND orders.created_at::date >= $3::date AND orders.created_at::date <= $4::date ';
     }
+    const limitParam = params.length + 1;
+    const offsetParam = params.length + 2;
+    const whereSql = `WHERE orders.user_id = $1
+         AND ($2::int IS NULL OR orders.owner_admin_id = $2 OR users.owner_user_id = $2 OR users.id = $2)
+         ${dateSql}`;
+
+    const totalResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM orders
+       JOIN users ON users.id = orders.user_id
+       ${whereSql}`,
+      params
+    );
+    const total = Number(totalResult.rows[0]?.total || 0);
+
     const result = await pool.query(
       `SELECT orders.id, orders.amount, orders.status, orders.admin_response, orders.order_data, orders.delivered_account_data, orders.created_at,
               COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name) AS product_name,
@@ -5375,13 +5656,18 @@ app.get("/api/admin/user-history", authMiddleware, adminMiddleware, async (req, 
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
-       WHERE orders.user_id = $1
-         AND ($2::int IS NULL OR orders.owner_admin_id = $2 OR users.owner_user_id = $2 OR users.id = $2)
-         ${dateSql}
-       ORDER BY orders.created_at DESC`,
-      params
+       ${whereSql}
+       ORDER BY orders.created_at DESC
+       LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      [...params, limit, offset]
     );
-    res.json({ records: result.rows });
+    res.json({
+      records: summarizeOrderRowsForList(result.rows),
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit))
+    });
   } catch (err) {
     console.error('Error cargando historial:', err.message);
     res.status(500).json({ error: "Error cargando historial de usuario" });

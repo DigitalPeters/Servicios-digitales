@@ -51,7 +51,7 @@ function isSubadminOnly(){
 
 function installDistributorHooks(){
   if(window.__distributorHooksInstalled) return true;
-  if(typeof window.registerSectionHook !== 'function' || typeof window.loadApp !== 'function') return false;
+  if(typeof window.registerSectionHook !== 'function' || typeof window.registerLoadAppHook !== 'function') return false;
 
   window.registerSectionHook(function distributorSectionHook(name){
     if(name === 'distributor' && isDistributorUser()){
@@ -60,26 +60,22 @@ function installDistributorHooks(){
     }
   });
 
-  const __oldLoadAppForDistributor = window.loadApp;
-  window.loadApp = async function(){
-    await __oldLoadAppForDistributor();
+  window.registerLoadAppHook(function distributorLoadAppHook(){
     const distributorVisible = isSubadminOnly();
     document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !distributorVisible);
     document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
     if(currentUser?.role === 'admin'){
       renderAdminSubadminSelect();
     }
-  };
+  }, { name:'distributor-controls', order:800 });
 
   window.__distributorHooksInstalled = true;
   return true;
 }
 
-(function waitForAppHooks(attempts){
-  if(installDistributorHooks()) return;
-  if(attempts <= 0) return;
-  setTimeout(() => waitForAppHooks(attempts - 1), 50);
-})(80);
+// Este archivo se carga después de app.js; los registros ya están disponibles.
+// No es necesario sondear el navegador cada 50 ms.
+installDistributorHooks();
 
 async function createReseller(){
   try{
@@ -255,21 +251,14 @@ function installLoadUsersEnhancer(){
   };
   window.__loadUsersEnhancedByDistributorTools = true;
 
-  // Si ya hay usuarios cargados en memoria, aplica render inmediato.
-  if(Array.isArray(window.allUsers) && window.allUsers.length){
+  // Si la lista ya fue cargada, solo vuelve a renderizarla; no hace otra petición.
+  if(Array.isArray(allUsers) && allUsers.length){
     renderAdminSubadminSelect();
     renderAdminUsersWithTools();
   }
-
-  // Refresco único para garantizar que el panel Usuarios tome la versión nueva.
-  setTimeout(()=>{
-    if(typeof window.loadUsers === 'function' && currentUser?.role === 'admin'){
-      window.loadUsers().catch(()=>{});
-    }
-  }, 0);
 }
 
-setTimeout(installLoadUsersEnhancer, 0);
+installLoadUsersEnhancer();
 
 function formatAdminUserMovementDate(value){
   if(!value) return 'Sin movimientos registrados';

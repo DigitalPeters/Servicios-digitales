@@ -1936,3 +1936,36 @@
   .replacement-delivery-actions{display:grid;grid-template-columns:1fr}
   .replacement-delivery-actions .copy-account-btn{width:100%}
 }
+
+
+/* Paso 7: los comprobantes y evidencias se renderizan solamente al abrirlos. */
+.lazy-media-card{
+  width:min(920px, calc(100% - 28px));
+  max-height:92vh;
+  overflow:auto;
+}
+.lazy-media-preview{
+  min-height:120px;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background:#f8fafc;
+  overflow:hidden;
+}
+.lazy-media-image{
+  display:block;
+  width:100%;
+  max-height:72vh;
+  object-fit:contain;
+  background:#fff;
+}
+.lazy-media-frame{
+  width:100%;
+  min-height:70vh;
+  border:0;
+  background:#fff;
+}
+@media(max-width:700px){
+  .lazy-media-frame{min-height:62vh}
+}

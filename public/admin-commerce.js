@@ -19,6 +19,76 @@ function setTodaySalesDate(){
   }
 }
 
+function makeDashboardChartColor(index){
+  const colors=['#f00662','#17135a','#2563eb','#7c3aed','#06b6d4','#f59e0b','#16a34a'];
+  return colors[Number(index||0) % colors.length];
+}
+
+// Renderizador unico de las graficas del dashboard.
+// Recibe el formato normalizado usado por los modulos posteriores de app.js.
+function renderDashboardCharts(data = {}) {
+  const byUser = Array.isArray(data?.by_user) ? data.by_user : [];
+  const byProduct = Array.isArray(data?.top_products) ? data.top_products : [];
+  const chartsPanel = document.getElementById('dashboardChartsPanel');
+
+  if(chartsPanel && currentUser?.role === 'admin'){
+    chartsPanel.classList.remove('hidden');
+  }
+
+  const productBox = document.getElementById('dashboardTopProductsChart');
+  if(productBox){
+    const products = byProduct
+      .map((product) => ({
+        ...product,
+        product_name: product.product_name || product.name || product.product || 'Producto',
+        orders: Number(product.orders ?? product.total_orders ?? product.count ?? product.total ?? 0) || 0
+      }))
+      .filter((product) => product.orders > 0)
+      .sort((a,b) => b.orders - a.orders)
+      .slice(0, 6);
+
+    const totalOrders = products.reduce((total, product) => total + product.orders, 0);
+    if(!products.length || totalOrders <= 0){
+      productBox.innerHTML = '<div class="empty-chart">Sin productos vendidos hoy.</div>';
+    }else{
+      let start = 0;
+      const stops = products.map((product, index) => {
+        const end = start + ((product.orders / totalOrders) * 360);
+        const stop = `${makeDashboardChartColor(index)} ${start}deg ${end}deg`;
+        start = end;
+        return stop;
+      });
+
+      productBox.innerHTML = `<div class="donut-summary"><div class="donut" style="background:conic-gradient(${stops.join(',')})"><div class="donut-center">${totalOrders}<span>pedidos</span></div></div><div class="legend-list">${products.map((product,index)=>`<div class="legend-item"><span class="legend-dot" style="background:${makeDashboardChartColor(index)}"></span><span class="legend-name" title="${safeText(product.product_name)}">${safeText(product.product_name)}</span><span class="legend-value">${product.orders}</span></div>`).join('')}</div></div>`;
+    }
+  }
+
+  const userBox = document.getElementById('dashboardTopUsersChart');
+  if(userBox){
+    const users = byUser
+      .map((user) => ({
+        ...user,
+        total_sales: Number(user.total_sales ?? user.sales ?? user.value ?? 0) || 0
+      }))
+      .filter((user) => user.total_sales > 0)
+      .sort((a,b) => b.total_sales - a.total_sales)
+      .slice(0, 6);
+
+    const maxSales = Math.max(...users.map((user) => user.total_sales), 0);
+    if(!users.length || maxSales <= 0){
+      userBox.innerHTML = '<div class="empty-chart">Sin ventas por usuario hoy.</div>';
+    }else{
+      userBox.innerHTML = `<div class="bar-chart">${users.map((user,index)=>{
+        const percentage = Math.max(4, (user.total_sales / maxSales) * 100);
+        const displayName = user.customer_name || user.customer_email || 'Usuario';
+        return `<div class="bar-row"><div class="bar-label" title="${safeText(user.customer_email || displayName)}">${safeText(displayName)}</div><div class="bar-track"><div class="bar-fill" style="width:${percentage}%;background:linear-gradient(90deg,${makeDashboardChartColor(index)},#f00662)"></div></div><div class="bar-value">$${formatMoney(user.total_sales)}</div></div>`;
+      }).join('')}</div>`;
+    }
+  }
+}
+
+window.renderDashboardCharts = renderDashboardCharts;
+
 function renderDashboardSalesCharts(byUser = [], byProduct = []) {
   if (typeof renderDashboardCharts === 'function') {
     const payload = {
@@ -125,7 +195,8 @@ async function createProduct(){
 }
 
 async function loadAdminProducts(){
-  const products=allProducts.length?allProducts:await api('/api/products');
+  if(!__productsLoadedOnce && typeof loadProducts === 'function') await loadProducts();
+  const products=Array.isArray(allProducts) ? allProducts : [];
   if(document.getElementById('adminProductsCount'))adminProductsCount.textContent=products.length;
   const list=document.getElementById('adminProductsList');
   if(!list)return;
