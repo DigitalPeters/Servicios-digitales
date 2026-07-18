@@ -304,6 +304,57 @@ async function markAccountAsSold(client, accountId, orderId, userId, isReusableS
     }
 }
 
+// Cuando una cuenta madre falla, todos los perfiles todavía disponibles que
+// comparten el mismo correo deben salir del inventario vendible. El alcance se
+// limita al mismo propietario del inventario para no afectar otros paneles.
+async function markFailedAccountEmailGroup(client, {
+  reportedAccountId,
+  accountEmail,
+  ownerAdminId
+}) {
+  const accountId = Number(reportedAccountId || 0);
+  const cleanEmail = String(accountEmail || "").trim();
+  const inventoryOwnerId = Number(ownerAdminId || 0) || null;
+
+  if (!accountId) {
+    return {
+      reportedAccountMarked: 0,
+      availableSiblingsMarked: 0,
+      totalMarked: 0,
+      accountIds: []
+    };
+  }
+
+  const result = await client.query(
+    `UPDATE platform_accounts
+     SET status = 'failed'
+     WHERE id = $1
+        OR (
+          $2::text <> ''
+          AND status IN ('available', 'disponible')
+          AND lower(regexp_replace(trim(COALESCE(account_email, '')), '\\s+', '', 'g')) =
+              lower(regexp_replace(trim($2), '\\s+', '', 'g'))
+          AND (
+            (($3::int IS NULL OR $3::int = 0) AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+            OR ($3::int IS NOT NULL AND $3::int <> 0 AND owner_admin_id = $3)
+          )
+        )
+     RETURNING id,
+               CASE WHEN id = $1 THEN 'reported' ELSE 'available_sibling' END AS failure_source`,
+    [accountId, cleanEmail, inventoryOwnerId]
+  );
+
+  const reportedAccountMarked = result.rows.filter(row => row.failure_source === 'reported').length;
+  const availableSiblingsMarked = result.rows.filter(row => row.failure_source === 'available_sibling').length;
+
+  return {
+    reportedAccountMarked,
+    availableSiblingsMarked,
+    totalMarked: result.rowCount,
+    accountIds: result.rows.map(row => Number(row.id)).filter(Number.isFinite)
+  };
+}
+
 function safeJsonArray(value) {
   try {
     if (Array.isArray(value)) return value;
@@ -3782,7 +3833,7 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
     const reportResult = await pool.query(
       `SELECT ar.*, o.owner_admin_id AS order_owner_admin_id,
               p.name AS product_name, p.category AS product_category,
-              pa.platform, pa.product_name AS account_product_name,
+              pa.platform, pa.product_name AS account_product_name, pa.account_email,
               COALESCE(ar.owner_admin_id, o.owner_admin_id, pa.owner_admin_id, p.owner_admin_id) AS resolved_owner_admin_id
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
@@ -3798,11 +3849,17 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
     const platform = report.platform || report.account_product_name || report.reported_platform || report.product_name || report.product_category || "";
+    const failedAccountEmail = String(report.account_email || "").trim();
 
     const optionsResult = await pool.query(
       `SELECT id, platform, product_name, account_email, profile_name, profile_pin, created_at
        FROM platform_accounts
        WHERE status = 'available'
+         AND (
+           $3::text = ''
+           OR lower(regexp_replace(trim(COALESCE(account_email, '')), '\\s+', '', 'g')) <>
+              lower(regexp_replace(trim($3), '\\s+', '', 'g'))
+         )
          AND (
            lower(platform) = lower($1)
            OR lower(product_name) = lower($1)
@@ -3819,7 +3876,7 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
          )
        ORDER BY id ASC
        LIMIT 30`,
-      [platform, ownerAdminId]
+      [platform, ownerAdminId, failedAccountEmail]
     );
 
     res.json({ report_id: reportId, platform, options: optionsResult.rows });
@@ -3853,6 +3910,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
     await client.query("BEGIN");
     transactionStarted = true;
 
+    const selectedReportedAccountId = Number(reported_account_id || 0);
+
     const reportResult = await client.query(
       `SELECT ar.*, o.amount, o.product_id, o.created_at AS order_created_at,
               o.owner_admin_id AS order_owner_admin_id,
@@ -3860,14 +3919,15 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
               p.owner_admin_id AS product_owner_admin_id,
               pa.platform, pa.product_name AS account_product_name, pa.account_email,
               pa.owner_admin_id AS reported_account_owner_admin_id,
+              COALESCE(NULLIF($2::int, 0), ar.reported_account_id) AS resolved_reported_account_id,
               COALESCE(ar.owner_admin_id, o.owner_admin_id, p.owner_admin_id, pa.owner_admin_id) AS resolved_owner_admin_id
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        JOIN products p ON p.id = o.product_id
-       LEFT JOIN platform_accounts pa ON pa.id = ar.reported_account_id
+       LEFT JOIN platform_accounts pa ON pa.id = COALESCE(NULLIF($2::int, 0), ar.reported_account_id)
        WHERE ar.id = $1
        FOR UPDATE OF ar, o`,
-      [reportId]
+      [reportId, selectedReportedAccountId]
     );
 
     const report = reportResult.rows[0];
@@ -3892,6 +3952,9 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
     // ----------------------------------------------
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
+    const failedAccountOwnerAdminId = Number(report.reported_account_owner_admin_id || 0) || null;
+    const failedAccountEmail = String(report.account_email || "").trim();
+    const resolvedReportedAccountId = Number(report.resolved_reported_account_id || 0);
     const replacementProductName = report.account_product_name || report.product_name || "";
     const replacementPlatform = report.platform || report.product_category || report.product_name || "";
 
@@ -3937,19 +4000,29 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
         availableResult = await client.query(
           `SELECT * FROM platform_accounts
            WHERE id = $1 AND status = 'available'
+             AND (
+               $4::text = ''
+               OR lower(regexp_replace(trim(COALESCE(account_email, '')), '\\s+', '', 'g')) <>
+                  lower(regexp_replace(trim($4), '\\s+', '', 'g'))
+             )
              AND (lower(platform) = lower($2) OR lower(product_name) = lower($2) OR lower(platform) LIKE '%' || lower($2) || '%' OR lower($2) LIKE '%' || lower(platform) || '%' OR lower(product_name) LIKE '%' || lower($2) || '%' OR lower($2) LIKE '%' || lower(product_name) || '%')
              AND (owner_admin_id = $3 OR owner_admin_id IS NULL OR owner_admin_id = 0 OR $3::int IS NULL)
            LIMIT 1 FOR UPDATE`,
-          [Number(replacement_account_id), replacementPlatform, ownerAdminId]
+          [Number(replacement_account_id), replacementPlatform, ownerAdminId, failedAccountEmail]
         );
       } else {
         availableResult = await client.query(
           `SELECT * FROM platform_accounts
            WHERE status = 'available'
+             AND (
+               $3::text = ''
+               OR lower(regexp_replace(trim(COALESCE(account_email, '')), '\\s+', '', 'g')) <>
+                  lower(regexp_replace(trim($3), '\\s+', '', 'g'))
+             )
              AND (lower(platform) = lower($1) OR lower(product_name) = lower($1) OR lower(platform) LIKE '%' || lower($1) || '%' OR lower($1) LIKE '%' || lower(platform) || '%' OR lower(product_name) LIKE '%' || lower($1) || '%' OR lower($1) LIKE '%' || lower(product_name) || '%')
              AND (owner_admin_id = $2 OR owner_admin_id IS NULL OR owner_admin_id = 0 OR $2::int IS NULL)
            ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-          [replacementPlatform, ownerAdminId]
+          [replacementPlatform, ownerAdminId, failedAccountEmail]
         );
       }
 
@@ -3982,12 +4055,11 @@ if (!(manual === true || manual === "true")) {
 
      const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category, report.order_created_at);
     
-       if (report.reported_account_id) {
-      await client.query(
-        `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
-        [report.reported_account_id]
-      );
-    }
+    const failedGroupResult = await markFailedAccountEmailGroup(client, {
+      reportedAccountId: resolvedReportedAccountId,
+      accountEmail: failedAccountEmail,
+      ownerAdminId: failedAccountOwnerAdminId
+    });
 
     await client.query(
       `UPDATE orders
@@ -4011,10 +4083,23 @@ if (!(manual === true || manual === "true")) {
     await client.query("COMMIT");
     transactionStarted = false;
 
+    const baseMessage = manual === true || manual === "true"
+      ? "Cuenta manual agregada y reemplazada correctamente"
+      : "Cuenta reemplazada correctamente";
+    const siblingMessage = failedGroupResult.availableSiblingsMarked > 0
+      ? ` Se marcaron también ${failedGroupResult.availableSiblingsMarked} cuenta(s) disponible(s) con el mismo correo como dañada(s).`
+      : "";
+
     res.json({
-      message: manual === true || manual === "true" ? "Cuenta manual agregada y reemplazada correctamente" : "Cuenta reemplazada correctamente",
+      message: `${baseMessage}.${siblingMessage}`.replace("correctamente..", "correctamente."),
       delivered_account_data: deliveredAccountData,
-      platform_account_id: newAccount.id
+      platform_account_id: newAccount.id,
+      failed_email_group: {
+        email: failedAccountEmail,
+        reported_account_marked: failedGroupResult.reportedAccountMarked,
+        available_siblings_marked: failedGroupResult.availableSiblingsMarked,
+        total_marked: failedGroupResult.totalMarked
+      }
     });
   } catch (err) {
     if (transactionStarted) {
