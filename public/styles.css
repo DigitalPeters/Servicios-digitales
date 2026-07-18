@@ -1969,3 +1969,151 @@
 @media(max-width:700px){
   .lazy-media-frame{min-height:62vh}
 }
+
+
+/* ===== Entrega inmediata de compra (v2) ===== */
+body.modal-open{
+  overflow:hidden;
+}
+
+.modal-entrega{
+  isolation:isolate;
+}
+
+.modal-entrega-card{
+  width:min(760px, 100%);
+  max-height:min(92vh, 860px);
+  overflow:auto;
+  border:1px solid rgba(34,197,94,.35);
+  border-radius:24px;
+  box-shadow:0 28px 80px rgba(2,6,23,.38);
+  padding:28px;
+  text-align:left;
+}
+
+.modal-entrega-success-icon{
+  width:58px;
+  height:58px;
+  display:grid;
+  place-items:center;
+  margin:0 auto 12px;
+  border-radius:999px;
+  background:#dcfce7;
+  color:#15803d;
+  border:1px solid #86efac;
+  font-size:34px;
+  font-weight:900;
+}
+
+.modal-entrega-card h2{
+  padding-right:44px;
+  text-align:center;
+  font-size:clamp(22px, 4vw, 30px);
+}
+
+.modal-entrega-subtitle{
+  margin:0 0 16px;
+  text-align:center;
+  color:#475569;
+}
+
+#modalEntregaInmediataText{
+  width:100%;
+  min-height:280px;
+  max-height:46vh;
+  resize:vertical;
+  padding:16px;
+  border:1px solid #cbd5e1;
+  border-radius:14px;
+  background:#f8fafc;
+  color:#0f172a;
+  line-height:1.55;
+  font-size:14px;
+  box-shadow:inset 0 1px 2px rgba(15,23,42,.05);
+}
+
+.modal-entrega-account-chooser{
+  margin-top:14px;
+  padding:14px;
+  border:1px solid #dbeafe;
+  border-radius:14px;
+  background:#eff6ff;
+}
+
+.modal-entrega-account-chooser.hidden{
+  display:none!important;
+}
+
+.modal-entrega-account-chooser select{
+  width:100%;
+}
+
+.modal-entrega-actions{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:10px;
+  margin-top:16px;
+}
+
+.modal-entrega-actions button{
+  width:100%;
+  min-height:48px;
+  border-radius:12px;
+  font-weight:900;
+}
+
+.modal-entrega-copy{
+  border-color:#2563eb!important;
+  color:#1d4ed8!important;
+  background:#eff6ff!important;
+}
+
+.modal-entrega-report{
+  border:1px solid #dc2626;
+  background:#fee2e2;
+  color:#991b1b;
+}
+
+.modal-entrega-report:hover:not(:disabled){
+  background:#fecaca;
+}
+
+.modal-entrega-report:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+.modal-entrega-confirm{
+  background:#16a34a;
+  border-color:#15803d;
+}
+
+.modal-entrega-history-note{
+  margin:14px 0 0;
+  text-align:center;
+  color:#64748b;
+  font-size:13px;
+}
+
+@media (max-width:680px){
+  .modal-entrega{
+    padding:10px;
+    align-items:flex-end;
+  }
+
+  .modal-entrega-card{
+    width:100%;
+    max-height:94vh;
+    border-radius:22px 22px 14px 14px;
+    padding:22px 16px 18px;
+  }
+
+  #modalEntregaInmediataText{
+    min-height:250px;
+    max-height:43vh;
+  }
+
+  .modal-entrega-actions{
+    grid-template-columns:1fr;
+  }
+}

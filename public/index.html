@@ -14,7 +14,7 @@
   <style>
     html.session-token-present #authSection { display: none !important; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
   <div id="message" class="message"></div>
@@ -676,26 +676,12 @@
 <script src="shared-utils.js?v=2"></script>
 <script src="auth-session.js?v=4"></script>
 <script src="nav-dashboard.js?v=3"></script>
-<script src="product-shop.js?v=2"></script>
-<script src="user-orders-balance.js?v=3"></script>
+<script src="product-shop.js?v=3"></script>
+<script src="user-orders-balance.js?v=4"></script>
 <script src="admin-commerce.js?v=3"></script>
 <script src="dashboard-stock-alerts.js?v=1"></script>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 <script src="admin-users-distributor.js?v=8"></script>
-
-  <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
-    <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>
-    <div class="modal-entrega-card" role="dialog" aria-modal="true" aria-labelledby="modalEntregaTitulo">
-      <button class="modal-entrega-close" type="button" onclick="closeModalEntregaInmediata()" aria-label="Cerrar entrega inmediata">✕</button>
-      <h2 id="modalEntregaTitulo">🎉 Entrega Inmediata Completada</h2>
-      <p class="small-text">Copia estos datos y guárdalos en un lugar seguro.</p>
-      <textarea id="modalEntregaInmediataText" readonly></textarea>
-      <div class="modal-entrega-actions">
-        <button class="outline-btn" type="button" onclick="copyEntregaInmediataData()">📋 Copiar datos</button>
-        <button class="modal-entrega-confirm" type="button" onclick="closeModalEntregaInmediata()">✅ Datos Copiados, Cerrar</button>
-      </div>
-    </div>
-  </div>
 
   <div id="modalStatusCSV" class="modal-status-csv hidden" aria-hidden="true">
     <div class="modal-status-csv-backdrop"></div>
@@ -716,6 +702,28 @@
 
   </div>
 </div>
+
+  <div id="modalEntregaInmediata" class="modal-entrega hidden" aria-hidden="true">
+    <div class="modal-entrega-backdrop" onclick="closeModalEntregaInmediata()"></div>
+    <div class="modal-entrega-card" role="dialog" aria-modal="true" aria-labelledby="modalEntregaTitulo" aria-describedby="modalEntregaOrderLabel">
+      <button class="modal-entrega-close" type="button" onclick="closeModalEntregaInmediata()" aria-label="Cerrar entrega inmediata">✕</button>
+      <div class="modal-entrega-success-icon" aria-hidden="true">✓</div>
+      <h2 id="modalEntregaTitulo">Entrega inmediata completada</h2>
+      <p id="modalEntregaOrderLabel" class="modal-entrega-subtitle">Guarda estos datos en un lugar seguro.</p>
+      <textarea id="modalEntregaInmediataText" readonly aria-label="Datos de la cuenta entregada"></textarea>
+      <div id="modalEntregaAccountChooser" class="modal-entrega-account-chooser hidden">
+        <label class="field-label" for="modalEntregaAccountSelect">Cuenta que deseas reportar</label>
+        <select id="modalEntregaAccountSelect" onchange="onImmediateDeliveryAccountChange()"></select>
+        <p class="small-text">El selector aparece únicamente cuando el pedido incluye varias cuentas.</p>
+      </div>
+      <div class="modal-entrega-actions">
+        <button id="modalEntregaCopyBtn" class="outline-btn modal-entrega-copy" type="button" onclick="copyEntregaInmediataData()">📋 Copiar datos</button>
+        <button id="modalEntregaReportBtn" class="modal-entrega-report" type="button" onclick="reportEntregaInmediata()">⚠ Reportar falla</button>
+        <button class="modal-entrega-confirm" type="button" onclick="closeModalEntregaInmediata()">Cerrar</button>
+      </div>
+      <p class="modal-entrega-history-note">Si cierras esta ventana, la entrega seguirá disponible en <b>Mis pedidos</b>.</p>
+    </div>
+  </div>
 
 </body>
 </html>

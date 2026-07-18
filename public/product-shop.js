@@ -244,8 +244,17 @@ async function buyProduct(productId) {
 
     closeProductModal();
     showMessage(data.message || 'Compra realizada');
-    if (data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
-    showSection('orders');
+
+    const hasImmediateDelivery = Boolean(data?.delivered_account_data && data?.immediate_delivery !== false);
+    if (hasImmediateDelivery && typeof window.openModalEntregaInmediata === 'function') {
+      window.openModalEntregaInmediata({
+        ...data,
+        product_name: data.product_name || product.name
+      });
+    } else {
+      showSection('orders');
+    }
+
     loadMyOrders().catch((e) => console.warn('Error recargando pedidos:', e));
     if (allProducts.length) {
       loadProducts().catch((e) => console.warn('Error recargando productos:', e));

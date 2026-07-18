@@ -1770,8 +1770,22 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       });
 
       return res.json({
-        message: "Combo comprado correctamente. Tus cuentas fueron entregadas automáticamente en Mis pedidos.",
-        delivered_account_data: deliveredAccountData
+        message: "Combo comprado correctamente. Tus cuentas fueron entregadas automáticamente.",
+        immediate_delivery: true,
+        order_id: newOrderId,
+        product_id: Number(productId),
+        product_name: product.name || 'Combo',
+        amount: price,
+        delivered_account_data: deliveredAccountData,
+        assigned_account_id: assignedAccounts[0]?.id || null,
+        assigned_accounts: assignedAccounts.map(account => ({
+          id: Number(account.id),
+          platform: account.platform || account.product_name || '',
+          product_name: account.product_name || account.platform || '',
+          account_email: account.account_email || '',
+          profile_name: account.profile_name || '',
+          reportable: true
+        }))
       });
     }
 
@@ -1916,7 +1930,21 @@ return res.json({
     message: assignedAccount
         ? "Cuenta entregada correctamente."
         : "Pedido enviado correctamente.",
-    delivered_account_data: deliveredAccountData
+    immediate_delivery: Boolean(assignedAccount && deliveredAccountData),
+    order_id: newOrderId,
+    product_id: Number(productId),
+    product_name: product.name || productName,
+    amount: price,
+    delivered_account_data: deliveredAccountData,
+    assigned_account_id: assignedAccount ? Number(assignedAccount.id) : null,
+    assigned_accounts: assignedAccount ? [{
+      id: Number(assignedAccount.id),
+      platform: assignedAccount.platform || assignedAccount.product_name || productName || productCategory || '',
+      product_name: assignedAccount.product_name || productName || '',
+      account_email: assignedAccount.account_email || '',
+      profile_name: assignedAccount.profile_name || '',
+      reportable: assignedAccount.isReusableSale !== true
+    }] : []
 });
 
 } catch (err) {

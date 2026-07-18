@@ -2600,11 +2600,20 @@ window.buyProduct = async function(productId){
 
     if (typeof closeProductModal === 'function') closeProductModal();
     showMessage(data.message || 'Compra realizada');
-    if(data.delivered_account_data) openModalEntregaInmediata(data.delivered_account_data);
 
-    // Ir a pedidos inmediatamente. showSection ya inicia la carga de pedidos y
-    // refreshAfterPurchase reutiliza esa misma promesa para no duplicar consultas.
-    showSection('orders');
+    const hasImmediateDelivery = Boolean(data?.delivered_account_data && data?.immediate_delivery !== false);
+    if (hasImmediateDelivery && typeof window.openModalEntregaInmediata === 'function') {
+      window.openModalEntregaInmediata({
+        ...data,
+        product_name: data.product_name || product.name
+      });
+    } else {
+      // Los pedidos manuales continúan enviando al usuario a Mis pedidos.
+      showSection('orders');
+    }
+
+    // Actualiza pedidos, stock y saldo en segundo plano sin cerrar el modal ni
+    // reconstruir toda la aplicación.
     void refreshAfterPurchase();
   } catch(e) {
     showMessage(e.message || 'Error comprando producto','error');

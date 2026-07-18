@@ -515,13 +515,139 @@ function copyAccountDataFromOrder(orderId, source = 'my') {
   copyToClipboard(text, 'Datos de cuenta copiados');
 }
 
-function openModalEntregaInmediata(text) {
+const immediateDeliveryModalState = {
+  text: '',
+  orderId: 0,
+  productName: '',
+  assignedAccounts: [],
+  selectedAccountId: 0,
+  previousFocus: null
+};
+
+function normalizeImmediateDeliveryPayload(payload) {
+  if (typeof payload === 'string') {
+    return {
+      text: payload,
+      orderId: 0,
+      productName: '',
+      assignedAccounts: []
+    };
+  }
+
+  const source = payload && typeof payload === 'object' ? payload : {};
+  const accounts = Array.isArray(source.assigned_accounts)
+    ? source.assigned_accounts
+        .map((account) => ({
+          id: Number(account?.id || 0),
+          platform: String(account?.platform || account?.product_name || '').trim(),
+          product_name: String(account?.product_name || account?.platform || '').trim(),
+          account_email: String(account?.account_email || '').trim(),
+          profile_name: String(account?.profile_name || '').trim(),
+          reportable: account?.reportable !== false
+        }))
+        .filter((account) => account.id > 0)
+    : [];
+
+  const fallbackAccountId = Number(source.assigned_account_id || 0);
+  if (!accounts.length && fallbackAccountId > 0) {
+    accounts.push({
+      id: fallbackAccountId,
+      platform: String(source.product_name || '').trim(),
+      product_name: String(source.product_name || '').trim(),
+      account_email: extractAccountEmailFromText(source.delivered_account_data || ''),
+      profile_name: '',
+      reportable: source.reportable !== false
+    });
+  }
+
+  return {
+    text: String(source.delivered_account_data || source.text || '').trim(),
+    orderId: Number(source.order_id || 0),
+    productName: String(source.product_name || '').trim(),
+    assignedAccounts: accounts
+  };
+}
+
+function ensureImmediateDeliveryModalAtBodyRoot() {
   const modal = document.getElementById('modalEntregaInmediata');
+  if (modal && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+  return modal;
+}
+
+function renderImmediateDeliveryAccountChooser(accounts) {
+  const wrap = document.getElementById('modalEntregaAccountChooser');
+  const select = document.getElementById('modalEntregaAccountSelect');
+  if (!wrap || !select) return;
+
+  if (!Array.isArray(accounts) || accounts.length <= 1) {
+    wrap.classList.add('hidden');
+    select.innerHTML = '';
+    immediateDeliveryModalState.selectedAccountId = Number(accounts?.[0]?.id || 0);
+    return;
+  }
+
+  select.innerHTML = accounts.map((account) => {
+    const label = [
+      account.platform || account.product_name || 'Plataforma',
+      account.account_email,
+      account.profile_name ? `Perfil: ${account.profile_name}` : ''
+    ].filter(Boolean).join(' · ');
+    return `<option value="${Number(account.id)}">${safeText(label)}</option>`;
+  }).join('');
+
+  immediateDeliveryModalState.selectedAccountId = Number(accounts[0]?.id || 0);
+  wrap.classList.remove('hidden');
+}
+
+function openModalEntregaInmediata(payload) {
+  const normalized = normalizeImmediateDeliveryPayload(payload);
+  if (!normalized.text) return false;
+
+  const modal = ensureImmediateDeliveryModalAtBodyRoot();
   const box = document.getElementById('modalEntregaInmediataText');
-  if (!modal || !box) return;
-  box.value = String(text || '').trim();
+  const title = document.getElementById('modalEntregaTitulo');
+  const orderLabel = document.getElementById('modalEntregaOrderLabel');
+  const reportButton = document.getElementById('modalEntregaReportBtn');
+  if (!modal || !box) return false;
+
+  immediateDeliveryModalState.text = normalized.text;
+  immediateDeliveryModalState.orderId = normalized.orderId;
+  immediateDeliveryModalState.productName = normalized.productName;
+  immediateDeliveryModalState.assignedAccounts = normalized.assignedAccounts;
+  immediateDeliveryModalState.selectedAccountId = Number(normalized.assignedAccounts[0]?.id || 0);
+  immediateDeliveryModalState.previousFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  box.value = normalized.text;
+  if (title) {
+    title.textContent = normalized.productName
+      ? `🎉 ${normalized.productName} entregado`
+      : '🎉 Entrega inmediata completada';
+  }
+  if (orderLabel) {
+    orderLabel.textContent = normalized.orderId > 0
+      ? `Pedido #${normalized.orderId} · Guarda estos datos en un lugar seguro.`
+      : 'Guarda estos datos en un lugar seguro.';
+  }
+
+  renderImmediateDeliveryAccountChooser(normalized.assignedAccounts);
+
+  if (reportButton) {
+    const canReport = normalized.assignedAccounts.some((account) => Number(account.id) > 0 && account.reportable !== false);
+    reportButton.disabled = !canReport;
+    reportButton.title = canReport
+      ? 'Abrir el formulario con esta cuenta seleccionada'
+      : 'Esta entrega no tiene una cuenta reportable asociada';
+  }
+
   modal.classList.remove('hidden');
   modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('modal-open');
+  requestAnimationFrame(() => document.getElementById('modalEntregaCopyBtn')?.focus());
+  return true;
 }
 
 function closeModalEntregaInmediata() {
@@ -529,13 +655,92 @@ function closeModalEntregaInmediata() {
   if (!modal) return;
   modal.classList.add('hidden');
   modal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('modal-open');
+
+  const previous = immediateDeliveryModalState.previousFocus;
+  immediateDeliveryModalState.previousFocus = null;
+  if (previous && document.contains(previous) && typeof previous.focus === 'function') {
+    previous.focus();
+  }
 }
 
 function copyEntregaInmediataData() {
-  const text = document.getElementById('modalEntregaInmediataText')?.value || '';
+  const text = immediateDeliveryModalState.text || document.getElementById('modalEntregaInmediataText')?.value || '';
   if (!text.trim()) return showMessage('No hay datos para copiar', 'error');
   copyToClipboard(text, 'Datos de entrega copiados');
 }
+
+async function reportEntregaInmediata() {
+  const accounts = (immediateDeliveryModalState.assignedAccounts || []).filter((account) => account.reportable !== false);
+  const selectedFromModal = Number(document.getElementById('modalEntregaAccountSelect')?.value || 0);
+  const accountId = selectedFromModal || Number(immediateDeliveryModalState.selectedAccountId || accounts[0]?.id || 0);
+  const account = accounts.find((item) => Number(item.id) === accountId) || accounts[0] || null;
+
+  if (!accountId) {
+    showMessage('No pude identificar la cuenta comprada para reportarla', 'error');
+    return;
+  }
+
+  closeModalEntregaInmediata();
+  showSection('reports');
+
+  try {
+    if (typeof window.ensureReportSelectStable === 'function') {
+      window.ensureReportSelectStable();
+    }
+    if (typeof window.loadReportableAccountsStable === 'function') {
+      await window.loadReportableAccountsStable();
+    }
+
+    const reportSelect = document.getElementById('reporteCuentaSelect');
+    if (reportSelect) {
+      reportSelect.value = String(accountId);
+      if (reportSelect.value === String(accountId)) {
+        reportSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+
+    const emailInput = document.getElementById('reporteCorreo');
+    const deliveredEmail = String(account?.account_email || extractAccountEmailFromText(immediateDeliveryModalState.text) || '').trim();
+    if (emailInput && deliveredEmail) emailInput.value = deliveredEmail;
+
+    const description = document.getElementById('reporteExplicacion');
+    if (description) {
+      description.value = '';
+      requestAnimationFrame(() => description.focus());
+    }
+
+    showMessage('Cuenta comprada seleccionada. Describe la falla para enviar el reporte.');
+  } catch (error) {
+    showMessage(error?.message || 'No se pudo preparar el reporte de esta cuenta', 'error');
+  }
+}
+
+function onImmediateDeliveryAccountChange() {
+  immediateDeliveryModalState.selectedAccountId = Number(document.getElementById('modalEntregaAccountSelect')?.value || 0);
+}
+
+function handleImmediateDeliveryModalKeydown(event) {
+  const modal = document.getElementById('modalEntregaInmediata');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeModalEntregaInmediata();
+  }
+}
+
+document.addEventListener('keydown', handleImmediateDeliveryModalKeydown);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ensureImmediateDeliveryModalAtBodyRoot, { once: true });
+} else {
+  ensureImmediateDeliveryModalAtBodyRoot();
+}
+
+window.openModalEntregaInmediata = openModalEntregaInmediata;
+window.closeModalEntregaInmediata = closeModalEntregaInmediata;
+window.copyEntregaInmediataData = copyEntregaInmediataData;
+window.reportEntregaInmediata = reportEntregaInmediata;
+window.onImmediateDeliveryAccountChange = onImmediateDeliveryAccountChange;
 
 function extractAccountEmailFromText(text) {
   const value = String(text || '');
