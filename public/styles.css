@@ -2117,3 +2117,298 @@ body.modal-open{
     grid-template-columns:1fr;
   }
 }
+
+/* ===== Ajuste final exclusivo para celular: navegación y dashboard ===== */
+@media (max-width: 768px){
+  html,
+  body{
+    width:100%;
+    max-width:100%;
+    overflow-x:hidden;
+  }
+
+  #appSection,
+  #appSection .app,
+  #appSection .main,
+  #appSection .section,
+  #appSection .panel,
+  #appSection .item,
+  #appSection .row,
+  #appSection .two-row,
+  #appSection .three-row,
+  #appSection .account-grid,
+  #appSection .grid-cards,
+  #appSection .dashboard-actions-grid{
+    min-width:0;
+    max-width:100%;
+  }
+
+  #appSection{
+    overflow-x:hidden;
+  }
+
+  #appSection .mobile-header,
+  #appSection .sidebar,
+  #appSection .topbar-user{
+    display:none!important;
+  }
+
+  #appSection .topbar{
+    position:fixed!important;
+    top:calc(env(safe-area-inset-top, 0px) + 8px)!important;
+    left:8px!important;
+    right:8px!important;
+    width:auto!important;
+    min-height:48px;
+    margin:0!important;
+    padding:7px 8px!important;
+    display:grid!important;
+    grid-template-columns:minmax(0, 1fr) auto auto!important;
+    align-items:center!important;
+    gap:6px!important;
+    border-radius:16px!important;
+    z-index:12000!important;
+    background:rgba(15,23,42,.92)!important;
+    border:1px solid rgba(148,163,184,.32)!important;
+    box-shadow:0 12px 28px rgba(2,6,23,.38)!important;
+    backdrop-filter:blur(16px);
+    -webkit-backdrop-filter:blur(16px);
+  }
+
+  #appSection .topbar-left-actions{
+    display:block!important;
+    width:auto!important;
+    min-width:0;
+    margin:0!important;
+  }
+
+  #appSection .top-actions{
+    display:contents!important;
+  }
+
+  #appSection .topbar-home-btn,
+  #appSection .logout-top-btn,
+  #appSection .balance-pill{
+    width:auto!important;
+    min-width:0;
+    min-height:34px;
+    margin:0!important;
+    padding:7px 9px!important;
+    border-radius:10px!important;
+    font-size:11px!important;
+    line-height:1.1;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  #appSection .topbar-home-btn{
+    justify-self:start;
+  }
+
+  #appSection .balance-pill{
+    justify-self:end;
+    display:flex;
+    align-items:center;
+    background:rgba(30,41,59,.96)!important;
+    color:#f8fafc!important;
+  }
+
+  #appSection .logout-top-btn{
+    justify-self:end;
+  }
+
+  #appSection .main{
+    width:100%!important;
+    margin-left:0!important;
+    padding:calc(env(safe-area-inset-top, 0px) + 72px) 10px calc(34px + env(safe-area-inset-bottom, 0px))!important;
+    overflow-x:hidden;
+  }
+
+  #section-dashboard .dashboard-mini-banners{
+    width:100%;
+    margin:0 0 10px!important;
+    overflow:hidden;
+  }
+
+  #section-dashboard .dashboard-mini-banners-carousel{
+    --mini-banner-gap:7px;
+    --mini-banner-card-width:clamp(116px, 38vw, 142px);
+    width:100%!important;
+    max-width:360px;
+    padding:6px!important;
+    border-radius:14px;
+  }
+
+  #section-dashboard .dashboard-mini-banner-item{
+    height:90px;
+    aspect-ratio:auto;
+    border-radius:10px;
+  }
+
+  #section-dashboard .dashboard-mini-banner-item img{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    object-position:center;
+  }
+
+  #section-dashboard .mini-banner-below-title{
+    min-height:24px;
+    margin-top:4px;
+    font-size:10px;
+    line-height:1.2;
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+    overflow:hidden;
+  }
+
+  #section-dashboard.dashboard-premium > .grid-cards,
+  #section-dashboard.dashboard-premium .dashboard-actions-grid{
+    display:grid!important;
+    grid-template-columns:repeat(2, minmax(0, 1fr))!important;
+    gap:9px!important;
+    margin-bottom:12px;
+  }
+
+  #section-dashboard .dashboard-actions-center{
+    padding:10px!important;
+    margin-bottom:12px!important;
+    border-radius:16px!important;
+  }
+
+  #section-dashboard.dashboard-premium .dash-card,
+  #section-dashboard .dashboard-actions-grid .dash-card{
+    min-width:0;
+    min-height:96px!important;
+    margin:0!important;
+    padding:11px 8px!important;
+    border-radius:15px!important;
+    display:flex;
+    flex-direction:column;
+    align-items:center!important;
+    justify-content:center;
+    gap:7px!important;
+    text-align:center;
+    overflow:hidden;
+    box-shadow:0 8px 18px rgba(15,23,42,.10)!important;
+  }
+
+  #section-dashboard.dashboard-premium .dash-card > div,
+  #section-dashboard .dashboard-actions-grid .dash-card > div{
+    min-width:0;
+    max-width:100%;
+  }
+
+  #section-dashboard.dashboard-premium .dash-card .dash-icon,
+  #section-dashboard .dashboard-actions-grid .dash-card .dash-icon{
+    flex:0 0 40px;
+    width:40px!important;
+    height:40px!important;
+    border-radius:12px!important;
+    font-size:20px!important;
+    line-height:1;
+  }
+
+  #section-dashboard.dashboard-premium .dash-card .dash-label,
+  #section-dashboard .dashboard-actions-grid .dash-card .dash-label{
+    max-width:100%;
+    color:#1e293b;
+    font-size:13px!important;
+    line-height:1.18;
+    font-weight:850;
+    overflow-wrap:anywhere;
+    word-break:normal;
+  }
+
+  #section-dashboard.dashboard-premium .dash-card .dash-value,
+  #section-dashboard.dashboard-premium .dash-card .dash-value span,
+  #section-dashboard .dashboard-actions-grid .dash-card .dash-value,
+  #section-dashboard .dashboard-actions-grid .dash-card .dash-value span{
+    max-width:100%;
+    font-size:22px!important;
+    line-height:1.05;
+    overflow-wrap:anywhere;
+  }
+
+  #section-dashboard.dashboard-premium .dash-card .small-text,
+  #section-dashboard .dashboard-actions-grid .dash-card .small-text{
+    max-width:100%;
+    font-size:10.5px!important;
+    line-height:1.2;
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+    overflow:hidden;
+    overflow-wrap:anywhere;
+  }
+
+  #appSection img,
+  #appSection video,
+  #appSection canvas,
+  #appSection svg,
+  #appSection iframe{
+    max-width:100%;
+  }
+
+  #appSection input,
+  #appSection textarea,
+  #appSection select,
+  #appSection button{
+    min-width:0;
+    max-width:100%;
+  }
+
+  #appSection .panel-head,
+  #appSection .tools,
+  #appSection .product-header,
+  #appSection .quarantine-row{
+    min-width:0;
+    max-width:100%;
+    overflow-wrap:anywhere;
+  }
+
+  #appSection .table-wrap{
+    width:100%;
+    max-width:100%;
+    overflow-x:hidden;
+  }
+
+  #appSection table{
+    width:100%!important;
+    max-width:100%;
+    table-layout:fixed;
+  }
+
+  #appSection table th,
+  #appSection table td{
+    max-width:0;
+    padding:8px 6px;
+    font-size:11px;
+    white-space:normal!important;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+  }
+
+  #appSection pre,
+  #appSection code,
+  #appSection .order-data,
+  #appSection .response-text,
+  #appSection .account-value,
+  #appSection .product-name,
+  #appSection .compact-title,
+  #appSection .compact-meta{
+    max-width:100%;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+  }
+
+  #appSection .modal-card,
+  #appSection .modal-content,
+  #appSection .modal-box,
+  #appSection .modal-entrega-card{
+    max-width:calc(100vw - 20px)!important;
+  }
+}

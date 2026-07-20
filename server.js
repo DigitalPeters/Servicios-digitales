@@ -864,6 +864,7 @@ async function initDatabase() {
       assigned_order_id INTEGER,
       assigned_user_id INTEGER,
       delivered_at TIMESTAMP,
+      purchase_price NUMERIC,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
@@ -959,6 +960,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_order_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS purchase_price NUMERIC`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS manual_replacement_source TEXT DEFAULT ''`);
