@@ -4657,7 +4657,7 @@ function parseInventoryCsvText(text){
 
   const separator=detectCsvSeparator(lines[0]);
   const headers=parseCsvLine(lines[0], separator).map(cleanCsvHeader);
-  const expected=['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte'];
+  const expected=['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte','precio_compra'];
   const missing=expected.filter(h=>!headers.includes(h));
   if(missing.length){
     throw new Error(`Encabezados faltantes en CSV: ${missing.join(', ')}`);
@@ -4731,6 +4731,17 @@ function csvEscape(value){
   return `"${String(value ?? '').replace(/"/g,'""')}"`;
 }
 
+function formatInventoryCsvDate(value){
+  const raw=String(value ?? '').trim();
+  if(!raw) return '';
+
+  const isoMatch=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+
+  const localMatch=raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return localMatch ? raw : '';
+}
+
 async function downloadInventoryCsv(){
   try{
     const rows = [];
@@ -4744,7 +4755,7 @@ async function downloadInventoryCsv(){
       page += 1;
     }while(page <= totalPages);
 
-    const headers = ['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte'];
+    const headers = ['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte','precio_compra'];
 
     const lines = [headers.map(csvEscape).join(',')];
     (Array.isArray(rows) ? rows : []).forEach(acc => {
@@ -4754,9 +4765,10 @@ async function downloadInventoryCsv(){
         acc.account_password || '',
         acc.profile_name || '',
         acc.profile_pin || '',
-        acc.official_purchase_date ? String(acc.official_purchase_date).slice(0,10) : '',
+        formatInventoryCsvDate(acc.official_purchase_date),
         acc.platform || acc.product_name || '',
-        acc.access_url || ''
+        acc.access_url || '',
+        acc.purchase_price ?? ''
       ].map(csvEscape).join(',');
       lines.push(line);
     });

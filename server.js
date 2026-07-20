@@ -705,6 +705,22 @@ function normalizeProductType(value) {
   return ["streaming_auto", "manual", "combo_auto"].includes(clean) ? clean : "streaming_auto";
 }
 
+function getPlatformAccountPurchaseCost(account, fallbackCost = 0) {
+  const rawPurchasePrice = account?.purchase_price;
+
+  if (
+    rawPurchasePrice !== null &&
+    rawPurchasePrice !== undefined &&
+    String(rawPurchasePrice).trim() !== ""
+  ) {
+    const purchasePrice = Number(rawPurchasePrice);
+    if (Number.isFinite(purchasePrice)) return Math.max(0, purchasePrice);
+  }
+
+  const fallback = Number(fallbackCost);
+  return Number.isFinite(fallback) ? Math.max(0, fallback) : 0;
+}
+
 async function getEffectiveProductPrice(client, user, product) {
   const fallbackPrice = Number(product.price || 0);
 
@@ -1772,7 +1788,10 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [price, userId]);
       }
 
-      const comboCost = comboItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost_price || 0)), 0);
+      const comboCost = assignedAccounts.reduce((sum, account, index) => {
+        const fallbackCost = comboItems[index]?.cost_price;
+        return sum + getPlatformAccountPurchaseCost(account, fallbackCost);
+      }, 0);
 
       const orderInsertResult = await client.query(
         `INSERT INTO orders
@@ -1939,7 +1958,9 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         deliveredAccountData,
         product.name || productName,
         product.category || productCategory,
-        Math.max(0, Number(product.cost_price || 0)),
+        assignedAccount
+          ? getPlatformAccountPurchaseCost(assignedAccount, product.cost_price)
+          : Math.max(0, Number(product.cost_price || 0)),
         viewerContext?.owner_admin_id || null
       ]
     );
@@ -2370,8 +2391,56 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     return semicolonCols > commaCols ? ';' : ',';
   };
 
+  const normalizeInventoryDate = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return null;
+
+    let year;
+    let month;
+    let day;
+    let match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (match) {
+      year = Number(match[1]);
+      month = Number(match[2]);
+      day = Number(match[3]);
+    } else {
+      match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!match) return undefined;
+      day = Number(match[1]);
+      month = Number(match[2]);
+      year = Number(match[3]);
+    }
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      return undefined;
+    }
+
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  const normalizePurchasePrice = (value) => {
+    const text = String(value ?? "").trim();
+    if (!text) return null;
+
+    const normalized = text
+      .replace(/\s+/g, "")
+      .replace(/(?:MXN|\$)/gi, "")
+      .replace(',', '.');
+
+    if (!/^\d+(?:\.\d+)?$/.test(normalized)) return undefined;
+
+    const amount = Number(normalized);
+    return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
+  };
+
   const parseRowsFromCsvText = (csvText) => {
-    const expected = ["producto", "correo", "contrasena", "perfil", "pin", "fecha_compra", "cuenta_madre", "url_soporte"];
+    const expected = ["producto", "correo", "contrasena", "perfil", "pin", "fecha_compra", "cuenta_madre", "url_soporte", "precio_compra"];
     const normalized = String(csvText || "")
       .replace(/^\uFEFF/, "")
       .replace(/\r\n/g, "\n")
@@ -2452,6 +2521,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       const fechaCompra = String(row.fecha_compra || "").trim();
       const cuentaMadre = String(row.cuenta_madre || "").trim();
       const urlSoporte = String(row.url_soporte || "").trim();
+      const precioCompra = row.precio_compra;
 
       if (!producto) {
         errors.push(`Fila ${rowNumber}: Falta el campo producto.`);
@@ -2470,7 +2540,17 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         continue;
       }
 
-      const parsedDate = fechaCompra && /^\d{4}-\d{2}-\d{2}$/.test(fechaCompra) ? fechaCompra : null;
+      const parsedDate = normalizeInventoryDate(fechaCompra);
+      if (parsedDate === undefined) {
+        errors.push(`Fila ${rowNumber}: fecha_compra inválida. Usa DD/MM/YYYY o YYYY-MM-DD.`);
+        continue;
+      }
+
+      const parsedPurchasePrice = normalizePurchasePrice(precioCompra);
+      if (parsedPurchasePrice === undefined) {
+        errors.push(`Fila ${rowNumber}: precio_compra debe ser un número mayor o igual a 0.`);
+        continue;
+      }
 
       preparedRows.push({
         rowNumber,
@@ -2485,7 +2565,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         access_url: urlSoporte,
         owner_admin_id: ownerId,
         reusable: isReusable ? 1 : 0,
-        official_purchase_date: parsedDate
+        official_purchase_date: parsedDate,
+        purchase_price: parsedPurchasePrice
       });
     }
 
@@ -2494,8 +2575,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       try {
         const insertResult = await pool.query(
   `INSERT INTO platform_accounts
-   (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)
+   (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date, purchase_price)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13)
    RETURNING id`,
   [
     item.platform,
@@ -2509,7 +2590,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     item.access_url,
     item.owner_admin_id,
     item.reusable,
-    item.official_purchase_date
+    item.official_purchase_date,
+    item.purchase_price
   ]
 );
 
@@ -2525,7 +2607,8 @@ await addTraceEvent(pool, {
         product: item.product_name,
         email: item.account_email,
         profile: item.profile_name,
-        purchase_date: item.official_purchase_date
+        purchase_date: item.official_purchase_date,
+        purchase_price: item.purchase_price
     }
 });
 
