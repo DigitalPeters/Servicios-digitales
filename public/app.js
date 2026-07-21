@@ -820,11 +820,138 @@ async function searchInventoryHistory() {
   }
 }
 
+function parseInventoryHistoryDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  let match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) {
+    const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatInventoryHistoryDate(value) {
+  const date = value instanceof Date ? value : parseInventoryHistoryDate(value);
+  return date ? date.toLocaleDateString('es-MX') : '-';
+}
+
+function getInventoryHistoryOfficialDate(evento) {
+  return evento?.cycle_official_purchase_date
+    || evento?.official_purchase_date
+    || evento?.fecha_compra
+    || evento?.fecha_original_cuenta_madre
+    || '';
+}
+
+function getInventoryHistoryCycleDateKey(evento) {
+  const date = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(evento));
+  if (!date) return 'sin-fecha';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getInventoryHistoryCycleKey(evento) {
+  const email = String(evento?.cuenta_madre || evento?.account_email || '').trim().toLowerCase();
+  return `${email}||${getInventoryHistoryCycleDateKey(evento)}`;
+}
+
+function getInventoryHistoryTimestamp(value) {
+  const date = new Date(value || '');
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function sortInventoryHistoryEvents(eventos) {
+  return [...(Array.isArray(eventos) ? eventos : [])].sort((a, b) => {
+    const officialA = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(a))?.getTime() || 0;
+    const officialB = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(b))?.getTime() || 0;
+    if (officialA !== officialB) return officialB - officialA;
+
+    const createdA = getInventoryHistoryTimestamp(a?.created_at || a?.fecha_ingreso);
+    const createdB = getInventoryHistoryTimestamp(b?.created_at || b?.fecha_ingreso);
+    return createdB - createdA;
+  });
+}
+
+function groupInventoryHistoryCycles(eventos) {
+  const sortedRows = sortInventoryHistoryEvents(eventos);
+  const cycleMap = new Map();
+
+  sortedRows.forEach(evento => {
+    const key = getInventoryHistoryCycleKey(evento);
+    if (!cycleMap.has(key)) {
+      cycleMap.set(key, {
+        key,
+        email: String(evento?.cuenta_madre || evento?.account_email || '').trim(),
+        motherAccountId: evento?.cuenta_madre_id ?? evento?.mother_account_id ?? '',
+        officialDate: getInventoryHistoryOfficialDate(evento),
+        events: []
+      });
+    }
+    cycleMap.get(key).events.push(evento);
+  });
+
+  return Array.from(cycleMap.values());
+}
+
+function isInventoryHistoryUnassigned(evento) {
+  const status = String(evento?.status || '').trim().toLowerCase();
+  const hasAssignedUser = evento?.assigned_user_id !== null
+    && evento?.assigned_user_id !== undefined
+    && String(evento.assigned_user_id).trim() !== '';
+  const hasAssignedOrder = evento?.assigned_order_id !== null
+    && evento?.assigned_order_id !== undefined
+    && String(evento.assigned_order_id).trim() !== '';
+  const hasOrder = evento?.orden_id !== null
+    && evento?.orden_id !== undefined
+    && String(evento.orden_id).trim() !== '';
+  const hasSeller = String(evento?.comprador_nombre || evento?.comprador_email || '').trim() !== '';
+  const availableStatus = !status || ['available', 'disponible'].includes(status);
+  return availableStatus && !hasAssignedUser && !hasAssignedOrder && !hasOrder && !hasSeller;
+}
+
+function countInventoryHistoryProfiles(eventos, onlyUnassigned = false) {
+  const profileKeys = new Set();
+  const rows = (Array.isArray(eventos) ? eventos : [])
+    .filter(evento => !onlyUnassigned || isInventoryHistoryUnassigned(evento));
+
+  rows.forEach((evento, index) => {
+    const profileId = evento?.perfil_id ?? evento?.platform_account_id ?? evento?.id;
+    if (profileId !== null && profileId !== undefined && String(profileId).trim() !== '') {
+      profileKeys.add(`id:${profileId}`);
+      return;
+    }
+
+    const profileName = String(evento?.profile_name || '').trim();
+    const profilePin = String(evento?.profile_pin || '').trim();
+    if (profileName || profilePin) profileKeys.add(`profile:${profileName}|${profilePin}`);
+    else profileKeys.add(`row:${index}`);
+  });
+  return profileKeys.size;
+}
+
 function renderInventoryHistorySummary(events) {
-  const firstEvent = events[0] || {};
-  const lastEvent = events[events.length - 1] || firstEvent;
+  const cycles = groupInventoryHistoryCycles(events);
+  const currentCycle = cycles[0] || { events: [] };
+  const currentEvents = currentCycle.events;
+  const currentAvailableEvents = currentEvents.filter(isInventoryHistoryUnassigned);
+  const visibleCurrentEvents = currentAvailableEvents.length ? currentAvailableEvents : currentEvents;
+  const firstEvent = visibleCurrentEvents[0] || {};
+  const lastEvent = visibleCurrentEvents[visibleCurrentEvents.length - 1] || firstEvent;
+  const fechaOficial = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(firstEvent));
   const fechaIngreso = firstEvent.fecha_ingreso ? new Date(firstEvent.fecha_ingreso) : null;
-  const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
+  const fechaVencimiento = fechaOficial ? new Date(fechaOficial) : null;
   if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
   const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
   const estado = lastEvent.status === 'failed' || lastEvent.orden_status === 'failed'
@@ -840,88 +967,88 @@ function renderInventoryHistorySummary(events) {
   document.getElementById('inventoryEntered').textContent = fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-';
   document.getElementById('inventoryExpire').textContent = fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : '-';
   document.getElementById('inventoryLifeDays').textContent = String(diasRestantes);
-  document.getElementById('inventoryEventsCount').textContent = String(events.length);
+  document.getElementById('inventoryEventsCount').textContent = String(countInventoryHistoryProfiles(currentEvents, true));
+}
+
+function renderInventoryHistoryEventCard(evento) {
+  const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
+  const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
+  const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
+  const fechaOficial = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(evento));
+  const fechaVencimiento = fechaOficial ? new Date(fechaOficial) : null;
+  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+  const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
+  const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
+  const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
+  const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Sin perfil';
+  const pedido = evento.orden_id ? `Pedido #${safeText(evento.orden_id)} (${safeText(evento.orden_status || 'sin estado')})` : 'No vendido aún';
+
+  return `
+    <div class="timeline-event">
+      <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleDateString('es-MX')} ${fechaIngreso.toLocaleTimeString('es-MX')}` : 'Fecha no disponible'}</div>
+      <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')}</div>
+      <div class="timeline-details">
+        <p><strong>Tipo de evento:</strong> ${safeText(eventoTipo)}</p>
+        <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')}</p>
+        <p><strong>Perfil vendido:</strong> ${perfil}</p>
+        <p><strong>Vendedor:</strong> ${vendedor}</p>
+        <p><strong>${pedido}</strong></p>
+        ${ordenCreada ? `<p><strong>Fecha de venta:</strong> ${ordenCreada.toLocaleDateString('es-MX')}</p>` : ''}
+        ${fechaEntrega ? `<p><strong>Entrega registrada:</strong> ${fechaEntrega.toLocaleDateString('es-MX')}</p>` : ''}
+        <p><strong>Estado actual:</strong> ${safeText(evento.status || evento.orden_status || 'Disponible')}</p>
+        <p><strong>Vence:</strong> ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No aplica'}</p>
+        <p><strong>Días restantes:</strong> ${safeText(String(diasRestantes))}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderInventoryHistoryCycles(eventos) {
+  const cycles = groupInventoryHistoryCycles(eventos);
+
+  return cycles.map((cycle, index) => {
+    const cycleLabel = index === 0 ? 'Ciclo actual' : 'Ciclo anterior';
+    const dateLabel = formatInventoryHistoryDate(cycle.officialDate);
+    const cycleProfileCount = index === 0
+      ? countInventoryHistoryProfiles(cycle.events, true)
+      : countInventoryHistoryProfiles(cycle.events);
+    const cycleProfileLabel = index === 0 ? 'Perfiles disponibles en este ciclo' : 'Perfiles en este ciclo';
+    return `
+      <section class="inventory-history-cycle" data-cycle-key="${safeText(cycle.key)}">
+        <div class="timeline-event" style="border-left:4px solid ${index === 0 ? '#2563eb' : '#94a3b8'};padding:12px 14px;margin-bottom:12px;">
+          <div class="timeline-title">${safeText(cycleLabel)}</div>
+          <div class="timeline-details">
+            <p><strong>ID cuenta madre:</strong> ${safeText(String(cycle.motherAccountId || '-'))}</p>
+            <p><strong>Correo:</strong> ${safeText(cycle.email || 'Sin correo')}</p>
+            <p><strong>Fecha oficial de compra:</strong> ${safeText(dateLabel)}</p>
+            <p><strong>${safeText(cycleProfileLabel)}:</strong> ${cycleProfileCount}</p>
+          </div>
+        </div>
+        ${cycle.events.map(renderInventoryHistoryEventCard).join('')}
+      </section>
+    `;
+  }).join('');
 }
 
 function renderInventoryHistoryTimeline(eventos) {
   const timelineItems = document.getElementById('inventoryTimelineItems');
   if (!timelineItems) return;
-
-  timelineItems.innerHTML = eventos.map(evento => {
-    const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
-    const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
-    const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
-    const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
-    if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
-    const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
-    const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
-    const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
-    const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Sin perfil';
-    const pedido = evento.orden_id ? `Pedido #${safeText(evento.orden_id)} (${safeText(evento.orden_status || 'sin estado')})` : 'No vendido aún';
-
-    return `
-      <div class="timeline-event">
-        <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleDateString('es-MX')} ${fechaIngreso.toLocaleTimeString('es-MX')}` : 'Fecha no disponible'}</div>
-        <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')}</div>
-        <div class="timeline-details">
-          <p><strong>Tipo de evento:</strong> ${safeText(eventoTipo)}</p>
-          <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')}</p>
-          <p><strong>Perfil vendido:</strong> ${perfil}</p>
-          <p><strong>Vendedor:</strong> ${vendedor}</p>
-          <p><strong>${pedido}</strong></p>
-          ${ordenCreada ? `<p><strong>Fecha de venta:</strong> ${ordenCreada.toLocaleDateString('es-MX')}</p>` : ''}
-          ${fechaEntrega ? `<p><strong>Entrega registrada:</strong> ${fechaEntrega.toLocaleDateString('es-MX')}</p>` : ''}
-          <p><strong>Estado actual:</strong> ${safeText(evento.status || evento.orden_status || 'Disponible')}</p>
-          <p><strong>Vence:</strong> ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No aplica'}</p>
-          <p><strong>Días restantes:</strong> ${safeText(String(diasRestantes))}</p>
-        </div>
-      </div>
-    `;
-  }).join('');
+  timelineItems.innerHTML = renderInventoryHistoryCycles(eventos);
 }
-
-
-
 
 function renderInventoryHistoryModal(eventos) {
   const summaryModal = document.getElementById('inventoryHistoryModalSummary');
   const timelineModalItems = document.getElementById('inventoryTimelineModalItems');
   if (!summaryModal || !timelineModalItems) return;
 
-  const rows = Array.isArray(eventos) ? eventos : [];
-  const firstEvent = rows[0] || {};
-  const motherEmail = String(firstEvent.cuenta_madre || '').trim().toLowerCase();
-  const motherEvents = motherEmail
-    ? rows.filter(evento => String(evento.cuenta_madre || '').trim().toLowerCase() === motherEmail)
-    : rows;
+  const cycles = groupInventoryHistoryCycles(eventos);
+  const currentCycle = cycles[0] || { events: [] };
+  const currentEvents = currentCycle.events;
+  const currentAvailableEvents = currentEvents.filter(isInventoryHistoryUnassigned);
+  const summaryEvents = currentAvailableEvents.length ? currentAvailableEvents : currentEvents;
 
-  const parseHistoryDate = value => {
-    const raw = String(value || '').trim();
-    if (!raw) return null;
-
-    let match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (match) {
-      const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-
-    match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-
-    const date = new Date(raw);
-    return Number.isNaN(date.getTime()) ? null : date;
-  };
-
-  const formatHistoryDate = value => {
-    const date = value instanceof Date ? value : parseHistoryDate(value);
-    return date ? date.toLocaleDateString('es-MX') : '-';
-  };
-
-  const findFirstValue = (...fields) => {
-    for (const evento of motherEvents) {
+  const findCurrentValue = (...fields) => {
+    for (const evento of summaryEvents) {
       for (const field of fields) {
         const value = evento?.[field];
         if (value !== null && value !== undefined && String(value).trim() !== '') return value;
@@ -930,95 +1057,46 @@ function renderInventoryHistoryModal(eventos) {
     return '';
   };
 
-  const fechaOficialRaw = findFirstValue(
-    'fecha_compra',
-    'fecha_original_cuenta_madre',
+  const fechaOficialRaw = currentCycle.officialDate || findCurrentValue(
     'official_purchase_date',
-    'fecha_ingreso'
+    'fecha_compra',
+    'fecha_original_cuenta_madre'
   );
-  const fechaOficial = parseHistoryDate(fechaOficialRaw);
-  const vencimientoRegistrado = findFirstValue(
-    'vencimiento_cuenta_madre',
-    'mother_expiration',
-    'mother_account_expiration'
-  );
-  let fechaVencimiento = parseHistoryDate(vencimientoRegistrado);
-  if (!fechaVencimiento && fechaOficial) {
-    fechaVencimiento = new Date(fechaOficial);
-    fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
-  }
+  const fechaOficial = parseInventoryHistoryDate(fechaOficialRaw);
+  const fechaVencimiento = fechaOficial ? new Date(fechaOficial) : null;
+  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
 
-  const profileKeys = new Set();
-  motherEvents.forEach((evento, index) => {
-    const profileId = evento?.perfil_id ?? evento?.platform_account_id ?? evento?.id;
-    if (profileId !== null && profileId !== undefined && String(profileId).trim() !== '') {
-      profileKeys.add(`id:${profileId}`);
-      return;
-    }
+  const totalProfiles = countInventoryHistoryProfiles(currentEvents, true);
 
-    const profileName = String(evento?.profile_name || '').trim();
-    const profilePin = String(evento?.profile_pin || '').trim();
-    if (profileName || profilePin) profileKeys.add(`profile:${profileName}|${profilePin}`);
-    else profileKeys.add(`row:${index}`);
-  });
-  const totalProfiles = profileKeys.size;
-
-  const explicitMotherStatus = String(findFirstValue(
+  const explicitMotherStatus = String(findCurrentValue(
     'mother_account_status',
     'mother_status',
     'estado_cuenta_madre'
   ) || '').trim().toLowerCase();
-  const profileStatuses = motherEvents.map(evento => String(evento?.status || evento?.orden_status || '').trim().toLowerCase());
-  let estado = 'Activa';
-  if (['replaced', 'reemplazada', 'reemplazado', 'inactive', 'inactiva'].includes(explicitMotherStatus)) {
+  const profileStatuses = currentEvents.map(evento => String(evento?.status || evento?.orden_status || '').trim().toLowerCase());
+  let estado = totalProfiles > 0 ? 'Activa' : 'Sin perfiles disponibles';
+  if (totalProfiles === 0 && ['replaced', 'reemplazada', 'reemplazado', 'inactive', 'inactiva'].includes(explicitMotherStatus)) {
     estado = 'Reemplazada';
-  } else if (['active', 'activa'].includes(explicitMotherStatus)) {
+  } else if (totalProfiles > 0 || ['active', 'activa'].includes(explicitMotherStatus)) {
     estado = 'Activa';
   } else if (profileStatuses.some(status => ['failed', 'fallida', 'damaged', 'dañada'].includes(status))) {
     estado = 'Con falla';
   }
 
+  const currentMotherAccountId = currentCycle.motherAccountId || findCurrentValue('cuenta_madre_id', 'mother_account_id') || '-';
+
   summaryModal.innerHTML = `
-    <div class="trace-item"><strong class="trace-label">Plataforma / Producto</strong><div class="trace-value">${safeText(findFirstValue('platform', 'product_name') || '-')}</div></div>
-    <div class="trace-item"><strong class="trace-label">Correo</strong><div class="trace-value">${safeText(findFirstValue('cuenta_madre', 'account_email') || '-')}</div></div>
-    <div class="trace-item"><strong class="trace-label">Contraseña</strong><div class="trace-value">${safeText(findFirstValue('contrasena', 'account_password') || '-')}</div></div>
-    <div class="trace-item"><strong class="trace-label">Fecha oficial de compra</strong><div class="trace-value">${formatHistoryDate(fechaOficial)}</div></div>
-    <div class="trace-item"><strong class="trace-label">Vencimiento a 30 días</strong><div class="trace-value">${formatHistoryDate(fechaVencimiento)}</div></div>
+    <div class="trace-item"><strong class="trace-label">ID cuenta madre</strong><div class="trace-value">${safeText(String(currentMotherAccountId))}</div></div>
+    <div class="trace-item"><strong class="trace-label">Plataforma / Producto</strong><div class="trace-value">${safeText(findCurrentValue('product_name', 'platform') || '-')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Correo</strong><div class="trace-value">${safeText(findCurrentValue('cuenta_madre', 'account_email') || '-')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Contraseña actual</strong><div class="trace-value">${safeText(findCurrentValue('contrasena', 'account_password') || '-')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Fecha oficial de compra</strong><div class="trace-value">${formatInventoryHistoryDate(fechaOficial)}</div></div>
+    <div class="trace-item"><strong class="trace-label">Vencimiento a 30 días</strong><div class="trace-value">${formatInventoryHistoryDate(fechaVencimiento)}</div></div>
     <div class="trace-item"><strong class="trace-label">Total de perfiles</strong><div class="trace-value">${totalProfiles}</div></div>
     <div class="trace-item"><strong class="trace-label">Estado</strong><div class="trace-value">${safeText(estado)}</div></div>
   `;
 
-  timelineModalItems.innerHTML = rows.map(evento => {
-    const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
-    const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
-    const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
-    const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
-    if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
-    const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
-    const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
-    const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
-    const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Sin perfil';
-    const pedido = evento.orden_id ? `Pedido #${safeText(evento.orden_id)} (${safeText(evento.orden_status || 'sin estado')})` : 'No vendido aún';
-
-    return `
-      <div class="timeline-event">
-        <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleDateString('es-MX')} ${fechaIngreso.toLocaleTimeString('es-MX')}` : 'Fecha no disponible'}</div>
-        <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')}</div>
-        <div class="timeline-details">
-          <p><strong>Tipo de evento:</strong> ${safeText(eventoTipo)}</p>
-          <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')}</p>
-          <p><strong>Perfil vendido:</strong> ${perfil}</p>
-          <p><strong>Vendedor:</strong> ${vendedor}</p>
-          <p><strong>${pedido}</strong></p>
-          ${ordenCreada ? `<p><strong>Fecha de venta:</strong> ${ordenCreada.toLocaleDateString('es-MX')}</p>` : ''}
-          ${fechaEntrega ? `<p><strong>Entrega registrada:</strong> ${fechaEntrega.toLocaleDateString('es-MX')}</p>` : ''}
-          <p><strong>Estado actual:</strong> ${safeText(evento.status || evento.orden_status || 'Disponible')}</p>
-          <p><strong>Vence:</strong> ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No aplica'}</p>
-          <p><strong>Días restantes:</strong> ${safeText(String(diasRestantes))}</p>
-        </div>
-      </div>
-    `;
-  }).join('');
+  timelineModalItems.innerHTML = renderInventoryHistoryCycles(eventos);
 }
 
 function openInventoryHistoryModal() {

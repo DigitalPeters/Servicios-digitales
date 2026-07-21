@@ -729,7 +729,8 @@ async function resolveMotherAccount(client, {
   purchaseDate = null,
   originalPurchaseDate = null,
   expirationDate = null,
-  replacesMotherAccountId = null
+  replacesMotherAccountId = null,
+  forceCreateNew = false
 }) {
   const cleanProduct = String(productName || "").trim() || "Sin producto";
   const cleanEmail = String(accountEmail || "").trim();
@@ -804,6 +805,22 @@ async function resolveMotherAccount(client, {
     return newMother;
   }
 
+  if (forceCreateNew) {
+    const createdResult = await client.query(
+      `INSERT INTO mother_accounts
+       (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status)
+       VALUES (
+         $1, $2, $3, $4,
+         COALESCE($5::date, CASE WHEN $4::date IS NULL THEN NULL ELSE ($4::date + INTERVAL '30 days')::date END),
+         'active'
+       )
+       RETURNING *`,
+      [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate, expirationDate]
+    );
+
+    return createdResult.rows[0];
+  }
+
   const existingResult = await client.query(
     `SELECT *
      FROM mother_accounts
@@ -811,10 +828,14 @@ async function resolveMotherAccount(client, {
        AND lower(trim(product_name)) = lower(trim($1))
        AND lower(trim(account_email)) = lower(trim($2))
        AND COALESCE(owner_admin_id, 0) = COALESCE($3::int, 0)
-     ORDER BY id DESC
+       AND (
+         ($4::date IS NULL AND original_purchase_date IS NULL)
+         OR original_purchase_date = $4::date
+       )
+     ORDER BY created_at DESC, id DESC
      LIMIT 1
      FOR UPDATE`,
-    [cleanProduct, cleanEmail, cleanOwnerId]
+    [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate]
   );
 
   if (existingResult.rows[0]) {
@@ -2523,7 +2544,7 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
         access_url || "",
         ownerAdminId,
         reusable === 1 ? 1 : 0,
-        motherAccount.original_purchase_date || official_purchase_date || null,
+        official_purchase_date || motherAccount.original_purchase_date || null,
         parsedPurchasePrice,
         motherAccount.id
       ]
@@ -2702,6 +2723,17 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     return Number.isSafeInteger(id) && id > 0 ? id : undefined;
   };
 
+  const getCurrentMexicoDateISO = () => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  };
+
   const requiredHeaders = [
     "producto", "correo", "contrasena", "perfil", "pin", "fecha_compra",
     "cuenta_madre", "url_soporte", "precio_compra"
@@ -2795,6 +2827,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       const cuentaMadre = String(row.cuenta_madre || "").trim();
       const urlSoporte = String(row.url_soporte || "").trim();
       const precioCompra = row.precio_compra;
+      const explicitMotherId = normalizeOptionalPositiveId(row.cuenta_madre_id);
       const replacementMotherId = normalizeOptionalPositiveId(row.reemplaza_cuenta_madre_id);
 
       if (!producto) {
@@ -2814,15 +2847,13 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         continue;
       }
 
-      const parsedDate = normalizeInventoryDate(fechaCompra);
-      if (parsedDate === undefined) {
+      const parsedCsvDate = normalizeInventoryDate(fechaCompra);
+      if (parsedCsvDate === undefined) {
         errors.push(`Fila ${rowNumber}: fecha_compra inválida. Usa DD/MM/YYYY o YYYY-MM-DD.`);
         continue;
       }
 
-      const parsedOriginalMotherDate = normalizeInventoryDate(
-        String(row.fecha_original_cuenta_madre || "").trim() || fechaCompra
-      );
+      const parsedOriginalMotherDate = normalizeInventoryDate(row.fecha_original_cuenta_madre);
       if (parsedOriginalMotherDate === undefined) {
         errors.push(`Fila ${rowNumber}: fecha_original_cuenta_madre inválida. Usa DD/MM/YYYY o YYYY-MM-DD.`);
         continue;
@@ -2834,14 +2865,29 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         continue;
       }
 
+      // Sin IDs se considera una renovación/cuenta madre nueva. Su ciclo comienza
+      // el día de esta carga, aunque el CSV provenga de una descarga anterior.
+      const isNewMotherCycle = !explicitMotherId && !replacementMotherId;
+      const cyclePurchaseDate = isNewMotherCycle ? getCurrentMexicoDateISO() : parsedCsvDate;
+
       const parsedPurchasePrice = normalizePurchasePrice(precioCompra);
       if (parsedPurchasePrice === undefined) {
         errors.push(`Fila ${rowNumber}: precio_compra debe ser un número mayor o igual a 0.`);
         continue;
       }
 
+      if (explicitMotherId === undefined) {
+        errors.push(`Fila ${rowNumber}: cuenta_madre_id debe ser un ID numérico positivo o quedar vacío.`);
+        continue;
+      }
+
       if (replacementMotherId === undefined) {
         errors.push(`Fila ${rowNumber}: reemplaza_cuenta_madre_id debe ser un ID numérico positivo o quedar vacío.`);
+        continue;
+      }
+
+      if (explicitMotherId && replacementMotherId) {
+        errors.push(`Fila ${rowNumber}: usa cuenta_madre_id o reemplaza_cuenta_madre_id, no ambos.`);
         continue;
       }
 
@@ -2858,31 +2904,76 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         access_url: urlSoporte,
         owner_admin_id: ownerId,
         reusable: isReusable ? 1 : 0,
-        official_purchase_date: parsedDate,
+        official_purchase_date: cyclePurchaseDate,
         purchase_price: parsedPurchasePrice,
         original_mother_date: parsedOriginalMotherDate,
         mother_expiration: parsedMotherExpiration,
-        replaces_mother_account_id: replacementMotherId
+        mother_account_id: explicitMotherId,
+        replaces_mother_account_id: replacementMotherId,
+        is_new_mother_cycle: isNewMotherCycle
       });
     }
 
     let successCount = 0;
+    const newMotherCyclesInThisUpload = new Map();
+
     for (const item of preparedRows) {
       const client = await pool.connect();
+      let newCycleCacheKey = '';
+      let shouldCacheNewMother = false;
       try {
         await client.query("BEGIN");
 
-        const motherAccount = await resolveMotherAccount(client, {
-          productName: item.product_name,
-          accountEmail: item.account_email,
-          ownerAdminId: item.owner_admin_id,
-          purchaseDate: item.official_purchase_date,
-          originalPurchaseDate: item.original_mother_date,
-          expirationDate: item.mother_expiration,
-          replacesMotherAccountId: item.replaces_mother_account_id
-        });
+        let motherAccount = null;
 
-        const effectivePurchaseDate = motherAccount.original_purchase_date || item.official_purchase_date || null;
+        if (item.mother_account_id) {
+          const existingMotherResult = await client.query(
+            `SELECT * FROM mother_accounts WHERE id = $1 FOR UPDATE`,
+            [item.mother_account_id]
+          );
+          motherAccount = existingMotherResult.rows[0] || null;
+          if (!motherAccount) {
+            throw new Error(`La cuenta madre #${item.mother_account_id} no existe.`);
+          }
+          if (Number(motherAccount.owner_admin_id || 0) !== Number(item.owner_admin_id || 0)) {
+            throw new Error(`La cuenta madre #${item.mother_account_id} no pertenece a este propietario.`);
+          }
+        } else if (item.replaces_mother_account_id) {
+          motherAccount = await resolveMotherAccount(client, {
+            productName: item.product_name,
+            accountEmail: item.account_email,
+            ownerAdminId: item.owner_admin_id,
+            purchaseDate: item.official_purchase_date,
+            originalPurchaseDate: item.original_mother_date,
+            expirationDate: item.mother_expiration,
+            replacesMotherAccountId: item.replaces_mother_account_id
+          });
+        } else {
+          newCycleCacheKey = [
+            String(item.product_name || '').trim().toLowerCase(),
+            String(item.account_email || '').trim().toLowerCase(),
+            String(Number(item.owner_admin_id || 0)),
+            String(item.official_purchase_date || '')
+          ].join('||');
+
+          motherAccount = newMotherCyclesInThisUpload.get(newCycleCacheKey) || null;
+          if (!motherAccount) {
+            motherAccount = await resolveMotherAccount(client, {
+              productName: item.product_name,
+              accountEmail: item.account_email,
+              ownerAdminId: item.owner_admin_id,
+              purchaseDate: item.official_purchase_date,
+              originalPurchaseDate: item.official_purchase_date,
+              expirationDate: null,
+              forceCreateNew: true
+            });
+            shouldCacheNewMother = true;
+          }
+        }
+
+        const effectivePurchaseDate = (item.mother_account_id || item.replaces_mother_account_id)
+          ? (motherAccount.original_purchase_date || item.official_purchase_date || null)
+          : item.official_purchase_date;
         const insertResult = await client.query(
           `INSERT INTO platform_accounts
            (platform, product_name, account_email, account_password, profile_name, profile_pin,
@@ -2927,6 +3018,9 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         });
 
         await client.query("COMMIT");
+        if (shouldCacheNewMother && newCycleCacheKey) {
+          newMotherCyclesInThisUpload.set(newCycleCacheKey, motherAccount);
+        }
         successCount++;
       } catch (insertErr) {
         await client.query("ROLLBACK").catch(() => {});
@@ -5974,14 +6068,26 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
         if (!search) {
             return res.status(400).json({ error: 'Se requiere q=texto de búsqueda' });
         }
-    const lowerSearch = search.toLowerCase();
-    const likeSearch = `%${lowerSearch}%`;
-    const likeRawSearch = `%${search}%`;
-    const normalizedSearch = lowerSearch.replace(/\s+/g, '');
-    const likeNormalizedSearch = `%${normalizedSearch}%`;
+        const lowerSearch = search.toLowerCase();
+        const likeSearch = `%${lowerSearch}%`;
+        const likeRawSearch = `%${search}%`;
+        const normalizedSearch = lowerSearch.replace(/\s+/g, '');
+        const likeNormalizedSearch = `%${normalizedSearch}%`;
+
+        // Para perfiles disponibles de una renovación normal, la fecha del ciclo
+        // es la fecha en que se creó esa cuenta madre/carga. Solo los reemplazos
+        // conservan la fecha original heredada de la cuenta anterior.
+        const cycleDateExpression = `CASE
+          WHEN ma.replaces_mother_account_id IS NULL
+           AND lower(COALESCE(pa.status, '')) IN ('available', 'disponible')
+           AND pa.assigned_user_id IS NULL
+           AND pa.assigned_order_id IS NULL
+          THEN COALESCE(ma.created_at::date, pa.created_at::date, pa.official_purchase_date, ma.original_purchase_date)
+          ELSE COALESCE(pa.official_purchase_date, ma.original_purchase_date, pa.created_at::date)
+        END`;
 
         const query = `
-            SELECT 
+            SELECT
                 pa.id AS perfil_id,
                 pa.platform,
                 pa.product_name,
@@ -5991,10 +6097,19 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
                 pa.profile_pin,
                 pa.status,
                 pa.created_at AS fecha_ingreso,
-                pa.official_purchase_date AS fecha_compra,
+                pa.created_at AS created_at,
+                ${cycleDateExpression} AS fecha_compra,
+                ${cycleDateExpression} AS official_purchase_date,
+                pa.official_purchase_date AS stored_official_purchase_date,
                 pa.delivered_at AS fecha_entrega,
                 pa.assigned_order_id,
                 pa.assigned_user_id,
+                pa.mother_account_id AS cuenta_madre_id,
+                ma.original_purchase_date AS fecha_original_cuenta_madre,
+                ma.expiration_date AS vencimiento_cuenta_madre,
+                ma.status AS mother_account_status,
+                ma.replaces_mother_account_id AS reemplaza_cuenta_madre_id,
+                ma.replaced_by_mother_account_id AS reemplazada_por_cuenta_madre_id,
                 COALESCE(u.name, '') AS comprador_nombre,
                 COALESCE(u.email, '') AS comprador_email,
                 COALESCE(u.role, '') AS comprador_rol,
@@ -6003,6 +6118,7 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
                 o.created_at AS orden_creada,
                 o.amount AS orden_amount
             FROM platform_accounts pa
+            LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
             LEFT JOIN orders o ON pa.assigned_order_id = o.id
             LEFT JOIN users u ON pa.assigned_user_id = u.id
             WHERE lower(pa.account_email) LIKE $1
@@ -6015,9 +6131,12 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
               OR regexp_replace(lower(COALESCE(u.email, '')), '\\s+', '', 'g') LIKE $3
               OR lower(COALESCE(u.name, '')) LIKE $1
               OR regexp_replace(lower(COALESCE(u.name, '')), '\\s+', '', 'g') LIKE $3
-               OR pa.assigned_order_id::text LIKE $2
-               OR o.id::text LIKE $2
-            ORDER BY pa.created_at ASC, pa.delivered_at ASC;
+              OR pa.assigned_order_id::text LIKE $2
+              OR o.id::text LIKE $2
+            ORDER BY
+              ${cycleDateExpression} DESC NULLS LAST,
+              pa.created_at DESC NULLS LAST,
+              pa.delivered_at DESC NULLS LAST;
         `;
 
         const result = await pool.query(query, [likeSearch, likeRawSearch, likeNormalizedSearch]);
@@ -6029,7 +6148,6 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
         res.status(500).json({ error: 'Error interno obteniendo el historial de inventario.' });
     }
 });
-
 
 
 // ADMIN: REPORTE MENSUAL CSV (respeta admin global, distribuidor o panel independiente)
