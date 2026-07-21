@@ -6330,9 +6330,9 @@ app.get("/api/bank-info", authMiddleware, async (req, res) => {
     }
 
     res.json({
-      bank_name: "Mercado Pago",
+      bank_name: "Klar",
       bank_holder: "Pedro Garcia Diaz",
-      bank_clabe: "722969020555596471",
+      bank_clabe: "661610003119974659",
       payment_concept: "ropa o comida"
     });
   } catch (err) {
