@@ -2412,3 +2412,46 @@ body.modal-open{
     max-width:calc(100vw - 20px)!important;
   }
 }
+
+/* ===== Avisos del sistema visibles debajo de la barra fija en celular ===== */
+@media (max-width: 768px){
+  .message{
+    top:calc(env(safe-area-inset-top, 0px) + 72px)!important;
+    left:10px!important;
+    right:10px!important;
+    width:auto!important;
+    max-width:none!important;
+    z-index:200000!important;
+    pointer-events:none;
+  }
+
+  .message p{
+    width:100%;
+    max-height:min(42vh, 280px);
+    margin:0!important;
+    padding:13px 15px!important;
+    overflow-y:auto;
+    border:1px solid currentColor;
+    border-radius:13px!important;
+    background:rgba(255,255,255,.98)!important;
+    box-shadow:0 12px 30px rgba(15,23,42,.24)!important;
+    font-size:14px;
+    line-height:1.35;
+    text-align:left;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+    pointer-events:auto;
+  }
+
+  .message p.success{
+    color:#166534!important;
+    background:#ecfdf5!important;
+    border-color:#86efac!important;
+  }
+
+  .message p.error{
+    color:#991b1b!important;
+    background:#fef2f2!important;
+    border-color:#fca5a5!important;
+  }
+}
