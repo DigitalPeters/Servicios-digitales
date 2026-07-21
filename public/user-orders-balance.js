@@ -131,7 +131,7 @@ window.reportReplacementAccount = async function reportReplacementAccount(report
   const report = getMyAccountReportById(reportId);
   const data = extractReplacementDeliveryData(report);
   const email = extractDeliveredAccountEmail(data) || String(report?.email || '').trim();
-  const accountId = Number(report?.reported_account_id || 0);
+  const accountId = Number(report?.replacement_account_id || report?.reported_account_id || 0);
 
   if (!report || !email) {
     showMessage('No pude identificar la cuenta reemplazada para reportarla', 'error');
@@ -184,6 +184,7 @@ async function loadMyReports(page = currentMyReportsPage) {
       <div class="item">
         <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status)}</span></p>
         <p><b>Correo reportado:</b> ${safeText(r.email)}</p>
+        <p><b>Perfil reportado:</b> ${Number(r.reported_account_id||0)>0 ? '#'+Number(r.reported_account_id) : 'No identificado'}${Number(r.replacement_account_id||0)>0 ? ` &nbsp; <b>Reemplazo:</b> #${Number(r.replacement_account_id)}` : ''}</p>
         <p><b>Falla:</b> ${safeText(r.issue_type)}</p>
         <p><b>Explicación:</b> ${safeText(r.description)}</p>
         ${Number(r.has_evidence || 0) === 1 ? `<div class="order-proof-row"><button class="outline-btn" style="width:auto" onclick="openMyReportEvidence(${r.id})">👁️ Ver evidencia</button></div>` : ''}

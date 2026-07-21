@@ -313,8 +313,6 @@ async function markFailedAccountEmailGroup(client, {
   ownerAdminId
 }) {
   const accountId = Number(reportedAccountId || 0);
-  const cleanEmail = String(accountEmail || "").trim();
-  const inventoryOwnerId = Number(ownerAdminId || 0) || null;
 
   if (!accountId) {
     return {
@@ -325,15 +323,49 @@ async function markFailedAccountEmailGroup(client, {
     };
   }
 
+  // El perfil reportado define el correo, propietario y ciclo exactos.
+  // Un ciclo se identifica por account_email + official_purchase_date.
+  const sourceResult = await client.query(
+    `SELECT id,
+            account_email,
+            owner_admin_id,
+            official_purchase_date,
+            created_at,
+            COALESCE(official_purchase_date, created_at::date) AS cycle_date
+     FROM platform_accounts
+     WHERE id = $1
+     LIMIT 1
+     FOR UPDATE`,
+    [accountId]
+  );
+
+  const sourceAccount = sourceResult.rows[0];
+  if (!sourceAccount) {
+    return {
+      reportedAccountMarked: 0,
+      availableSiblingsMarked: 0,
+      totalMarked: 0,
+      accountIds: []
+    };
+  }
+
+  const cleanEmail = String(sourceAccount.account_email || accountEmail || "").trim();
+  const sourceOwnerValue = sourceAccount.owner_admin_id;
+  const inventoryOwnerId = sourceOwnerValue !== null && sourceOwnerValue !== undefined
+    ? (Number(sourceOwnerValue || 0) || null)
+    : (Number(ownerAdminId || 0) || null);
+  const cycleDate = sourceAccount.cycle_date || null;
+
   const result = await client.query(
     `UPDATE platform_accounts
      SET status = 'failed'
      WHERE id = $1
         OR (
-          $2::text <> ''
-          AND status IN ('available', 'disponible')
+          status IN ('available', 'disponible')
+          AND $2::text <> ''
           AND lower(regexp_replace(trim(COALESCE(account_email, '')), '\\s+', '', 'g')) =
               lower(regexp_replace(trim($2), '\\s+', '', 'g'))
+          AND COALESCE(official_purchase_date, created_at::date) IS NOT DISTINCT FROM $4::date
           AND (
             (($3::int IS NULL OR $3::int = 0) AND (owner_admin_id IS NULL OR owner_admin_id = 0))
             OR ($3::int IS NOT NULL AND $3::int <> 0 AND owner_admin_id = $3)
@@ -341,7 +373,7 @@ async function markFailedAccountEmailGroup(client, {
         )
      RETURNING id,
                CASE WHEN id = $1 THEN 'reported' ELSE 'available_sibling' END AS failure_source`,
-    [accountId, cleanEmail, inventoryOwnerId]
+    [accountId, cleanEmail, inventoryOwnerId, cycleDate]
   );
 
   const reportedAccountMarked = result.rows.filter(row => row.failure_source === 'reported').length;
@@ -979,7 +1011,8 @@ async function initDatabase() {
       status TEXT DEFAULT 'pendiente',
       admin_response TEXT DEFAULT '',
       created_at TIMESTAMP DEFAULT NOW(),
-      reviewed_at TIMESTAMP
+      reviewed_at TIMESTAMP,
+      replacement_account_id INTEGER
     )
   `);
 
@@ -1215,6 +1248,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS order_id INTEGER`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_account_id INTEGER`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS replacement_account_id INTEGER`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS resolution_type TEXT DEFAULT ''`);
 
@@ -4131,7 +4165,7 @@ app.get("/api/my-account-reports", authMiddleware, async (req, res) => {
 
     const result = await pool.query(
       `SELECT id, email, issue_type, description, status, admin_response, created_at, reviewed_at,
-              order_id, reported_account_id, refund_amount, resolution_type,
+              order_id, reported_account_id, replacement_account_id, refund_amount, resolution_type,
               CASE WHEN COALESCE(evidence_image, '') <> '' THEN 1 ELSE 0 END AS has_evidence
        FROM account_reports
        WHERE user_id = $1
@@ -4195,6 +4229,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.reviewed_at,
         account_reports.order_id,
         account_reports.reported_account_id,
+        account_reports.replacement_account_id,
         account_reports.refund_amount,
         account_reports.resolution_type,
         CASE WHEN COALESCE(account_reports.evidence_image, '') <> '' THEN 1 ELSE 0 END AS has_evidence,
@@ -4255,7 +4290,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
   try {
     const reportId = Number(req.params.reportId || 0);
     const reportResult = await pool.query(
-      `SELECT id, order_id, reported_account_id
+      `SELECT id, order_id, reported_account_id, replacement_account_id
        FROM account_reports
        WHERE id = $1
        LIMIT 1`,
@@ -4311,6 +4346,7 @@ app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, a
       report_id: report.id,
       order_id: report.order_id,
       reported_account_id: report.reported_account_id,
+      replacement_account_id: report.replacement_account_id || null,
       accounts: accountsResult.rows
     });
   } catch (err) {
@@ -4333,7 +4369,7 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        JOIN products p ON p.id = o.product_id
-       LEFT JOIN platform_accounts pa ON pa.id = COALESCE(NULLIF($2,0), ar.reported_account_id)
+       LEFT JOIN platform_accounts pa ON pa.id = COALESCE(NULLIF(ar.reported_account_id,0), NULLIF($2,0))
        WHERE ar.id = $1
        LIMIT 1`,
       [reportId, selectedAccountId]
@@ -4412,14 +4448,18 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
               o.owner_admin_id AS order_owner_admin_id,
               p.name AS product_name, p.category AS product_category,
               p.owner_admin_id AS product_owner_admin_id,
+              pa.id AS matched_reported_account_id,
               pa.platform, pa.product_name AS account_product_name, pa.account_email,
               pa.owner_admin_id AS reported_account_owner_admin_id,
-              COALESCE(NULLIF($2::int, 0), ar.reported_account_id) AS resolved_reported_account_id,
+              COALESCE(NULLIF(ar.reported_account_id, 0), NULLIF($2::int, 0)) AS resolved_reported_account_id,
               COALESCE(ar.owner_admin_id, o.owner_admin_id, p.owner_admin_id, pa.owner_admin_id) AS resolved_owner_admin_id
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        JOIN products p ON p.id = o.product_id
-       LEFT JOIN platform_accounts pa ON pa.id = COALESCE(NULLIF($2::int, 0), ar.reported_account_id)
+       LEFT JOIN platform_accounts pa
+         ON pa.id = COALESCE(NULLIF(ar.reported_account_id, 0), NULLIF($2::int, 0))
+        AND pa.assigned_order_id = ar.order_id
+        AND pa.assigned_user_id = ar.user_id
        WHERE ar.id = $1
        FOR UPDATE OF ar, o`,
       [reportId, selectedReportedAccountId]
@@ -4435,6 +4475,11 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
     if (!report.order_id) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "Este reporte no está ligado a un pedido" });
+    }
+
+    if (!Number(report.resolved_reported_account_id || 0) || !Number(report.matched_reported_account_id || 0)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "No se pudo identificar el perfil exacto reportado dentro de este pedido" });
     }
 
     // --- NUEVA LÓGICA: CALCULAR DÍAS RESTANTES ---
@@ -4565,13 +4610,20 @@ if (!(manual === true || manual === "true")) {
 
     await client.query(
       `UPDATE account_reports
-       SET reported_account_id = $1, owner_admin_id = COALESCE(owner_admin_id, $4), status = 'reemplazo', resolution_type = 'reemplazo', admin_response = $2, reviewed_at = NOW()
+       SET reported_account_id = COALESCE(NULLIF(reported_account_id, 0), $5),
+           replacement_account_id = $1,
+           owner_admin_id = COALESCE(owner_admin_id, $4),
+           status = 'reemplazo',
+           resolution_type = 'reemplazo',
+           admin_response = $2,
+           reviewed_at = NOW()
        WHERE id = $3`,
       [
         newAccount.id,
         `Cuenta reemplazada correctamente (Días restantes: ${daysRemaining}).\n\n${deliveredAccountData}`,
         reportId,
-        ownerAdminId
+        ownerAdminId,
+        resolvedReportedAccountId
       ]
     );
 
@@ -4589,6 +4641,8 @@ if (!(manual === true || manual === "true")) {
       message: `${baseMessage}.${siblingMessage}`.replace("correctamente..", "correctamente."),
       delivered_account_data: deliveredAccountData,
       platform_account_id: newAccount.id,
+      reported_account_id: resolvedReportedAccountId,
+      replacement_account_id: newAccount.id,
       failed_email_group: {
         email: failedAccountEmail,
         reported_account_marked: failedGroupResult.reportedAccountMarked,
@@ -4665,10 +4719,9 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
       [report.order_id]
     );
 
-    await client.query(
-      `UPDATE platform_accounts SET status = 'failed' WHERE id = $1`,
-      [report.reported_account_id]
-    );
+    await markFailedAccountEmailGroup(client, {
+      reportedAccountId: report.reported_account_id
+    });
 
     await client.query(
       `UPDATE account_reports
@@ -4743,7 +4796,9 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
 
     await client.query(`UPDATE orders SET refunded = 1 WHERE id = $1`, [report.order_id]);
 
-    await client.query(`UPDATE platform_accounts SET status = 'failed' WHERE id = $1`, [report.reported_account_id]);
+    await markFailedAccountEmailGroup(client, {
+      reportedAccountId: report.reported_account_id
+    });
 
     await client.query(
       `UPDATE account_reports

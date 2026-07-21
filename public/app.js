@@ -472,7 +472,10 @@ async function replaceReportedAccountAuto(reportId){
     try {
       const comboData = await api('/api/admin/account-reports/'+reportId+'/order-accounts');
       const accounts = Array.isArray(comboData?.accounts) ? comboData.accounts : [];
-      if (accounts.length === 1) {
+      const exactReportedAccountId = Number(comboData?.reported_account_id || 0);
+      if (exactReportedAccountId > 0) {
+        reportedAccountId = exactReportedAccountId;
+      } else if (accounts.length === 1) {
         reportedAccountId = Number(accounts[0]?.id || 0);
       } else if (accounts.length > 1) {
         const list = accounts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | Estado: ${a.status||'n/a'}`).join('\n');
@@ -1286,6 +1289,7 @@ function renderAdminReportCompactFinal(r){
       <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
       <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
       <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+      <p><b>Perfil original reportado:</b> ${Number(r.reported_account_id||0)>0 ? '#'+Number(r.reported_account_id) : 'No identificado'}${Number(r.replacement_account_id||0)>0 ? ` &nbsp; <b>Perfil de reemplazo:</b> #${Number(r.replacement_account_id)}` : ''}</p>
       <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
       <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
@@ -2800,6 +2804,8 @@ window.buyProduct = async function(productId){
 
   async function chooseComboAccount(reportId){
     const data=await api('/api/admin/account-reports/'+reportId+'/order-accounts');
+    const exactReportedAccountId=Number(data?.reported_account_id||0);
+    if(exactReportedAccountId>0) return exactReportedAccountId;
     const accounts=data.accounts||[];
     if(accounts.length<=1) return accounts[0]?.id || 0;
     const list=accounts.map((a,i)=>`${i+1}) ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | Estado: ${a.status}`).join('\n');
