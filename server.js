@@ -1799,6 +1799,38 @@ app.get("/api/products", authMiddleware, async (req, res) => {
   }
 });
 
+// ADMIN: LISTAR PRODUCTOS VISIBLES Y OCULTOS DEL PROPIETARIO ACTUAL
+app.get("/api/admin/products", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const ownerAdminId = req.isPanelAdmin ? req.user.id : null;
+
+    const result = await pool.query(
+      `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category,
+              p.required_fields, p.charge_mode, p.active, p.stock_enabled,
+              ${effectiveStockExpression("p")} AS stock,
+              p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
+       FROM products p
+       WHERE (
+         ($1::int IS NULL AND (p.owner_admin_id IS NULL OR p.owner_admin_id = 0))
+         OR ($1::int IS NOT NULL AND p.owner_admin_id = $1)
+       )
+       ORDER BY p.active DESC, p.category ASC, p.name ASC, p.id DESC`,
+      [ownerAdminId]
+    );
+
+    res.json(result.rows.map(product => ({
+      ...product,
+      product_type: normalizeProductType(product.product_type),
+      stock_enabled: normalizeProductType(product.product_type) === 'manual'
+        ? Number(product.stock_enabled || 0)
+        : 1
+    })));
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error cargando productos del administrador" });
+  }
+});
+
 // ADMIN: CREAR PRODUCTO
 app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -1898,7 +1930,11 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
            product_type = $10,
            combo_items = $11,
            combo_discount = $12
-       WHERE id = $13 AND active = 1 AND ($14::int IS NULL OR owner_admin_id = $14)`,
+       WHERE id = $13
+         AND (
+           ($14::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+           OR ($14::int IS NOT NULL AND owner_admin_id = $14)
+         )`,
       [
         name.trim(),
         description || "",
@@ -1928,24 +1964,76 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
   }
 });
 
-// ADMIN: ELIMINAR PRODUCTO
-app.delete("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
+// ADMIN: CAMBIAR VISIBILIDAD DEL PRODUCTO DE FORMA REVERSIBLE
+app.patch("/api/admin/products/:productId/visibility", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const productId = req.params.productId;
+    const productId = Number(req.params.productId || 0);
+    const rawActive = req.body?.active;
+    const active = (rawActive === true || rawActive === 1 || rawActive === "1")
+      ? 1
+      : (rawActive === false || rawActive === 0 || rawActive === "0")
+        ? 0
+        : null;
 
+    if (!productId || active === null) {
+      return res.status(400).json({ error: "Producto y visibilidad válida son obligatorios" });
+    }
+
+    const ownerAdminId = req.isPanelAdmin ? req.user.id : null;
     const result = await pool.query(
-      `UPDATE products SET active = 0 WHERE id = $1 AND active = 1 AND ($2::int IS NULL OR owner_admin_id = $2)`,
-      [productId, req.isPanelAdmin ? req.user.id : null]
+      `UPDATE products
+       SET active = $1
+       WHERE id = $2
+         AND (
+           ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+           OR ($3::int IS NOT NULL AND owner_admin_id = $3)
+         )
+       RETURNING id, active`,
+      [active, productId, ownerAdminId]
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Producto no encontrado" });
+      return res.status(404).json({ error: "Producto no encontrado para este panel" });
     }
 
-    res.json({ message: "Producto eliminado correctamente" });
+    res.json({
+      message: active === 1 ? "Producto mostrado nuevamente en la tienda" : "Producto ocultado de la tienda",
+      product_id: Number(result.rows[0].id),
+      active: Number(result.rows[0].active)
+    });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: "Error eliminando producto" });
+    res.status(500).json({ error: "Error cambiando la visibilidad del producto" });
+  }
+});
+
+// Compatibilidad con el botón anterior: DELETE ahora solo oculta, nunca borra.
+app.delete("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const productId = Number(req.params.productId || 0);
+    const ownerAdminId = req.isPanelAdmin ? req.user.id : null;
+
+    const result = await pool.query(
+      `UPDATE products
+       SET active = 0
+       WHERE id = $1
+         AND active = 1
+         AND (
+           ($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+           OR ($2::int IS NOT NULL AND owner_admin_id = $2)
+         )
+       RETURNING id`,
+      [productId, ownerAdminId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Producto no encontrado o ya está oculto" });
+    }
+
+    res.json({ message: "Producto ocultado de la tienda" });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Error ocultando producto" });
   }
 });
 

@@ -1,5 +1,28 @@
 function toggleAdminProduct(id){document.getElementById('admin-product-'+id)?.classList.toggle('open')}
-async function deleteProduct(id){if(!confirm('¿Seguro que quieres eliminar este producto?'))return;try{const data=await api('/api/admin/products/'+id,{method:'DELETE'});showMessage(data.message||'Producto eliminado');await loadProducts();await loadAdminProducts();}catch(e){showMessage(e.message,'error');}}
+
+async function setProductVisibility(id, active){
+  const shouldShow=Number(active)===1;
+  const question=shouldShow
+    ? '¿Mostrar nuevamente este producto en la tienda?'
+    : '¿Ocultar este producto de la tienda? Los pedidos, ventas e historial anteriores se conservarán.';
+  if(!confirm(question)) return;
+  try{
+    const data=await api('/api/admin/products/'+id+'/visibility',{
+      method:'PATCH',
+      body:JSON.stringify({active:shouldShow?1:0})
+    });
+    showMessage(data.message||(shouldShow?'Producto visible nuevamente':'Producto ocultado de la tienda'));
+    if(typeof loadProducts==='function') await loadProducts();
+    await loadAdminProducts();
+  }catch(e){
+    showMessage(e.message||(shouldShow?'Error mostrando producto':'Error ocultando producto'),'error');
+  }
+}
+
+async function hideProduct(id){return setProductVisibility(id,0)}
+async function showProductAgain(id){return setProductVisibility(id,1)}
+// Compatibilidad con llamadas antiguas: nunca elimina, únicamente oculta.
+async function deleteProduct(id){return hideProduct(id)}
 
 function normalizeProductTypeAdmin(value){
   const clean=String(value||'streaming_auto').trim().toLowerCase();
@@ -196,17 +219,37 @@ async function createProduct(){
 
 async function loadAdminProducts(){
   if(!__productsLoadedOnce && typeof loadProducts === 'function') await loadProducts();
-  const products=Array.isArray(allProducts) ? allProducts : [];
-  if(document.getElementById('adminProductsCount'))adminProductsCount.textContent=products.length;
+
+  const productsPayload=await api('/api/admin/products');
+  const products=Array.isArray(productsPayload) ? productsPayload : [];
+  const visibleProducts=products.filter(p=>Number(p.active)!==0);
+  const hiddenProducts=products.filter(p=>Number(p.active)===0);
+
+  const count=document.getElementById('adminProductsCount');
+  if(count) count.textContent=String(products.length);
+
   const list=document.getElementById('adminProductsList');
   if(!list)return;
-  list.innerHTML=products.map(p=>{
+
+  const renderAdminProduct=(p)=>{
     const rf=parseJsonArray(p.required_fields);
     const type=normalizeProductTypeAdmin(p.product_type||'streaming_auto');
     const se=type==='manual' ? Number(p.stock_enabled||0)===1 : true;
-    return `<div class="item" id="admin-product-${p.id}">
-      <div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id}); setTimeout(()=>toggleComboEditBox(${p.id}),60)">
-        <b>${safeText(p.name)}</b>
+    const isVisible=Number(p.active)!==0;
+    const visibilityLabel=isVisible?'Visible en tienda':'Oculto de tienda';
+    const visibilityStyle=isVisible
+      ? 'background:#dcfce7;color:#166534;border:1px solid #86efac'
+      : 'background:#f1f5f9;color:#475569;border:1px solid #cbd5e1';
+    const visibilityButton=isVisible
+      ? `<button class="danger-btn" onclick="hideProduct(${p.id})">Ocultar de la tienda</button>`
+      : `<button class="green-btn" onclick="showProductAgain(${p.id})">Mostrar nuevamente</button>`;
+    const shopButton=isVisible
+      ? `<button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button>`
+      : `<button class="muted-btn" disabled title="El producto está oculto de la tienda">No visible en tienda</button>`;
+
+    return `<div class="item" id="admin-product-${p.id}" data-product-active="${isVisible?1:0}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id}); setTimeout(()=>toggleComboEditBox(${p.id}),60)">
+        <div><b>${safeText(p.name)}</b><br><span class="chip" style="${visibilityStyle};display:inline-block;margin-top:6px">${visibilityLabel}</span></div>
         <span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')} · ${type==='combo_auto'?'Combo':type==='manual'?'Manual':'Automático'}</span>
       </div>
       <div class="admin-product-body">
@@ -218,10 +261,22 @@ async function loadAdminProducts(){
         <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
         <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
         <label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>
-        <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button><button class="danger-btn" onclick="deleteProduct(${p.id})">Eliminar</button><button class="muted-btn" onclick="toggleProduct(${p.id});showSection('shop')">Ver tienda</button></div>
+        <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button>${visibilityButton}${shopButton}</div>
       </div>
-    </div>`
-  }).join('')||'No hay productos.';
+    </div>`;
+  };
+
+  const renderGroup=(title, rows, emptyText, hiddenGroup=false)=>`
+    <section class="admin-products-visibility-group" data-hidden-group="${hiddenGroup?'1':'0'}" style="margin-bottom:22px">
+      <div class="panel-head" style="margin-bottom:10px">
+        <div><h3 style="margin:0">${title} (${rows.length})</h3><p class="small-text" style="margin:4px 0 0">${hiddenGroup?'Conservan pedidos, ventas, precios, inventario e historial; no aparecen en la tienda.':'Disponibles para vendedores y distribuidores según stock y permisos.'}</p></div>
+      </div>
+      <div>${rows.length?rows.map(renderAdminProduct).join(''):`<p class="small-text">${emptyText}</p>`}</div>
+    </section>`;
+
+  list.innerHTML=renderGroup('Productos visibles',visibleProducts,'No hay productos visibles.')+
+    renderGroup('Productos ocultos',hiddenProducts,'No hay productos ocultos.',true);
+
   products.forEach(p=>{
     if(normalizeProductTypeAdmin(String(p.product_type||''))==='combo_auto'){
       renderComboOptions(`editComboItemsBox-${p.id}`, parseJsonArray(p.combo_items), `edit-${p.id}`, p.id);
