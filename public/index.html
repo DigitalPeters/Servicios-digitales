@@ -13,6 +13,25 @@
   </script>
   <style>
     html.session-token-present #authSection { display: none !important; }
+    #inventoryHistoryModalSummary.modal-summary {
+      align-items: stretch;
+    }
+    #inventoryHistoryModalSummary.modal-summary .trace-item {
+      min-width: 0;
+    }
+    #inventoryHistoryModalSummary.modal-summary .trace-label {
+      display: block;
+    }
+    #inventoryHistoryModalSummary.modal-summary .trace-value {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      line-height: 1.35;
+    }
   </style>
   <link rel="stylesheet" href="styles.css?v=10">
 </head>
@@ -486,7 +505,10 @@
             <h2>Historial de inventario</h2>
             <p class="small-text">Detalle de la cuenta madre, eventos y fechas clave.</p>
           </div>
-          <div id="inventoryHistoryModalSummary" class="trace-grid modal-summary"></div>
+          <section class="inventory-history-mother-summary" aria-labelledby="inventoryHistoryMotherSummaryTitle">
+            <h3 id="inventoryHistoryMotherSummaryTitle">Resumen de cuenta madre</h3>
+            <div id="inventoryHistoryModalSummary" class="trace-grid modal-summary"></div>
+          </section>
           <div id="inventoryTimelineModalItems" class="timeline modal-timeline"></div>
         </div>
       </div>

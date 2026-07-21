@@ -888,46 +888,107 @@ function renderInventoryHistoryModal(eventos) {
   const timelineModalItems = document.getElementById('inventoryTimelineModalItems');
   if (!summaryModal || !timelineModalItems) return;
 
-  const firstEvent = eventos[0] || {};
-  const lastEvent = eventos[eventos.length - 1] || firstEvent;
-  const fechaIngreso = firstEvent.fecha_ingreso ? new Date(firstEvent.fecha_ingreso) : null;
-  const fechaVencimiento = fechaIngreso ? new Date(fechaIngreso) : null;
-  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
-  const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
-  const estado = lastEvent.status === 'failed' || lastEvent.orden_status === 'failed'
-    ? 'Reemplazo / Falla'
-    : lastEvent.orden_id
-      ? 'Venta normal'
-      : 'En inventario';
+  const rows = Array.isArray(eventos) ? eventos : [];
+  const firstEvent = rows[0] || {};
+  const motherEmail = String(firstEvent.cuenta_madre || '').trim().toLowerCase();
+  const motherEvents = motherEmail
+    ? rows.filter(evento => String(evento.cuenta_madre || '').trim().toLowerCase() === motherEmail)
+    : rows;
 
-  // Contar perfiles únicos asociados al mismo correo (sin repetir)
-  const targetEmail = String(firstEvent.cuenta_madre || '').toLowerCase();
-  const uniqueProfiles = new Set();
-  eventos.forEach(ev => {
-    try {
-      if (!targetEmail) return;
-      if (String(ev.cuenta_madre || '').toLowerCase() !== targetEmail) return;
-      const profile = String(ev.profile_name || '').trim();
-      const pin = String(ev.profile_pin || '').trim();
-      if (profile || pin) uniqueProfiles.add(`${profile}||${pin}`);
-    } catch (e) { /* ignore malformed rows */ }
+  const parseHistoryDate = value => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    let match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (match) {
+      const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const formatHistoryDate = value => {
+    const date = value instanceof Date ? value : parseHistoryDate(value);
+    return date ? date.toLocaleDateString('es-MX') : '-';
+  };
+
+  const findFirstValue = (...fields) => {
+    for (const evento of motherEvents) {
+      for (const field of fields) {
+        const value = evento?.[field];
+        if (value !== null && value !== undefined && String(value).trim() !== '') return value;
+      }
+    }
+    return '';
+  };
+
+  const fechaOficialRaw = findFirstValue(
+    'fecha_compra',
+    'fecha_original_cuenta_madre',
+    'official_purchase_date',
+    'fecha_ingreso'
+  );
+  const fechaOficial = parseHistoryDate(fechaOficialRaw);
+  const vencimientoRegistrado = findFirstValue(
+    'vencimiento_cuenta_madre',
+    'mother_expiration',
+    'mother_account_expiration'
+  );
+  let fechaVencimiento = parseHistoryDate(vencimientoRegistrado);
+  if (!fechaVencimiento && fechaOficial) {
+    fechaVencimiento = new Date(fechaOficial);
+    fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+  }
+
+  const profileKeys = new Set();
+  motherEvents.forEach((evento, index) => {
+    const profileId = evento?.perfil_id ?? evento?.platform_account_id ?? evento?.id;
+    if (profileId !== null && profileId !== undefined && String(profileId).trim() !== '') {
+      profileKeys.add(`id:${profileId}`);
+      return;
+    }
+
+    const profileName = String(evento?.profile_name || '').trim();
+    const profilePin = String(evento?.profile_pin || '').trim();
+    if (profileName || profilePin) profileKeys.add(`profile:${profileName}|${profilePin}`);
+    else profileKeys.add(`row:${index}`);
   });
-  const perfilesCount = uniqueProfiles.size;
-  const perfilDisplay = perfilesCount ? `${perfilesCount} perfiles` : (firstEvent.profile_name ? safeText(firstEvent.profile_name) : '-');
+  const totalProfiles = profileKeys.size;
+
+  const explicitMotherStatus = String(findFirstValue(
+    'mother_account_status',
+    'mother_status',
+    'estado_cuenta_madre'
+  ) || '').trim().toLowerCase();
+  const profileStatuses = motherEvents.map(evento => String(evento?.status || evento?.orden_status || '').trim().toLowerCase());
+  let estado = 'Activa';
+  if (['replaced', 'reemplazada', 'reemplazado', 'inactive', 'inactiva'].includes(explicitMotherStatus)) {
+    estado = 'Reemplazada';
+  } else if (['active', 'activa'].includes(explicitMotherStatus)) {
+    estado = 'Activa';
+  } else if (profileStatuses.some(status => ['failed', 'fallida', 'damaged', 'dañada'].includes(status))) {
+    estado = 'Con falla';
+  }
 
   summaryModal.innerHTML = `
-    <div><strong>Correo</strong><div>${safeText(firstEvent.cuenta_madre || '-')}</div></div>
-    <div><strong>Contraseña</strong><div>${safeText(firstEvent.contrasena || '-')}</div></div>
-    <div><strong>Ingreso</strong><div>${fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-'}</div></div>
-    <div><strong>Vence</strong><div>${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : '-'}</div></div>
-    <div><strong>Estado</strong><div>${safeText(estado)}</div></div>
-    <div><strong>Perfil</strong><div>${safeText(perfilDisplay)}</div></div>
-    <div><strong>Plataforma / Producto</strong><div>${safeText(firstEvent.platform || firstEvent.product_name || '-')}</div></div>
-    <div><strong>Días restantes</strong><div>${safeText(String(diasRestantes))}</div></div>
-    <div><strong>Eventos totales</strong><div>${eventos.length}</div></div>
+    <div class="trace-item"><strong class="trace-label">Plataforma / Producto</strong><div class="trace-value">${safeText(findFirstValue('platform', 'product_name') || '-')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Correo</strong><div class="trace-value">${safeText(findFirstValue('cuenta_madre', 'account_email') || '-')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Contraseña</strong><div class="trace-value">${safeText(findFirstValue('contrasena', 'account_password') || '-')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Fecha oficial de compra</strong><div class="trace-value">${formatHistoryDate(fechaOficial)}</div></div>
+    <div class="trace-item"><strong class="trace-label">Vencimiento a 30 días</strong><div class="trace-value">${formatHistoryDate(fechaVencimiento)}</div></div>
+    <div class="trace-item"><strong class="trace-label">Total de perfiles</strong><div class="trace-value">${totalProfiles}</div></div>
+    <div class="trace-item"><strong class="trace-label">Estado</strong><div class="trace-value">${safeText(estado)}</div></div>
   `;
 
-  timelineModalItems.innerHTML = eventos.map(evento => {
+  timelineModalItems.innerHTML = rows.map(evento => {
     const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
     const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
     const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
