@@ -3726,6 +3726,9 @@ async function loadExpiringAlerts() {
   try {
     list.innerHTML = '<p class="small-text">Buscando cuentas por vencer...</p>';
     const accounts = await api('/api/alerts/expiring');
+    if(currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && typeof loadMotherAccountsAlerts === 'function'){
+      loadMotherAccountsAlerts();
+    }
 
     if (accounts.length === 0) {
       list.innerHTML = '<p style="color: green; font-weight: bold;">✅ No hay cuentas por vencer pronto. Todo al día.</p>';
@@ -3776,18 +3779,20 @@ async function loadMotherAccountsAlerts() {
       const fechaCompra = new Date(acc.official_purchase_date);
       const fechaVence = new Date(acc.mother_expiration);
       const opcionesFecha = { year: 'numeric', month: 'short', day: 'numeric' };
-      
+      const perfiles=Number(acc.profile_count || 0);
+      const disponibles=Number(acc.available_profiles || 0);
+
       return `
         <div class="item" style="border: 1px solid #ef9a9a; background: #ffebee; margin-bottom: 10px; padding: 12px; border-radius: 6px;">
-          <div style="display:flex; justify-content:space-between; align-items: center;">
+          <div style="display:flex; justify-content:space-between; align-items: center; gap:12px;">
             <div>
               <b style="color: #c62828; font-size: 16px;">Vence Proveedor: ${fechaVence.toLocaleDateString('es-MX', opcionesFecha)}</b><br>
-              <span style="font-size: 14px;"><b>Correo:</b> ${acc.account_email}</span><br>
-              <span style="font-size: 13px; color: #555;">Plataforma: ${acc.platform} | Comprada el: ${fechaCompra.toLocaleDateString('es-MX', opcionesFecha)}</span>
+              <span style="font-size: 14px;"><b>Correo:</b> ${safeText(acc.account_email || '')}</span><br>
+              <span style="font-size: 13px; color: #555;">Plataforma: ${safeText(acc.product_name || acc.platform || '')} | Fecha original: ${fechaCompra.toLocaleDateString('es-MX', opcionesFecha)}</span>
             </div>
-            <div style="text-align: right;">
-              <span style="font-size: 13px;"><b>ID:</b> #${acc.id}</span><br>
-              <span style="font-size: 13px; font-weight:bold;">Perfil: ${acc.profile_name || 'N/A'}</span>
+            <div style="text-align: right; min-width:110px;">
+              <span style="font-size: 13px;"><b>Cuenta madre:</b> #${Number(acc.id || 0)}</span><br>
+              <span style="font-size: 13px; font-weight:bold;">Perfiles: ${perfiles} · Disponibles: ${disponibles}</span>
             </div>
           </div>
         </div>
@@ -4657,8 +4662,10 @@ function parseInventoryCsvText(text){
 
   const separator=detectCsvSeparator(lines[0]);
   const headers=parseCsvLine(lines[0], separator).map(cleanCsvHeader);
-  const expected=['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte','precio_compra'];
-  const missing=expected.filter(h=>!headers.includes(h));
+  const required=['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte','precio_compra'];
+  const optional=['cuenta_madre_id','reemplaza_cuenta_madre_id','fecha_original_cuenta_madre','vencimiento_cuenta_madre'];
+  const supported=[...required,...optional];
+  const missing=required.filter(h=>!headers.includes(h));
   if(missing.length){
     throw new Error(`Encabezados faltantes en CSV: ${missing.join(', ')}`);
   }
@@ -4669,7 +4676,10 @@ function parseInventoryCsvText(text){
   return lines.slice(1).map((line, idx)=>{
     const cols=parseCsvLine(line, separator);
     const row={};
-    expected.forEach(h=>{ row[h]=String(cols[indexByHeader[h]] || '').trim(); });
+    supported.forEach(h=>{
+      const columnIndex=indexByHeader[h];
+      row[h]=columnIndex===undefined ? '' : String(cols[columnIndex] || '').trim();
+    });
     row.__rowNumber=idx+2;
     return row;
   });
@@ -4755,7 +4765,11 @@ async function downloadInventoryCsv(){
       page += 1;
     }while(page <= totalPages);
 
-    const headers = ['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte','precio_compra'];
+    const headers = [
+      'producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte',
+      'precio_compra','cuenta_madre_id','reemplaza_cuenta_madre_id',
+      'fecha_original_cuenta_madre','vencimiento_cuenta_madre'
+    ];
 
     const lines = [headers.map(csvEscape).join(',')];
     (Array.isArray(rows) ? rows : []).forEach(acc => {
@@ -4768,7 +4782,11 @@ async function downloadInventoryCsv(){
         formatInventoryCsvDate(acc.official_purchase_date),
         acc.platform || acc.product_name || '',
         acc.access_url || '',
-        acc.purchase_price ?? ''
+        acc.purchase_price ?? '',
+        acc.mother_account_id ?? '',
+        acc.reemplaza_cuenta_madre_id ?? '',
+        formatInventoryCsvDate(acc.fecha_original_cuenta_madre),
+        formatInventoryCsvDate(acc.vencimiento_cuenta_madre)
       ].map(csvEscape).join(',');
       lines.push(line);
     });

@@ -721,6 +721,136 @@ function getPlatformAccountPurchaseCost(account, fallbackCost = 0) {
   return Number.isFinite(fallback) ? Math.max(0, fallback) : 0;
 }
 
+
+async function resolveMotherAccount(client, {
+  productName,
+  accountEmail,
+  ownerAdminId,
+  purchaseDate = null,
+  originalPurchaseDate = null,
+  expirationDate = null,
+  replacesMotherAccountId = null
+}) {
+  const cleanProduct = String(productName || "").trim() || "Sin producto";
+  const cleanEmail = String(accountEmail || "").trim();
+  const cleanOwnerId = Number(ownerAdminId || 0) || null;
+  const replacementId = Number(replacesMotherAccountId || 0) || null;
+  const suppliedOriginalDate = originalPurchaseDate || purchaseDate || null;
+
+  // Evita crear dos cuentas madre para el mismo grupo durante cargas simultáneas.
+  await client.query("LOCK TABLE mother_accounts IN SHARE ROW EXCLUSIVE MODE");
+
+  if (replacementId) {
+    const previousResult = await client.query(
+      `SELECT * FROM mother_accounts WHERE id = $1 FOR UPDATE`,
+      [replacementId]
+    );
+    const previous = previousResult.rows[0];
+
+    if (!previous) {
+      throw new Error(`La cuenta madre #${replacementId} indicada para reemplazo no existe.`);
+    }
+
+    if (Number(previous.owner_admin_id || 0) !== Number(cleanOwnerId || 0)) {
+      throw new Error(`La cuenta madre #${replacementId} no pertenece a este propietario.`);
+    }
+
+    const existingReplacementResult = await client.query(
+      `SELECT *
+       FROM mother_accounts
+       WHERE replaces_mother_account_id = $1
+         AND status = 'active'
+       ORDER BY id DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [replacementId]
+    );
+
+    if (existingReplacementResult.rows[0]) {
+      return existingReplacementResult.rows[0];
+    }
+
+    const inheritedOriginalDate = previous.original_purchase_date || suppliedOriginalDate || null;
+    const inheritedExpirationDate = previous.expiration_date || expirationDate || null;
+
+    await client.query(
+      `UPDATE mother_accounts
+       SET status = 'replaced', updated_at = NOW()
+       WHERE id = $1`,
+      [replacementId]
+    );
+
+    const newMotherResult = await client.query(
+      `INSERT INTO mother_accounts
+       (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date,
+        replaces_mother_account_id, status, created_at, updated_at)
+       VALUES (
+         $1, $2, $3, $4,
+         COALESCE($5::date, CASE WHEN $4::date IS NULL THEN NULL ELSE ($4::date + INTERVAL '30 days')::date END),
+         $6, 'active', NOW(), NOW()
+       )
+       RETURNING *`,
+      [cleanProduct, cleanEmail, cleanOwnerId, inheritedOriginalDate, inheritedExpirationDate, replacementId]
+    );
+
+    const newMother = newMotherResult.rows[0];
+    await client.query(
+      `UPDATE mother_accounts
+       SET replaced_by_mother_account_id = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [newMother.id, replacementId]
+    );
+
+    return newMother;
+  }
+
+  const existingResult = await client.query(
+    `SELECT *
+     FROM mother_accounts
+     WHERE status = 'active'
+       AND lower(trim(product_name)) = lower(trim($1))
+       AND lower(trim(account_email)) = lower(trim($2))
+       AND COALESCE(owner_admin_id, 0) = COALESCE($3::int, 0)
+     ORDER BY id DESC
+     LIMIT 1
+     FOR UPDATE`,
+    [cleanProduct, cleanEmail, cleanOwnerId]
+  );
+
+  if (existingResult.rows[0]) {
+    const existing = existingResult.rows[0];
+    const updatedResult = await client.query(
+      `UPDATE mother_accounts
+       SET original_purchase_date = COALESCE(original_purchase_date, $2::date),
+           expiration_date = COALESCE(
+             expiration_date,
+             $3::date,
+             CASE WHEN COALESCE(original_purchase_date, $2::date) IS NULL THEN NULL
+                  ELSE (COALESCE(original_purchase_date, $2::date) + INTERVAL '30 days')::date END
+           ),
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [existing.id, suppliedOriginalDate, expirationDate]
+    );
+    return updatedResult.rows[0];
+  }
+
+  const createdResult = await client.query(
+    `INSERT INTO mother_accounts
+     (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status)
+     VALUES (
+       $1, $2, $3, $4,
+       COALESCE($5::date, CASE WHEN $4::date IS NULL THEN NULL ELSE ($4::date + INTERVAL '30 days')::date END),
+       'active'
+     )
+     RETURNING *`,
+    [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate, expirationDate]
+  );
+
+  return createdResult.rows[0];
+}
+
 async function getEffectiveProductPrice(client, user, product) {
   const fallbackPrice = Number(product.price || 0);
 
@@ -865,6 +995,10 @@ async function initDatabase() {
       assigned_user_id INTEGER,
       delivered_at TIMESTAMP,
       purchase_price NUMERIC,
+      reusable INTEGER DEFAULT 0,
+      official_purchase_date DATE,
+      expires_at TIMESTAMP,
+      mother_account_id INTEGER,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
@@ -961,10 +1095,84 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS purchase_price NUMERIC`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS reusable INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS official_purchase_date DATE`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS mother_account_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS manual_replacement_source TEXT DEFAULT ''`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_mother_account ON platform_accounts (mother_account_id)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mother_accounts (
+      id SERIAL PRIMARY KEY,
+      product_name VARCHAR(150) NOT NULL DEFAULT '',
+      account_email VARCHAR(255) NOT NULL DEFAULT '',
+      owner_admin_id INTEGER,
+      original_purchase_date DATE,
+      expiration_date DATE,
+      replaces_mother_account_id INTEGER REFERENCES mother_accounts(id),
+      replaced_by_mother_account_id INTEGER REFERENCES mother_accounts(id),
+      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS product_name VARCHAR(150) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS account_email VARCHAR(255) NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS original_purchase_date DATE`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS expiration_date DATE`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS replaces_mother_account_id INTEGER`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS replaced_by_mother_account_id INTEGER`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'active'`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_group ON mother_accounts (lower(product_name), lower(account_email), COALESCE(owner_admin_id, 0), status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_replaces ON mother_accounts (replaces_mother_account_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_expiration ON mother_accounts (status, expiration_date)`);
+
+  // Vincula inventario histórico a una sola cuenta madre por producto, correo y propietario.
+  await pool.query(`
+    INSERT INTO mother_accounts
+      (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status)
+    SELECT groups.product_name, groups.account_email, groups.owner_admin_id,
+           groups.original_purchase_date,
+           CASE WHEN groups.original_purchase_date IS NULL THEN NULL
+                ELSE (groups.original_purchase_date + INTERVAL '30 days')::date END,
+           'active'
+    FROM (
+      SELECT
+        COALESCE(NULLIF(TRIM(product_name), ''), NULLIF(TRIM(platform), ''), 'Sin producto') AS product_name,
+        COALESCE(TRIM(account_email), '') AS account_email,
+        owner_admin_id,
+        MIN(official_purchase_date) AS original_purchase_date
+      FROM platform_accounts
+      WHERE mother_account_id IS NULL
+      GROUP BY 1, 2, 3
+    ) groups
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM mother_accounts ma
+      WHERE ma.status = 'active'
+        AND lower(trim(ma.product_name)) = lower(trim(groups.product_name))
+        AND lower(trim(ma.account_email)) = lower(trim(groups.account_email))
+        AND COALESCE(ma.owner_admin_id, 0) = COALESCE(groups.owner_admin_id, 0)
+    )
+  `);
+
+  await pool.query(`
+    UPDATE platform_accounts pa
+    SET mother_account_id = ma.id
+    FROM mother_accounts ma
+    WHERE pa.mother_account_id IS NULL
+      AND ma.status = 'active'
+      AND lower(trim(ma.product_name)) = lower(trim(COALESCE(NULLIF(pa.product_name, ''), NULLIF(pa.platform, ''), 'Sin producto')))
+      AND lower(trim(ma.account_email)) = lower(trim(COALESCE(pa.account_email, '')))
+      AND COALESCE(ma.owner_admin_id, 0) = COALESCE(pa.owner_admin_id, 0)
+  `);
 
 
   await pool.query(`ALTER TABLE balance_requests ADD COLUMN IF NOT EXISTS bank TEXT DEFAULT ''`);
@@ -2103,15 +2311,28 @@ app.get("/api/alerts/count", authMiddleware, async (req, res) => {
 // === AQUÍ PEGAS LA NUEVA RUTA DE ALERTAS ===
 app.get("/api/admin/alerts/mother-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const query = `
-      SELECT id, platform, account_email, profile_name, official_purchase_date,
-             (official_purchase_date + INTERVAL '30 days') as mother_expiration
-      FROM platform_accounts
-      WHERE official_purchase_date IS NOT NULL
-        AND (official_purchase_date + INTERVAL '30 days') <= (CURRENT_DATE + INTERVAL '5 days')
-      ORDER BY mother_expiration ASC
-    `;
-    const result = await pool.query(query);
+    const ownerId = req.isPanelAdmin ? req.user.id : null;
+    const result = await pool.query(
+      `SELECT
+         ma.id,
+         ma.product_name AS platform,
+         ma.product_name,
+         ma.account_email,
+         ma.original_purchase_date AS official_purchase_date,
+         ma.expiration_date AS mother_expiration,
+         ma.replaces_mother_account_id,
+         COUNT(pa.id)::int AS profile_count,
+         COUNT(pa.id) FILTER (WHERE pa.status = 'available')::int AS available_profiles
+       FROM mother_accounts ma
+       LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
+       WHERE ma.status = 'active'
+         AND ma.expiration_date IS NOT NULL
+         AND ma.expiration_date <= (CURRENT_DATE + INTERVAL '5 days')::date
+         AND COALESCE(ma.owner_admin_id, 0) = COALESCE($1::int, 0)
+       GROUP BY ma.id
+       ORDER BY ma.expiration_date ASC, ma.id ASC`,
+      [ownerId]
+    );
     res.json(result.rows);
   } catch (err) {
     console.error(err.message);
@@ -2211,7 +2432,16 @@ app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (
     );
 
     const result = await pool.query(
-      `SELECT * FROM platform_accounts WHERE ${owner.clause} ORDER BY id DESC LIMIT $${owner.params.length + 1} OFFSET $${owner.params.length + 2}`,
+      `SELECT pa.*,
+              ma.replaces_mother_account_id AS reemplaza_cuenta_madre_id,
+              ma.original_purchase_date AS fecha_original_cuenta_madre,
+              ma.expiration_date AS vencimiento_cuenta_madre,
+              ma.status AS estado_cuenta_madre
+       FROM platform_accounts pa
+       LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+       WHERE ${owner.clause.replace(/owner_admin_id/g, 'pa.owner_admin_id')}
+       ORDER BY pa.id DESC
+       LIMIT $${owner.params.length + 1} OFFSET $${owner.params.length + 2}`,
       [...owner.params, limit, offset]
     );
 
@@ -2234,6 +2464,7 @@ app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (
 });
 
 app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     const {
       platform,
@@ -2246,44 +2477,66 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       terms_conditions,
       access_url,
       reusable,
-      official_purchase_date // <-- NUEVO: Recibimos la fecha
+      official_purchase_date,
+      purchase_price
     } = req.body;
 
     if (!platform || !product_name) {
       return res.status(400).json({ error: "Faltan plataforma o nombre del producto" });
     }
-    
-    // Si NO es reusable (es 0 o no existe), obligamos a que traiga correo y contraseña
+
     if (!reusable && (!account_email || !account_password)) {
       return res.status(400).json({ error: "Faltan datos obligatorios (correo y contraseña)" });
     }
 
-    const result = await pool.query(
-      // <-- NUEVO: Agregamos la columna official_purchase_date y el valor $12
+    const rawPurchasePrice = String(purchase_price ?? "").trim();
+    const parsedPurchasePrice = rawPurchasePrice === "" ? null : Number(rawPurchasePrice);
+    if (parsedPurchasePrice !== null && (!Number.isFinite(parsedPurchasePrice) || parsedPurchasePrice < 0)) {
+      return res.status(400).json({ error: "precio_compra debe ser un número mayor o igual a 0" });
+    }
+
+    await client.query("BEGIN");
+    const ownerAdminId = req.isPanelAdmin ? req.user.id : null;
+    const motherAccount = await resolveMotherAccount(client, {
+      productName: product_name,
+      accountEmail: account_email || "",
+      ownerAdminId,
+      purchaseDate: official_purchase_date || null
+    });
+
+    const result = await client.query(
       `INSERT INTO platform_accounts
-       (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12)
+       (platform, product_name, account_email, account_password, profile_name, profile_pin,
+        extra_data, terms_conditions, access_url, status, owner_admin_id, reusable,
+        official_purchase_date, purchase_price, mother_account_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13,$14)
        RETURNING *`,
       [
-        platform, 
-        product_name, 
-        account_email || "", 
-        account_password || "", 
-        profile_name || "", 
-        profile_pin || "", 
-        extra_data || "", 
-        terms_conditions || "", 
-        access_url || "", 
-        req.isPanelAdmin ? req.user.id : null,
+        platform,
+        product_name,
+        account_email || "",
+        account_password || "",
+        profile_name || "",
+        profile_pin || "",
+        extra_data || "",
+        terms_conditions || "",
+        access_url || "",
+        ownerAdminId,
         reusable === 1 ? 1 : 0,
-        official_purchase_date || null // <-- NUEVO: Mandamos la fecha o null si está vacía
+        motherAccount.original_purchase_date || official_purchase_date || null,
+        parsedPurchasePrice,
+        motherAccount.id
       ]
     );
 
+    await client.query("COMMIT");
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     console.error(err.message);
-    res.status(500).json({ error: "Error guardando cuenta de plataforma" });
+    res.status(500).json({ error: err.message || "Error guardando cuenta de plataforma" });
+  } finally {
+    client.release();
   }
 });
 
@@ -2441,8 +2694,25 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
   };
 
+  const normalizeOptionalPositiveId = (value) => {
+    const text = String(value ?? "").trim();
+    if (!text) return null;
+    if (!/^\d+$/.test(text)) return undefined;
+    const id = Number(text);
+    return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+  };
+
+  const requiredHeaders = [
+    "producto", "correo", "contrasena", "perfil", "pin", "fecha_compra",
+    "cuenta_madre", "url_soporte", "precio_compra"
+  ];
+  const optionalHeaders = [
+    "cuenta_madre_id", "reemplaza_cuenta_madre_id",
+    "fecha_original_cuenta_madre", "vencimiento_cuenta_madre"
+  ];
+  const supportedHeaders = [...requiredHeaders, ...optionalHeaders];
+
   const parseRowsFromCsvText = (csvText) => {
-    const expected = ["producto", "correo", "contrasena", "perfil", "pin", "fecha_compra", "cuenta_madre", "url_soporte", "precio_compra"];
     const normalized = String(csvText || "")
       .replace(/^\uFEFF/, "")
       .replace(/\r\n/g, "\n")
@@ -2455,7 +2725,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
 
     const separator = detectSeparator(lines[0]);
     const headers = parseCsvLine(lines[0], separator).map(normalizeHeader);
-    const missing = expected.filter((h) => !headers.includes(h));
+    const missing = requiredHeaders.filter((h) => !headers.includes(h));
     if (missing.length) {
       throw new Error(`Encabezados faltantes en CSV: ${missing.join(", ")}`);
     }
@@ -2468,8 +2738,9 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     return lines.slice(1).map((line, idx) => {
       const cols = parseCsvLine(line, separator);
       const row = {};
-      expected.forEach((h) => {
-        row[h] = String(cols[indexByHeader[h]] || "").trim();
+      supportedHeaders.forEach((h) => {
+        const columnIndex = indexByHeader[h];
+        row[h] = columnIndex === undefined ? "" : String(cols[columnIndex] || "").trim();
       });
       row.__rowNumber = idx + 2;
       return row;
@@ -2524,6 +2795,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       const cuentaMadre = String(row.cuenta_madre || "").trim();
       const urlSoporte = String(row.url_soporte || "").trim();
       const precioCompra = row.precio_compra;
+      const replacementMotherId = normalizeOptionalPositiveId(row.reemplaza_cuenta_madre_id);
 
       if (!producto) {
         errors.push(`Fila ${rowNumber}: Falta el campo producto.`);
@@ -2548,9 +2820,28 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         continue;
       }
 
+      const parsedOriginalMotherDate = normalizeInventoryDate(
+        String(row.fecha_original_cuenta_madre || "").trim() || fechaCompra
+      );
+      if (parsedOriginalMotherDate === undefined) {
+        errors.push(`Fila ${rowNumber}: fecha_original_cuenta_madre inválida. Usa DD/MM/YYYY o YYYY-MM-DD.`);
+        continue;
+      }
+
+      const parsedMotherExpiration = normalizeInventoryDate(row.vencimiento_cuenta_madre);
+      if (parsedMotherExpiration === undefined) {
+        errors.push(`Fila ${rowNumber}: vencimiento_cuenta_madre inválido. Usa DD/MM/YYYY o YYYY-MM-DD.`);
+        continue;
+      }
+
       const parsedPurchasePrice = normalizePurchasePrice(precioCompra);
       if (parsedPurchasePrice === undefined) {
         errors.push(`Fila ${rowNumber}: precio_compra debe ser un número mayor o igual a 0.`);
+        continue;
+      }
+
+      if (replacementMotherId === undefined) {
+        errors.push(`Fila ${rowNumber}: reemplaza_cuenta_madre_id debe ser un ID numérico positivo o quedar vacío.`);
         continue;
       }
 
@@ -2568,55 +2859,80 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         owner_admin_id: ownerId,
         reusable: isReusable ? 1 : 0,
         official_purchase_date: parsedDate,
-        purchase_price: parsedPurchasePrice
+        purchase_price: parsedPurchasePrice,
+        original_mother_date: parsedOriginalMotherDate,
+        mother_expiration: parsedMotherExpiration,
+        replaces_mother_account_id: replacementMotherId
       });
     }
 
     let successCount = 0;
     for (const item of preparedRows) {
+      const client = await pool.connect();
       try {
-        const insertResult = await pool.query(
-  `INSERT INTO platform_accounts
-   (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, owner_admin_id, reusable, official_purchase_date, purchase_price)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13)
-   RETURNING id`,
-  [
-    item.platform,
-    item.product_name,
-    item.account_email,
-    item.account_password,
-    item.profile_name,
-    item.profile_pin,
-    item.extra_data,
-    item.terms_conditions,
-    item.access_url,
-    item.owner_admin_id,
-    item.reusable,
-    item.official_purchase_date,
-    item.purchase_price
-  ]
-);
+        await client.query("BEGIN");
 
-const accountId = insertResult.rows[0].id;
+        const motherAccount = await resolveMotherAccount(client, {
+          productName: item.product_name,
+          accountEmail: item.account_email,
+          ownerAdminId: item.owner_admin_id,
+          purchaseDate: item.official_purchase_date,
+          originalPurchaseDate: item.original_mother_date,
+          expirationDate: item.mother_expiration,
+          replacesMotherAccountId: item.replaces_mother_account_id
+        });
 
-await addTraceEvent(pool, {
-    accountId,
-    eventType: "ACCOUNT_CREATED",
-    userId: req.user.id,
-    description: "Cuenta agregada al inventario",
-    metadata: {
-        platform: item.platform,
-        product: item.product_name,
-        email: item.account_email,
-        profile: item.profile_name,
-        purchase_date: item.official_purchase_date,
-        purchase_price: item.purchase_price
-    }
-});
+        const effectivePurchaseDate = motherAccount.original_purchase_date || item.official_purchase_date || null;
+        const insertResult = await client.query(
+          `INSERT INTO platform_accounts
+           (platform, product_name, account_email, account_password, profile_name, profile_pin,
+            extra_data, terms_conditions, access_url, status, owner_admin_id, reusable,
+            official_purchase_date, purchase_price, mother_account_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13,$14)
+           RETURNING id`,
+          [
+            item.platform,
+            item.product_name,
+            item.account_email,
+            item.account_password,
+            item.profile_name,
+            item.profile_pin,
+            item.extra_data,
+            item.terms_conditions,
+            item.access_url,
+            item.owner_admin_id,
+            item.reusable,
+            effectivePurchaseDate,
+            item.purchase_price,
+            motherAccount.id
+          ]
+        );
 
-successCount++;
+        const accountId = insertResult.rows[0].id;
+        await addTraceEvent(client, {
+          accountId,
+          eventType: "ACCOUNT_CREATED",
+          userId: req.user.id,
+          description: "Cuenta agregada al inventario",
+          metadata: {
+            platform: item.platform,
+            product: item.product_name,
+            email: item.account_email,
+            profile: item.profile_name,
+            purchase_date: effectivePurchaseDate,
+            purchase_price: item.purchase_price,
+            mother_account_id: motherAccount.id,
+            replaces_mother_account_id: motherAccount.replaces_mother_account_id || null
+          }
+        });
+
+        await client.query("COMMIT");
+        successCount++;
       } catch (insertErr) {
+        await client.query("ROLLBACK").catch(() => {});
         errors.push(`Fila ${item.rowNumber}: ${insertErr.message || "Error al insertar en base de datos."}`);
+      } finally {
+        client.release();
       }
     }
 
@@ -5556,7 +5872,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
-    const costExpr = `COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0)`;
+    const costExpr = `COALESCE(orders.product_cost_snapshot, products.cost_price, 0)`;
     const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
@@ -5733,8 +6049,8 @@ app.get("/api/admin/monthly-report", authMiddleware, adminMiddleware, async (req
          COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name) AS product_name,
          COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, 'Otros') AS product_category,
          orders.amount,
-         COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0) AS cost_price,
-         (orders.amount - COALESCE(NULLIF(orders.product_cost_snapshot, 0), products.cost_price, 0)) AS profit,
+         COALESCE(orders.product_cost_snapshot, products.cost_price, 0) AS cost_price,
+         (orders.amount - COALESCE(orders.product_cost_snapshot, products.cost_price, 0)) AS profit,
          orders.status,
          to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'YYYY-MM-DD HH24:MI:SS') AS fecha_mexico
        FROM orders
