@@ -1501,7 +1501,11 @@ async function findReportedPurchase(client, userId, accountEmail) {
      WHERE pa.assigned_user_id = $1
        AND lower(pa.account_email) = lower($2)
        AND o.status = 'exito'
-       AND pa.status IN ('delivered','failed')
+       AND pa.status = 'delivered'
+       AND (
+         lower(COALESCE(p.product_type, '')) LIKE '%combo%'
+         OR pa.id = o.assigned_platform_account_id
+       )
      ORDER BY o.id DESC
      LIMIT 1`,
     [userId, String(accountEmail || "").trim()]
@@ -1564,6 +1568,105 @@ function buildComboDeliveredAccountData(accounts) {
     "",
     blocks.join("\n\n━━━━━━━━━━━━━━\n\n")
   ].join("\n");
+}
+
+function getValidDeliveryDate(value, fallbackValue = null) {
+  const primary = value ? new Date(value) : null;
+  if (primary && !Number.isNaN(primary.getTime())) return primary;
+  const fallback = fallbackValue ? new Date(fallbackValue) : null;
+  return fallback && !Number.isNaN(fallback.getTime()) ? fallback : new Date();
+}
+
+function getValidExpirationDate(value, deliveryDate) {
+  const explicit = value ? new Date(value) : null;
+  if (explicit && !Number.isNaN(explicit.getTime())) return explicit;
+  const calculated = new Date(deliveryDate);
+  calculated.setDate(calculated.getDate() + 28);
+  return calculated;
+}
+
+function buildCurrentAccountDeliveryBlock(account, fallbackDeliveryDate = null) {
+  const deliveryDate = getValidDeliveryDate(account?.delivered_at, fallbackDeliveryDate);
+  const expirationDate = getValidExpirationDate(account?.expires_at, deliveryDate);
+  const lines = [
+    `📌 Plataforma: ${String(account?.platform || account?.product_name || '').toUpperCase()}`,
+    `🆔 Cuenta entregada: ${Number(account?.id || 0) || ''}`,
+    `📧 Correo: ${account?.account_email || ''}`,
+    `🔐 Contraseña: ${account?.account_password || ''}`,
+    `👤 Perfil: ${account?.profile_name || 'No aplica'}`,
+    `🔢 PIN de acceso: ${account?.profile_pin || 'No aplica'}`,
+    `📅 Fecha de entrega: ${formatFechaMX(deliveryDate)}`,
+    `📅 Fecha de vencimiento: ${formatFechaMX(expirationDate)}`
+  ];
+
+  if (account?.access_url) lines.push(`🔗 URL para código/soporte: ${account.access_url}`);
+  if (account?.extra_data) lines.push(`📝 Datos adicionales: ${account.extra_data}`);
+  return lines.join("\n");
+}
+
+function buildCurrentOrderDeliveredAccountData(order, accounts) {
+  const currentAccounts = (Array.isArray(accounts) ? accounts : []).filter(account => Number(account?.id || 0) > 0);
+  if (!currentAccounts.length) return '';
+
+  const isCombo = normalizeProductType(order?.product_type) === 'combo_auto' || currentAccounts.length > 1;
+  if (isCombo) {
+    return [
+      '🎬 Combo Streaming Entregado',
+      '',
+      currentAccounts
+        .map(account => buildCurrentAccountDeliveryBlock(account, order?.created_at))
+        .join("\n\n━━━━━━━━━━━━━━\n\n")
+    ].join("\n");
+  }
+
+  const account = currentAccounts[0];
+  return [
+    '🎬 Cuenta de Streaming Entregada',
+    '',
+    buildCurrentAccountDeliveryBlock(account, order?.created_at),
+    '',
+    '📌 Normas de uso:',
+    '✅ No editar datos de acceso',
+    '✅ No cambiar el nombre ni el código del perfil',
+    '✅ Uso exclusivo en un solo equipo',
+    '✅ No compartir el acceso con otros',
+    '',
+    'Evita incumplir estas reglas para mantener el servicio activo sin inconvenientes.'
+  ].join("\n");
+}
+
+async function getCurrentOrderDeliveryState(client, orderId) {
+  const orderResult = await client.query(
+    `SELECT o.id, o.user_id, o.created_at, o.product_id,
+            COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, '') AS product_name,
+            COALESCE(NULLIF(o.product_category_snapshot, ''), p.category, '') AS product_category,
+            p.product_type
+     FROM orders o
+     LEFT JOIN products p ON p.id = o.product_id
+     WHERE o.id = $1
+     LIMIT 1`,
+    [orderId]
+  );
+  const order = orderResult.rows[0] || null;
+  if (!order) return { order: null, accounts: [], deliveredAccountData: '' };
+
+  const accountsResult = await client.query(
+    `SELECT id, platform, product_name, account_email, account_password,
+            profile_name, profile_pin, access_url, extra_data, status,
+            assigned_order_id, assigned_user_id, delivered_at, expires_at
+     FROM platform_accounts
+     WHERE assigned_order_id = $1
+       AND assigned_user_id = $2
+       AND status = 'delivered'
+     ORDER BY id ASC`,
+    [orderId, order.user_id]
+  );
+
+  return {
+    order,
+    accounts: accountsResult.rows,
+    deliveredAccountData: buildCurrentOrderDeliveredAccountData(order, accountsResult.rows)
+  };
 }
 
 async function findAvailableAccountForProduct(client, product, userId) {
@@ -3210,6 +3313,8 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
           OR orders.id::text ILIKE '%' || $2 || '%'
           OR COALESCE(products.name, '') ILIKE '%' || $2 || '%'
           OR COALESCE(products.category, '') ILIKE '%' || $2 || '%'
+          OR COALESCE(current_account.account_email, '') ILIKE '%' || $2 || '%'
+          OR COALESCE(current_account.profile_name, '') ILIKE '%' || $2 || '%'
           OR COALESCE(orders.delivered_account_data, '') ILIKE '%' || $2 || '%'
           OR COALESCE(orders.admin_response, '') ILIKE '%' || $2 || '%'
         )
@@ -3223,6 +3328,7 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
       `SELECT COUNT(*)::int AS total
        FROM orders
        JOIN products ON orders.product_id = products.id
+       LEFT JOIN platform_accounts current_account ON current_account.id = orders.assigned_platform_account_id AND current_account.status = 'delivered'
        ${whereSql}`,
       params
     );
@@ -3241,12 +3347,44 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
         orders.charged,
         orders.refunded,
         orders.created_at,
+        orders.assigned_platform_account_id,
+        current_account.id AS current_account_id,
+        current_account.platform AS current_platform,
+        current_account.product_name AS current_account_product_name,
+        current_account.account_email AS current_account_email,
+        current_account.account_password AS current_account_password,
+        current_account.profile_name AS current_profile_name,
+        current_account.profile_pin AS current_profile_pin,
+        current_account.delivered_at AS current_delivered_at,
+        current_account.expires_at AS current_expires_at,
+        current_account.access_url AS current_access_url,
         products.name AS product_name,
         products.category AS product_category,
         products.charge_mode AS charge_mode,
-        products.product_type AS product_type
+        products.product_type AS product_type,
+        COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'id', active_account.id,
+              'platform', active_account.platform,
+              'product_name', active_account.product_name,
+              'account_email', active_account.account_email,
+              'account_password', active_account.account_password,
+              'profile_name', active_account.profile_name,
+              'profile_pin', active_account.profile_pin,
+              'delivered_at', active_account.delivered_at,
+              'expires_at', active_account.expires_at,
+              'access_url', active_account.access_url
+            ) ORDER BY CASE WHEN active_account.id = orders.assigned_platform_account_id THEN 0 ELSE 1 END, active_account.id ASC
+          )
+          FROM platform_accounts active_account
+          WHERE active_account.assigned_order_id = orders.id
+            AND active_account.assigned_user_id = orders.user_id
+            AND active_account.status = 'delivered'
+        ), '[]'::json) AS current_accounts
        FROM orders
        JOIN products ON orders.product_id = products.id
+       LEFT JOIN platform_accounts current_account ON current_account.id = orders.assigned_platform_account_id AND current_account.status = 'delivered'
        ${whereSql}
        ORDER BY orders.id DESC
        LIMIT $4 OFFSET $5`,
@@ -4087,7 +4225,11 @@ app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
        WHERE pa.assigned_user_id = $1
          AND o.user_id = $1
          AND o.status = 'exito'
-         AND pa.status IN ('delivered','failed')
+         AND pa.status = 'delivered'
+         AND (
+           lower(COALESCE(p.product_type, '')) LIKE '%combo%'
+           OR pa.id = o.assigned_platform_account_id
+         )
        ORDER BY o.id DESC, pa.id ASC`,
       [req.user.id]
     );
@@ -4144,7 +4286,11 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
            AND pa.assigned_user_id = $2
            AND o.user_id = $2
            AND o.status = 'exito'
-           AND pa.status IN ('delivered','failed')
+           AND pa.status = 'delivered'
+           AND (
+             lower(COALESCE(p.product_type, '')) LIKE '%combo%'
+             OR pa.id = o.assigned_platform_account_id
+           )
          LIMIT 1`,
         [reportedAccountId, userId]
       );
@@ -4689,12 +4835,14 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
         return res.status(400).json({ error: "No hay cuenta disponible válida para esa plataforma. Puedes capturar una cuenta manual." });
       }
 
-      await client.query(
+      const deliveredReplacementResult = await client.query(
         `UPDATE platform_accounts
          SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW(), expires_at = $4
-         WHERE id = $3`,
+         WHERE id = $3
+         RETURNING *`,
         [report.order_id, report.user_id, newAccount.id, expirationDate]
       );
+      newAccount = deliveredReplacementResult.rows[0] || newAccount;
     }
 // Solo descontar stock cuando se toma una cuenta del inventario
 if (!(manual === true || manual === "true")) {
@@ -4709,17 +4857,27 @@ if (!(manual === true || manual === "true")) {
 
       // ----------------------------------------------
 
-     const deliveredAccountData = buildDeliveredAccountData(newAccount, report.product_name, report.product_category, report.order_created_at);
-    
     const failedGroupResult = await markFailedAccountEmailGroup(client, {
       reportedAccountId: resolvedReportedAccountId,
       accountEmail: failedAccountEmail,
       ownerAdminId: failedAccountOwnerAdminId
     });
 
+    const currentDeliveryState = await getCurrentOrderDeliveryState(client, report.order_id);
+    const deliveredAccountData = currentDeliveryState.deliveredAccountData;
+    if (!deliveredAccountData) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(500).json({ error: "No se pudo reconstruir la entrega vigente del pedido" });
+    }
+
     await client.query(
       `UPDATE orders
-       SET assigned_platform_account_id = $1, delivered_account_data = $2, admin_response = $2, status = 'exito', owner_admin_id = COALESCE(owner_admin_id, $4)
+       SET assigned_platform_account_id = $1,
+           delivered_account_data = $2,
+           admin_response = $2,
+           status = 'exito',
+           owner_admin_id = COALESCE(owner_admin_id, $4)
        WHERE id = $3`,
       [newAccount.id, deliveredAccountData, report.order_id, ownerAdminId]
     );

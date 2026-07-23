@@ -761,9 +761,10 @@ function renderMyOrders(){
   if(!myOrdersList) return;
   myOrdersList.innerHTML=rows.map(o=>{
     const data=parseJsonObject(o.order_data);
-    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta</button>`:'';
-    const reportButton=hasAccountDelivery(o)?`<button class="copy-account-btn danger-btn" onclick="reportDeliveredAccount(${o.id})">⚠ Reportar falla</button>`:'';
-    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${renderWarrantyNotice(o)}${renderOrderData(data, o.id)}<p><b>Respuesta:</b></p><div class="response-text">${safeText(o.admin_response||'Sin respuesta todavía')}</div>${copyButton}${reportButton}</div>`;
+    const currentAccountsHtml=typeof renderCurrentOrderAccounts==='function' ? renderCurrentOrderAccounts(o) : '';
+    const currentDeliveryText=typeof getAccountTextFromOrder==='function' ? getAccountTextFromOrder(o) : String(o.delivered_account_data||o.admin_response||'');
+    const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'my')">📋 Copiar datos de cuenta vigente</button>`:'';
+    return `<div class="item"><p><b>Pedido:</b> #${o.id}</p><p><b>Producto:</b> ${safeText(o.product_name)}</p><p><b>Monto:</b> $${formatMoney(o.amount)}</p><p><b>Estado:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>${currentAccountsHtml}${renderWarrantyNotice(o)}${renderOrderData(data, o.id)}<p><b>Entrega / respuesta vigente:</b></p><div class="response-text">${safeText(currentDeliveryText||'Sin respuesta todavía')}</div>${copyButton}</div>`;
   }).join('')||'No hay pedidos con esos filtros.';
 }
 

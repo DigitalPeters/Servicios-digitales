@@ -129,34 +129,30 @@ window.copyReplacementReportData = function copyReplacementReportData(reportId) 
 
 window.reportReplacementAccount = async function reportReplacementAccount(reportId) {
   const report = getMyAccountReportById(reportId);
-  const data = extractReplacementDeliveryData(report);
-  const email = extractDeliveredAccountEmail(data) || String(report?.email || '').trim();
-  const accountId = Number(report?.replacement_account_id || report?.reported_account_id || 0);
+  const accountId = Number(report?.replacement_account_id || 0);
 
-  if (!report || !email) {
-    showMessage('No pude identificar la cuenta reemplazada para reportarla', 'error');
+  if (!report || accountId <= 0) {
+    showMessage('No pude identificar el perfil exacto de reemplazo para reportarlo', 'error');
     return;
   }
 
   showSection('reports');
 
-  if (typeof window.ensureReportSelectStable === 'function') {
-    window.ensureReportSelectStable();
-  }
-  if (typeof window.loadReportableAccountsStable === 'function') {
-    await window.loadReportableAccountsStable();
-  }
+  if (typeof window.ensureReportSelectStable === 'function') window.ensureReportSelectStable();
+  if (typeof window.loadReportableAccountsStable === 'function') await window.loadReportableAccountsStable();
 
   const select = document.getElementById('reporteCuentaSelect');
-  if (select && accountId > 0) {
-    select.value = String(accountId);
-    if (select.value === String(accountId)) {
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    }
+  if (!select) {
+    showMessage('No se encontró el selector de cuentas reportables', 'error');
+    return;
   }
 
-  const emailInput = document.getElementById('reporteCorreo');
-  if (emailInput) emailInput.value = email;
+  select.value = String(accountId);
+  if (select.value !== String(accountId)) {
+    showMessage('La cuenta de reemplazo ya no está vigente o no está disponible para reportar', 'error');
+    return;
+  }
+  select.dispatchEvent(new Event('change', { bubbles: true }));
 
   const description = document.getElementById('reporteExplicacion');
   if (description) {
@@ -164,7 +160,7 @@ window.reportReplacementAccount = async function reportReplacementAccount(report
     setTimeout(() => description.focus(), 100);
   }
 
-  showMessage('Cuenta reemplazada seleccionada. Describe la nueva falla.');
+  showMessage('Perfil de reemplazo seleccionado. Describe la nueva falla.');
 };
 
 async function loadMyReports(page = currentMyReportsPage) {
@@ -466,9 +462,69 @@ function copyText(t) {
   copyToClipboard(t, 'Copiado');
 }
 
+function parseCurrentAccountsFromOrder(order) {
+  let accounts = order?.current_accounts;
+  if (typeof accounts === 'string') {
+    try { accounts = JSON.parse(accounts); } catch (_) { accounts = []; }
+  }
+  accounts = Array.isArray(accounts) ? accounts : [];
+
+  const currentId = Number(order?.current_account_id || order?.assigned_platform_account_id || 0);
+  if (currentId > 0 && !accounts.some((account) => Number(account?.id || 0) === currentId)) {
+    accounts.unshift({
+      id: currentId,
+      platform: order?.current_platform || order?.current_account_product_name || order?.product_name || '',
+      product_name: order?.current_account_product_name || order?.current_platform || order?.product_name || '',
+      account_email: order?.current_account_email || '',
+      account_password: order?.current_account_password || '',
+      profile_name: order?.current_profile_name || '',
+      profile_pin: order?.current_profile_pin || '',
+      delivered_at: order?.current_delivered_at || null,
+      expires_at: order?.current_expires_at || null,
+      access_url: order?.current_access_url || ''
+    });
+  }
+
+  return accounts.filter((account) => Number(account?.id || 0) > 0);
+}
+
+function getCurrentAccountFromOrder(order, accountId = 0) {
+  const accounts = parseCurrentAccountsFromOrder(order);
+  const exactId = Number(accountId || 0);
+  if (exactId > 0) return accounts.find((account) => Number(account.id) === exactId) || null;
+  const assignedId = Number(order?.current_account_id || order?.assigned_platform_account_id || 0);
+  return accounts.find((account) => Number(account.id) === assignedId) || accounts[0] || null;
+}
+
+function formatCurrentAccountDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('es-MX');
+}
+
+function renderCurrentOrderAccounts(order) {
+  const accounts = parseCurrentAccountsFromOrder(order);
+  if (!accounts.length) return '';
+  return `<div class="order-data current-order-accounts"><b>Cuenta${accounts.length > 1 ? 's' : ''} vigente${accounts.length > 1 ? 's' : ''}:</b>${accounts.map((account) => `
+    <div class="current-order-account" style="margin-top:8px;padding-top:8px;border-top:1px solid #dbe2ea">
+      <p style="margin:4px 0"><b>ID:</b> #${Number(account.id)}</p>
+      <p style="margin:4px 0"><b>Plataforma:</b> ${safeText(account.platform || account.product_name || order?.product_name || '-')}</p>
+      <p style="margin:4px 0"><b>Correo:</b> ${safeText(account.account_email || '-')}</p>
+      <p style="margin:4px 0"><b>Contraseña:</b> ${safeText(account.account_password || '-')}</p>
+      <p style="margin:4px 0"><b>Perfil:</b> ${safeText(account.profile_name || 'No aplica')} &nbsp; <b>PIN:</b> ${safeText(account.profile_pin || 'No aplica')}</p>
+      <p style="margin:4px 0"><b>Entregada:</b> ${safeText(formatCurrentAccountDate(account.delivered_at))} &nbsp; <b>Vence:</b> ${safeText(formatCurrentAccountDate(account.expires_at))}</p>
+      ${account.access_url ? `<p style="margin:4px 0"><b>URL:</b> ${safeText(account.access_url)}</p>` : ''}
+      <button class="copy-account-btn danger-btn" type="button" onclick="reportDeliveredAccount(${Number(order?.id || 0)}, ${Number(account.id)})">⚠ Reportar falla de este perfil</button>
+    </div>`).join('')}</div>`;
+}
+
 function getAccountTextFromOrder(order) {
   return String(order?.delivered_account_data || order?.admin_response || '').trim();
 }
+
+window.parseCurrentAccountsFromOrder = parseCurrentAccountsFromOrder;
+window.getCurrentAccountFromOrder = getCurrentAccountFromOrder;
+window.renderCurrentOrderAccounts = renderCurrentOrderAccounts;
 
 function copyToClipboard(text, successMessage = 'Copiado') {
   const value = String(text || '').trim();
@@ -749,19 +805,39 @@ function extractAccountEmailFromText(text) {
   return match ? match[1].trim() : '';
 }
 
-function reportDeliveredAccount(orderId) {
-  const order = myOrders.find((o) => Number(o.id) === Number(orderId));
-  const text = getAccountTextFromOrder(order);
-  const email = extractAccountEmailFromText(text);
-  if (!email) {
-    showMessage('No pude detectar el correo de esta cuenta para reportarla', 'error');
+async function reportDeliveredAccount(orderId, accountId = 0) {
+  const order = myOrders.find((item) => Number(item.id) === Number(orderId));
+  const account = getCurrentAccountFromOrder(order, accountId);
+  const exactAccountId = Number(account?.id || accountId || 0);
+
+  if (!order || exactAccountId <= 0) {
+    showMessage('No pude identificar el perfil vigente exacto de este pedido', 'error');
     return;
   }
+
   showSection('reports');
-  const input = document.getElementById('reporteCorreo');
-  if (input) {
-    input.value = email;
+  if (typeof window.ensureReportSelectStable === 'function') window.ensureReportSelectStable();
+  if (typeof window.loadReportableAccountsStable === 'function') await window.loadReportableAccountsStable();
+
+  const select = document.getElementById('reporteCuentaSelect');
+  if (!select) {
+    showMessage('No se encontró el selector de cuentas reportables', 'error');
+    return;
   }
-  copyToClipboard(email, 'Correo copiado y colocado en el reporte');
-  setTimeout(() => document.getElementById('reporteExplicacion')?.focus(), 150);
+
+  select.value = String(exactAccountId);
+  if (select.value !== String(exactAccountId)) {
+    showMessage('Ese perfil ya no es la cuenta vigente del pedido', 'error');
+    return;
+  }
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+
+  const input = document.getElementById('reporteCorreo');
+  if (input && account?.account_email) input.value = String(account.account_email);
+  const description = document.getElementById('reporteExplicacion');
+  if (description) {
+    description.value = '';
+    setTimeout(() => description.focus(), 100);
+  }
+  showMessage(`Perfil vigente #${exactAccountId} seleccionado. Describe la falla.`);
 }
