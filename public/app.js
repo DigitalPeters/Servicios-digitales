@@ -849,10 +849,19 @@ function formatInventoryHistoryDate(value) {
 }
 
 function getInventoryHistoryOfficialDate(evento) {
-  return evento?.cycle_official_purchase_date
+  return evento?.fecha_original_cuenta_madre
+    || evento?.cycle_official_purchase_date
     || evento?.official_purchase_date
     || evento?.fecha_compra
-    || evento?.fecha_original_cuenta_madre
+    || evento?.stored_official_purchase_date
+    || '';
+}
+
+function getInventoryHistoryExpirationDate(evento) {
+  return evento?.vencimiento_cuenta_madre
+    || evento?.mother_account_expiration
+    || evento?.expiration_date
+    || evento?.expires_at
     || '';
 }
 
@@ -866,8 +875,13 @@ function getInventoryHistoryCycleDateKey(evento) {
 }
 
 function getInventoryHistoryCycleKey(evento) {
+  const motherAccountId = evento?.cuenta_madre_id ?? evento?.mother_account_id;
+  if (motherAccountId !== null && motherAccountId !== undefined && String(motherAccountId).trim() !== '') {
+    return `mother:${String(motherAccountId).trim()}`;
+  }
+
   const email = String(evento?.cuenta_madre || evento?.account_email || '').trim().toLowerCase();
-  return `${email}||${getInventoryHistoryCycleDateKey(evento)}`;
+  return `legacy:${email}||${getInventoryHistoryCycleDateKey(evento)}`;
 }
 
 function getInventoryHistoryTimestamp(value) {
@@ -898,14 +912,31 @@ function groupInventoryHistoryCycles(eventos) {
         key,
         email: String(evento?.cuenta_madre || evento?.account_email || '').trim(),
         motherAccountId: evento?.cuenta_madre_id ?? evento?.mother_account_id ?? '',
+        replacesMotherAccountId: evento?.reemplaza_cuenta_madre_id ?? '',
         officialDate: getInventoryHistoryOfficialDate(evento),
+        expirationDate: getInventoryHistoryExpirationDate(evento),
+        motherStatus: evento?.mother_account_status || '',
+        totalProfiles: Number(evento?.total_perfiles || 0),
+        latestCreatedAt: getInventoryHistoryTimestamp(evento?.created_at || evento?.fecha_ingreso),
         events: []
       });
     }
-    cycleMap.get(key).events.push(evento);
+
+    const cycle = cycleMap.get(key);
+    cycle.events.push(evento);
+    cycle.totalProfiles = Math.max(cycle.totalProfiles, Number(evento?.total_perfiles || 0));
+    cycle.latestCreatedAt = Math.max(cycle.latestCreatedAt, getInventoryHistoryTimestamp(evento?.created_at || evento?.fecha_ingreso));
+    if (!cycle.officialDate) cycle.officialDate = getInventoryHistoryOfficialDate(evento);
+    if (!cycle.expirationDate) cycle.expirationDate = getInventoryHistoryExpirationDate(evento);
+    if (!cycle.motherStatus) cycle.motherStatus = evento?.mother_account_status || '';
   });
 
-  return Array.from(cycleMap.values());
+  return Array.from(cycleMap.values()).sort((a, b) => {
+    const officialA = parseInventoryHistoryDate(a.officialDate)?.getTime() || 0;
+    const officialB = parseInventoryHistoryDate(b.officialDate)?.getTime() || 0;
+    if (officialA !== officialB) return officialB - officialA;
+    return b.latestCreatedAt - a.latestCreatedAt;
+  });
 }
 
 function isInventoryHistoryUnassigned(evento) {
@@ -924,10 +955,9 @@ function isInventoryHistoryUnassigned(evento) {
   return availableStatus && !hasAssignedUser && !hasAssignedOrder && !hasOrder && !hasSeller;
 }
 
-function countInventoryHistoryProfiles(eventos, onlyUnassigned = false) {
+function countInventoryHistoryProfiles(eventos) {
   const profileKeys = new Set();
-  const rows = (Array.isArray(eventos) ? eventos : [])
-    .filter(evento => !onlyUnassigned || isInventoryHistoryUnassigned(evento));
+  const rows = Array.isArray(eventos) ? eventos : [];
 
   rows.forEach((evento, index) => {
     const profileId = evento?.perfil_id ?? evento?.platform_account_id ?? evento?.id;
@@ -944,42 +974,64 @@ function countInventoryHistoryProfiles(eventos, onlyUnassigned = false) {
   return profileKeys.size;
 }
 
+function getInventoryHistoryCycleTotal(cycle) {
+  const serverTotal = Number(cycle?.totalProfiles || 0);
+  return serverTotal > 0 ? serverTotal : countInventoryHistoryProfiles(cycle?.events || []);
+}
+
+function getInventoryHistoryCycleExpiration(cycle) {
+  const storedExpiration = parseInventoryHistoryDate(cycle?.expirationDate);
+  if (storedExpiration) return storedExpiration;
+
+  const officialDate = parseInventoryHistoryDate(cycle?.officialDate);
+  if (!officialDate) return null;
+  const calculated = new Date(officialDate);
+  calculated.setDate(calculated.getDate() + 30);
+  return calculated;
+}
+
 function renderInventoryHistorySummary(events) {
   const cycles = groupInventoryHistoryCycles(events);
   const currentCycle = cycles[0] || { events: [] };
   const currentEvents = currentCycle.events;
-  const currentAvailableEvents = currentEvents.filter(isInventoryHistoryUnassigned);
-  const visibleCurrentEvents = currentAvailableEvents.length ? currentAvailableEvents : currentEvents;
-  const firstEvent = visibleCurrentEvents[0] || {};
-  const lastEvent = visibleCurrentEvents[visibleCurrentEvents.length - 1] || firstEvent;
-  const fechaOficial = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(firstEvent));
+  const firstEvent = currentEvents[0] || {};
+  const lastEvent = currentEvents[currentEvents.length - 1] || firstEvent;
   const fechaIngreso = firstEvent.fecha_ingreso ? new Date(firstEvent.fecha_ingreso) : null;
-  const fechaVencimiento = fechaOficial ? new Date(fechaOficial) : null;
-  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+  const fechaVencimiento = getInventoryHistoryCycleExpiration(currentCycle);
   const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
-  const estado = lastEvent.status === 'failed' || lastEvent.orden_status === 'failed'
-    ? 'Reemplazo / Falla'
-    : lastEvent.orden_id
-      ? 'Venta normal'
-      : 'En inventario';
+  const explicitStatus = String(currentCycle.motherStatus || '').trim().toLowerCase();
+  const estado = ['replaced', 'reemplazada', 'reemplazado', 'inactive', 'inactiva'].includes(explicitStatus)
+    ? 'Reemplazada'
+    : ['active', 'activa'].includes(explicitStatus)
+      ? 'Activa'
+      : lastEvent.status === 'failed' || lastEvent.orden_status === 'failed'
+        ? 'Reemplazo / Falla'
+        : lastEvent.orden_id
+          ? 'Venta normal'
+          : 'En inventario';
 
   document.getElementById('inventoryEmail').textContent = firstEvent.cuenta_madre || '-';
   document.getElementById('inventoryProfile').textContent = firstEvent.profile_name || '-';
   document.getElementById('inventoryPlatform').textContent = firstEvent.platform || firstEvent.product_name || '-';
   document.getElementById('inventoryStatus').textContent = estado;
   document.getElementById('inventoryEntered').textContent = fechaIngreso ? fechaIngreso.toLocaleDateString('es-MX') : '-';
-  document.getElementById('inventoryExpire').textContent = fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : '-';
+  document.getElementById('inventoryExpire').textContent = formatInventoryHistoryDate(fechaVencimiento);
   document.getElementById('inventoryLifeDays').textContent = String(diasRestantes);
-  document.getElementById('inventoryEventsCount').textContent = String(countInventoryHistoryProfiles(currentEvents, true));
+  document.getElementById('inventoryEventsCount').textContent = String(getInventoryHistoryCycleTotal(currentCycle));
 }
 
 function renderInventoryHistoryEventCard(evento) {
   const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
   const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
   const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
-  const fechaOficial = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(evento));
-  const fechaVencimiento = fechaOficial ? new Date(fechaOficial) : null;
-  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+  let fechaVencimiento = parseInventoryHistoryDate(getInventoryHistoryExpirationDate(evento));
+  if (!fechaVencimiento) {
+    const fechaOficial = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(evento));
+    if (fechaOficial) {
+      fechaVencimiento = new Date(fechaOficial);
+      fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+    }
+  }
   const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
   const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
   const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
@@ -1012,19 +1064,19 @@ function renderInventoryHistoryCycles(eventos) {
   return cycles.map((cycle, index) => {
     const cycleLabel = index === 0 ? 'Ciclo actual' : 'Ciclo anterior';
     const dateLabel = formatInventoryHistoryDate(cycle.officialDate);
-    const cycleProfileCount = index === 0
-      ? countInventoryHistoryProfiles(cycle.events, true)
-      : countInventoryHistoryProfiles(cycle.events);
-    const cycleProfileLabel = index === 0 ? 'Perfiles disponibles en este ciclo' : 'Perfiles en este ciclo';
+    const expirationLabel = formatInventoryHistoryDate(getInventoryHistoryCycleExpiration(cycle));
+    const cycleProfileCount = getInventoryHistoryCycleTotal(cycle);
     return `
       <section class="inventory-history-cycle" data-cycle-key="${safeText(cycle.key)}">
         <div class="timeline-event" style="border-left:4px solid ${index === 0 ? '#2563eb' : '#94a3b8'};padding:12px 14px;margin-bottom:12px;">
           <div class="timeline-title">${safeText(cycleLabel)}</div>
           <div class="timeline-details">
             <p><strong>ID cuenta madre:</strong> ${safeText(String(cycle.motherAccountId || '-'))}</p>
+            <p><strong>Reemplaza cuenta madre:</strong> ${safeText(String(cycle.replacesMotherAccountId || '-'))}</p>
             <p><strong>Correo:</strong> ${safeText(cycle.email || 'Sin correo')}</p>
             <p><strong>Fecha oficial de compra:</strong> ${safeText(dateLabel)}</p>
-            <p><strong>${safeText(cycleProfileLabel)}:</strong> ${cycleProfileCount}</p>
+            <p><strong>Vencimiento:</strong> ${safeText(expirationLabel)}</p>
+            <p><strong>Perfiles en este ciclo:</strong> ${cycleProfileCount}</p>
           </div>
         </div>
         ${cycle.events.map(renderInventoryHistoryEventCard).join('')}
@@ -1047,11 +1099,9 @@ function renderInventoryHistoryModal(eventos) {
   const cycles = groupInventoryHistoryCycles(eventos);
   const currentCycle = cycles[0] || { events: [] };
   const currentEvents = currentCycle.events;
-  const currentAvailableEvents = currentEvents.filter(isInventoryHistoryUnassigned);
-  const summaryEvents = currentAvailableEvents.length ? currentAvailableEvents : currentEvents;
 
   const findCurrentValue = (...fields) => {
-    for (const evento of summaryEvents) {
+    for (const evento of currentEvents) {
       for (const field of fields) {
         const value = evento?.[field];
         if (value !== null && value !== undefined && String(value).trim() !== '') return value;
@@ -1060,27 +1110,25 @@ function renderInventoryHistoryModal(eventos) {
     return '';
   };
 
-  const fechaOficialRaw = currentCycle.officialDate || findCurrentValue(
+  const fechaOficial = parseInventoryHistoryDate(currentCycle.officialDate || findCurrentValue(
+    'fecha_original_cuenta_madre',
+    'cycle_official_purchase_date',
     'official_purchase_date',
-    'fecha_compra',
-    'fecha_original_cuenta_madre'
-  );
-  const fechaOficial = parseInventoryHistoryDate(fechaOficialRaw);
-  const fechaVencimiento = fechaOficial ? new Date(fechaOficial) : null;
-  if (fechaVencimiento) fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+    'fecha_compra'
+  ));
+  const fechaVencimiento = getInventoryHistoryCycleExpiration(currentCycle);
+  const totalProfiles = getInventoryHistoryCycleTotal(currentCycle);
 
-  const totalProfiles = countInventoryHistoryProfiles(currentEvents, true);
-
-  const explicitMotherStatus = String(findCurrentValue(
+  const explicitMotherStatus = String(currentCycle.motherStatus || findCurrentValue(
     'mother_account_status',
     'mother_status',
     'estado_cuenta_madre'
   ) || '').trim().toLowerCase();
   const profileStatuses = currentEvents.map(evento => String(evento?.status || evento?.orden_status || '').trim().toLowerCase());
-  let estado = totalProfiles > 0 ? 'Activa' : 'Sin perfiles disponibles';
-  if (totalProfiles === 0 && ['replaced', 'reemplazada', 'reemplazado', 'inactive', 'inactiva'].includes(explicitMotherStatus)) {
+  let estado = 'Activa';
+  if (['replaced', 'reemplazada', 'reemplazado', 'inactive', 'inactiva'].includes(explicitMotherStatus)) {
     estado = 'Reemplazada';
-  } else if (totalProfiles > 0 || ['active', 'activa'].includes(explicitMotherStatus)) {
+  } else if (['active', 'activa'].includes(explicitMotherStatus)) {
     estado = 'Activa';
   } else if (profileStatuses.some(status => ['failed', 'fallida', 'damaged', 'dañada'].includes(status))) {
     estado = 'Con falla';
