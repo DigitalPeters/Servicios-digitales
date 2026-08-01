@@ -1,5 +1,12 @@
 // Indicador de productos sin stock para dashboard/admin
 function isProductOutOfStock(product){
+  if(typeof getShopStockState === 'function'){
+    return getShopStockState(product).soldOut;
+  }
+
+  const mode=String(product?.stock_mode || '').toLowerCase();
+  const type=String(product?.product_type || '').toLowerCase();
+  if(mode==='unlimited' || mode==='combo' || Number(product?.unlimited_stock || 0)===1 || type.includes('combo')) return false;
   return Number(product?.stock_enabled || 0) === 1 && Number(product?.stock || 0) <= 0;
 }
 

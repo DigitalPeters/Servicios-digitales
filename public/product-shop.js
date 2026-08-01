@@ -1,5 +1,28 @@
 let currentShopCategory = null;
 
+function getShopStockState(product) {
+  const productType = String(product?.product_type || '').toLowerCase();
+  const explicitMode = String(product?.stock_mode || '').toLowerCase();
+  const unlimited = explicitMode === 'unlimited' || Number(product?.unlimited_stock || 0) === 1;
+  const combo = explicitMode === 'combo' || productType.includes('combo');
+  const stockEnabled = Number(product?.stock_enabled || 0) === 1;
+  const stock = Math.max(0, Number(product?.stock || 0));
+
+  if (combo) {
+    return { mode: 'combo', stock, soldOut: false, label: 'Según disponibilidad' };
+  }
+  if (unlimited || !stockEnabled) {
+    return { mode: 'unlimited', stock, soldOut: false, label: 'Sin límite' };
+  }
+
+  return {
+    mode: 'finite',
+    stock,
+    soldOut: stock <= 0,
+    label: stock <= 0 ? 'Sin stock' : `Stock: ${stock}`
+  };
+}
+
 async function loadProducts() {
   allProducts = await api('/api/products');
   __productsLoadedOnce = true;
@@ -50,7 +73,7 @@ function renderCategoriesOnly(products) {
       ${categories
         .map((category) => {
           const items = byCategory[category];
-          const available = items.filter((p) => Number(p.stock_enabled || 0) !== 1 || Number(p.stock || 0) > 0).length;
+          const available = items.filter((p) => !getShopStockState(p).soldOut).length;
           return `
             <button class="shop-category-card" type="button" data-category="${safeText(category)}" onclick="openShopCategory(this.dataset.category)">
               <div class="shop-category-card-icon">▶</div>
@@ -107,19 +130,16 @@ function renderProducts(products) {
 }
 
 function renderProductRow(product) {
-  const stockEnabled = Number(product.stock_enabled || 0) === 1;
-  const stock = Number(product.stock || 0);
-  const soldOut = stockEnabled && stock <= 0;
-  const stackedName = String(product.name || '').replace(/\s+/g, '<br>');
+  const stockState = getShopStockState(product);
 
   return `<article class="shop-card product-row shop-list-item" data-product-id="${product.id}">
     <button class="shop-card-head product-header shop-list-head" type="button" onclick="openProductModal(${product.id})">
       <div class="shop-card-main">
-        <div class="product-name">${stackedName || safeText(product.name)}</div>
+        <div class="product-name">${safeText(product.name || 'Producto')}</div>
       </div>
       <div class="shop-card-price-wrap">
         <div class="price">$${formatMoney(product.price)}</div>
-        ${stockEnabled ? `<div class="stock ${soldOut ? 'out' : ''}">${soldOut ? 'Sin stock' : 'Stock: ' + stock}</div>` : '<div class="stock">Sin límite</div>'}
+        <div class="stock ${stockState.soldOut ? 'out' : ''}">${safeText(stockState.label)}</div>
       </div>
       <div class="shop-expand">Ver</div>
     </button>
@@ -155,9 +175,8 @@ function openProductModal(productId) {
   const product = allProducts.find((p) => Number(p.id) === Number(productId));
   if (!product) return;
 
-  const stockEnabled = Number(product.stock_enabled || 0) === 1;
-  const stock = Number(product.stock || 0);
-  const soldOut = stockEnabled && stock <= 0;
+  const stockState = getShopStockState(product);
+  const soldOut = stockState.soldOut;
 
   body.innerHTML = `
     <div class="modal-head">
@@ -167,7 +186,7 @@ function openProductModal(productId) {
     <p class="product-description">${safeText(product.description || 'Sin descripción disponible.')}</p>
     <p class="small-text"><b>Cobro:</b> ${safeText(getChargeModeText(product.charge_mode))}</p>
     <div class="shop-modal-price">$${formatMoney(product.price)}</div>
-    <div class="shop-modal-stock ${soldOut ? 'out' : ''}">${stockEnabled ? (soldOut ? 'Sin stock' : 'Stock: ' + stock) : 'Sin límite'}</div>
+    <div class="shop-modal-stock ${soldOut ? 'out' : ''}">${safeText(stockState.label)}</div>
     ${renderProductInputs(product)}
     <button class="primary-btn" onclick="buyProduct(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? 'Sin stock' : 'Comprar'}</button>`;
 
@@ -279,3 +298,4 @@ window.toggleProduct = toggleProduct;
 window.openProductModal = openProductModal;
 window.closeProductModal = closeProductModal;
 window.renderShopHome = renderShopHome;
+window.getShopStockState = getShopStockState;

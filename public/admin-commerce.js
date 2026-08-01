@@ -234,7 +234,13 @@ async function loadAdminProducts(){
   const renderAdminProduct=(p)=>{
     const rf=parseJsonArray(p.required_fields);
     const type=normalizeProductTypeAdmin(p.product_type||'streaming_auto');
-    const se=type==='manual' ? Number(p.stock_enabled||0)===1 : true;
+    const stockMode=String(p.stock_mode || '').toLowerCase() || (type==='combo_auto'?'combo':(Number(p.unlimited_stock||0)===1?'unlimited':'finite'));
+    const se=type==='manual' ? Number(p.stock_enabled||0)===1 : stockMode==='finite';
+    const stockStatus=stockMode==='unlimited'
+      ? 'Stock: Sin límite'
+      : stockMode==='combo'
+        ? 'Stock: según productos incluidos'
+        : `Stock: ${Math.max(0, Number(p.stock||0))}`;
     const isVisible=Number(p.active)!==0;
     const visibilityLabel=isVisible?'Visible en tienda':'Oculto de tienda';
     const visibilityStyle=isVisible
@@ -250,7 +256,7 @@ async function loadAdminProducts(){
     return `<div class="item" id="admin-product-${p.id}" data-product-active="${isVisible?1:0}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;cursor:pointer" onclick="toggleAdminProduct(${p.id}); setTimeout(()=>toggleComboEditBox(${p.id}),60)">
         <div><b>${safeText(p.name)}</b><br><span class="chip" style="${visibilityStyle};display:inline-block;margin-top:6px">${visibilityLabel}</span></div>
-        <span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')} · ${type==='combo_auto'?'Combo':type==='manual'?'Manual':'Automático'}</span>
+        <span>Venta: $${formatMoney(p.price)} · Costo: $${formatMoney(p.cost_price||0)} · ${safeText(p.category||'Otros')} · ${type==='combo_auto'?'Combo':type==='manual'?'Manual':'Automático'} · ${safeText(stockStatus)}</span>
       </div>
       <div class="admin-product-body">
         <label class="field-label">Nombre</label><input id="editName-${p.id}" value="${safeText(p.name)}" />
@@ -260,7 +266,9 @@ async function loadAdminProducts(){
         <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
         <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
         <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
-        <label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>
+        ${type==='manual'
+          ? `<label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>`
+          : `<input id="editStockEnabled-${p.id}" type="checkbox" class="hidden" ${se?'checked':''}/><input id="editStock-${p.id}" type="hidden" value="${Number(p.stock||0)}"/><div class="order-data"><b>${safeText(stockStatus)}</b><br><span class="small-text">${stockMode==='unlimited'?'El mismo enlace o acceso reutilizable puede venderse nuevamente.':stockMode==='combo'?'La compra valida el inventario de cada producto incluido.':'El stock se calcula automáticamente con las cuentas disponibles del inventario.'}</span></div>`}
         <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button>${visibilityButton}${shopButton}</div>
       </div>
     </div>`;

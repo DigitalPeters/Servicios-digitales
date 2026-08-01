@@ -288,7 +288,14 @@ async function markAccountAsSold(client, accountId, orderId, userId, isReusableS
                 assigned_order_id = $1, 
                 assigned_user_id = $2, 
                 delivered_at = NOW() 
-            WHERE id = $3 AND (status = 'available' OR ($4 = true AND reusable = 1))
+            WHERE id = $3
+              AND (
+                status IN ('available', 'disponible')
+                OR (
+                  $4 = true
+                  AND lower(COALESCE(status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')
+                )
+              )
             RETURNING id, reusable;
         `, [orderId, userId, accountId, isReusableSale]);
 
@@ -704,19 +711,49 @@ function adminOwnedWhere(viewer, alias = "") {
   return { clause: `(${prefix}owner_admin_id IS NULL OR ${prefix}owner_admin_id = 0)`, params: [] };
 }
 
+function productAccountMatchCondition(productAlias = "products", accountAlias = "pa") {
+  return `(
+    lower(COALESCE(NULLIF(TRIM(${accountAlias}.product_name), ''), NULLIF(TRIM(${accountAlias}.platform), ''))) = lower(${productAlias}.name)
+    OR lower(COALESCE(${accountAlias}.platform, '')) = lower(${productAlias}.name)
+  )`;
+}
+
+function productAccountOwnerCondition(productAlias = "products", accountAlias = "pa") {
+  return `(
+    (${productAlias}.owner_admin_id IS NULL AND (${accountAlias}.owner_admin_id IS NULL OR ${accountAlias}.owner_admin_id = 0))
+    OR ${accountAlias}.owner_admin_id = ${productAlias}.owner_admin_id
+  )`;
+}
+
+function reusableProductTextCondition(productAlias = "products") {
+  return `lower(concat_ws(' ', COALESCE(${productAlias}.name, ''), COALESCE(${productAlias}.category, '')))
+    ~ '(pdf|curso|ebook|manual|guia|guía)'`;
+}
+
+function reusableStockSubquery(productAlias = "products") {
+  return `EXISTS (
+    SELECT 1
+    FROM platform_accounts pa
+    WHERE (
+        COALESCE(pa.reusable, 0) = 1
+        OR (
+          ${reusableProductTextCondition(productAlias)}
+          AND COALESCE(NULLIF(TRIM(pa.access_url), ''), '') <> ''
+        )
+      )
+      AND lower(COALESCE(pa.status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')
+      AND ${productAccountOwnerCondition(productAlias, 'pa')}
+      AND ${productAccountMatchCondition(productAlias, 'pa')}
+  )`;
+}
+
 function dynamicStockSubquery(productAlias = "products") {
   return `COALESCE((
     SELECT COUNT(*)::int
     FROM platform_accounts pa
     WHERE pa.status IN ('available', 'disponible')
-      AND (
-        (${productAlias}.owner_admin_id IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
-        OR pa.owner_admin_id = ${productAlias}.owner_admin_id
-      )
-      AND (
-        lower(COALESCE(NULLIF(TRIM(pa.product_name), ''), NULLIF(TRIM(pa.platform), ''))) = lower(${productAlias}.name)
-        OR lower(pa.platform) = lower(${productAlias}.name)
-      )
+      AND ${productAccountOwnerCondition(productAlias, 'pa')}
+      AND ${productAccountMatchCondition(productAlias, 'pa')}
   ), 0)`;
 }
 
@@ -724,8 +761,14 @@ function effectiveStockExpression(productAlias = "products") {
   return `CASE
     WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) LIKE '%manual%'
       THEN GREATEST(0, COALESCE(${productAlias}.stock, 0))::int
+    WHEN ${reusableStockSubquery(productAlias)}
+      THEN 1
     ELSE ${dynamicStockSubquery(productAlias)}
   END`;
+}
+
+function reusableStockFlagExpression(productAlias = "products") {
+  return `CASE WHEN ${reusableStockSubquery(productAlias)} THEN 1 ELSE 0 END`;
 }
 
 function normalizeProductType(value) {
@@ -1526,6 +1569,7 @@ async function getComboItems(client, comboItemsValue) {
   const result = await client.query(
     `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
             ${effectiveStockExpression("p")} AS stock,
+            ${reusableStockFlagExpression("p")} AS reusable_stock,
             p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
      FROM products p
      WHERE p.id = ANY($1::int[]) AND p.active = 1`,
@@ -1672,19 +1716,28 @@ async function getCurrentOrderDeliveryState(client, orderId) {
 async function findAvailableAccountForProduct(client, product, userId) {
   const productName = String(product.name || '').trim();
   const productCategory = String(product.category || '').trim();
-
   const ownerId = product.owner_admin_id || null;
+  const reusableProduct = Number(product.reusable_stock || 0) === 1 ||
+    isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
+
+  const statusCondition = reusableProduct
+    ? `(status IN ('available', 'disponible') OR ((COALESCE(reusable, 0) = 1 OR COALESCE(NULLIF(TRIM(access_url), ''), '') <> '') AND lower(COALESCE(status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')))`
+    : `status IN ('available', 'disponible')`;
+
   const result = await client.query(
     `SELECT *
      FROM platform_accounts
-     WHERE status = 'available'
-       AND ($3::int IS NULL OR owner_admin_id = $3)
+     WHERE ${statusCondition}
        AND (
-         lower(product_name) = lower($1)
-         OR lower(platform) = lower($1)
-         OR lower(platform) = lower($2)
+         ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+         OR ($3::int IS NOT NULL AND owner_admin_id = $3)
        )
-     ORDER BY id ASC
+       AND (
+         lower(COALESCE(product_name, '')) = lower($1)
+         OR lower(COALESCE(platform, '')) = lower($1)
+         OR lower(COALESCE(platform, '')) = lower($2)
+       )
+     ORDER BY CASE WHEN COALESCE(reusable, 0) = 1 THEN 0 ELSE 1 END, id ASC
      LIMIT 1
      FOR UPDATE SKIP LOCKED`,
     [productName, productCategory, ownerId]
@@ -1846,6 +1899,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
     const result = await pool.query(
       `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
               ${effectiveStockExpression("p")} AS stock,
+              ${reusableStockFlagExpression("p")} AS reusable_stock,
               p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
        FROM products p
        WHERE p.active = 1 AND ${owner.clause}
@@ -1913,12 +1967,22 @@ app.get("/api/products", authMiddleware, async (req, res) => {
             if (customPriceMap.has(pid)) return customPriceMap.get(pid);
             return Number(product.price || 0);
           })();
+      const normalizedType = normalizeProductType(product.product_type);
+      const unlimitedStock = normalizedType === 'manual'
+        ? Number(product.stock_enabled || 0) !== 1
+        : normalizedType === 'streaming_auto' && Number(product.reusable_stock || 0) === 1;
+      const stockMode = normalizedType === 'combo_auto'
+        ? 'combo'
+        : unlimitedStock
+          ? 'unlimited'
+          : 'finite';
+
       const cleanProduct = {
         ...product,
-        product_type: normalizeProductType(product.product_type),
-        stock_enabled: normalizeProductType(product.product_type) === 'manual'
-          ? Number(product.stock_enabled || 0)
-          : 1,
+        product_type: normalizedType,
+        stock_enabled: stockMode === 'finite' ? 1 : 0,
+        unlimited_stock: unlimitedStock ? 1 : 0,
+        stock_mode: stockMode,
         base_price: product.price,
         price: effectivePrice
       };
@@ -1946,6 +2010,7 @@ app.get("/api/admin/products", authMiddleware, adminMiddleware, async (req, res)
       `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category,
               p.required_fields, p.charge_mode, p.active, p.stock_enabled,
               ${effectiveStockExpression("p")} AS stock,
+              ${reusableStockFlagExpression("p")} AS reusable_stock,
               p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
        FROM products p
        WHERE (
@@ -1956,13 +2021,25 @@ app.get("/api/admin/products", authMiddleware, adminMiddleware, async (req, res)
       [ownerAdminId]
     );
 
-    res.json(result.rows.map(product => ({
-      ...product,
-      product_type: normalizeProductType(product.product_type),
-      stock_enabled: normalizeProductType(product.product_type) === 'manual'
-        ? Number(product.stock_enabled || 0)
-        : 1
-    })));
+    res.json(result.rows.map(product => {
+      const normalizedType = normalizeProductType(product.product_type);
+      const unlimitedStock = normalizedType === 'manual'
+        ? Number(product.stock_enabled || 0) !== 1
+        : normalizedType === 'streaming_auto' && Number(product.reusable_stock || 0) === 1;
+      const stockMode = normalizedType === 'combo_auto'
+        ? 'combo'
+        : unlimitedStock
+          ? 'unlimited'
+          : 'finite';
+
+      return {
+        ...product,
+        product_type: normalizedType,
+        stock_enabled: stockMode === 'finite' ? 1 : 0,
+        unlimited_stock: unlimitedStock ? 1 : 0,
+        stock_mode: stockMode
+      };
+    }));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando productos del administrador" });
@@ -2192,7 +2269,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const ownerFilter = adminOwnedWhere(viewerContext, "p");
     const productResult = await client.query(
       `SELECT p.*,
-              ${effectiveStockExpression("p")} AS stock
+              ${effectiveStockExpression("p")} AS stock,
+              ${reusableStockFlagExpression("p")} AS reusable_stock
        FROM products p
        WHERE p.id = $1 AND p.active = 1 AND ${ownerFilter.clause}
        FOR UPDATE`,
@@ -2207,9 +2285,10 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const productType = normalizeProductType(product.product_type);
+    const reusableStock = productType === 'streaming_auto' && Number(product.reusable_stock || 0) === 1;
     const enforceStock = productType === 'manual'
       ? Number(product.stock_enabled || 0) === 1
-      : true;
+      : productType === 'streaming_auto' && !reusableStock;
 
     if (enforceStock && Number(product.stock || 0) <= 0) {
       await client.query("ROLLBACK");
@@ -2356,7 +2435,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     console.log("Buscando cuenta para:", productName, productCategory);
 
     const isPlatformProduct = productType === 'streaming_auto';
-    const isReusableProduct = isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
+    const isReusableProduct = Number(product.reusable_stock || 0) === 1 ||
+      isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
 
     console.log(
       'PRODUCTO:',
@@ -2375,22 +2455,27 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     if (isPlatformProduct) {
       const availableCondition = isReusableProduct
-        ? "(status = 'available' OR reusable = 1)"
-        : "status = 'available'";
+        ? `(status IN ('available', 'disponible') OR ((COALESCE(reusable, 0) = 1 OR COALESCE(NULLIF(TRIM(access_url), ''), '') <> '') AND lower(COALESCE(status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')))`
+        : `status IN ('available', 'disponible')`;
+      const inventoryOwnerId = viewerContext?.owner_admin_id || null;
 
       const availableAccountResult = await client.query(
         `SELECT *
          FROM platform_accounts
          WHERE ${availableCondition}
            AND (
-             lower(product_name) = lower($1)
-             OR lower(platform) = lower($1)
-             OR lower(platform) = lower($2)
+             ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+             OR ($3::int IS NOT NULL AND owner_admin_id = $3)
            )
-         ORDER BY id ASC
+           AND (
+             lower(COALESCE(product_name, '')) = lower($1)
+             OR lower(COALESCE(platform, '')) = lower($1)
+             OR lower(COALESCE(platform, '')) = lower($2)
+           )
+         ORDER BY CASE WHEN COALESCE(reusable, 0) = 1 THEN 0 ELSE 1 END, id ASC
          LIMIT 1
          FOR UPDATE SKIP LOCKED`,
-        [productName, productCategory]
+        [productName, productCategory, inventoryOwnerId]
       );
 
       assignedAccount = availableAccountResult.rows[0];
