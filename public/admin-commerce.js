@@ -282,8 +282,9 @@ async function loadAdminProducts(){
   const renderAdminProduct=(p)=>{
     const rf=parseJsonArray(p.required_fields);
     const type=normalizeProductTypeAdmin(p.product_type||'streaming_auto');
-    const stockMode=String(p.stock_mode || '').toLowerCase() || (type==='combo_auto'?'combo':(Number(p.unlimited_stock||0)===1?'unlimited':'finite'));
-    const se=stockMode==='finite';
+    const configuredLimited=Number(p.stock_enabled||0)===1;
+    const stockMode=type==='combo_auto' ? 'combo' : (configuredLimited ? 'finite' : 'unlimited');
+    const se=configuredLimited;
     const stockStatus=stockMode==='unlimited'
       ? 'Stock: Sin límite'
       : stockMode==='combo'

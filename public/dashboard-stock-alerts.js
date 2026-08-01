@@ -6,9 +6,9 @@ function isProductOutOfStock(product){
 
   const mode=String(product?.stock_mode || '').toLowerCase();
   const type=String(product?.product_type || '').toLowerCase();
-  const digitalReusable=/(pdf|curso|ebook|manual|guia|guía)/i.test(`${String(product?.name || '')} ${String(product?.category || '')}`);
-  if(mode==='unlimited' || mode==='combo' || Number(product?.unlimited_stock || 0)===1 || type.includes('combo') || digitalReusable) return false;
-  return Number(product?.stock_enabled || 0) === 1 && Number(product?.stock || 0) <= 0;
+  if(mode==='combo' || type.includes('combo')) return false;
+  const stockEnabled=mode==='finite' || Number(product?.stock_enabled || 0)===1;
+  return stockEnabled && Number(product?.stock || 0) <= 0;
 }
 
 function getOutOfStockProducts(){

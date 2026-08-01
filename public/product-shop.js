@@ -3,8 +3,6 @@ let currentShopCategory = null;
 function getShopStockState(product) {
   const productType = String(product?.product_type || '').toLowerCase();
   const explicitMode = String(product?.stock_mode || '').toLowerCase();
-  const digitalReusable = /(pdf|curso|ebook|manual|guia|guía)/i.test(`${String(product?.name || '')} ${String(product?.category || '')}`);
-  const unlimited = explicitMode === 'unlimited' || Number(product?.unlimited_stock || 0) === 1 || digitalReusable;
   const combo = explicitMode === 'combo' || productType.includes('combo');
   const stockEnabled = Number(product?.stock_enabled || 0) === 1;
   const stock = Math.max(0, Number(product?.stock || 0));
@@ -12,16 +10,19 @@ function getShopStockState(product) {
   if (combo) {
     return { mode: 'combo', stock, soldOut: false, label: 'Según disponibilidad' };
   }
-  if (unlimited || !stockEnabled) {
-    return { mode: 'unlimited', stock, soldOut: false, label: 'Sin límite' };
+
+  // La configuración guardada por el administrador manda sobre el nombre o categoría.
+  // Esto permite perfiles con stock limitado y cursos/PDF configurados explícitamente sin límite.
+  if (explicitMode === 'finite' || stockEnabled) {
+    return {
+      mode: 'finite',
+      stock,
+      soldOut: stock <= 0,
+      label: stock <= 0 ? 'Sin stock' : `Stock: ${stock}`
+    };
   }
 
-  return {
-    mode: 'finite',
-    stock,
-    soldOut: stock <= 0,
-    label: stock <= 0 ? 'Sin stock' : `Stock: ${stock}`
-  };
+  return { mode: 'unlimited', stock, soldOut: false, label: 'Sin límite' };
 }
 
 async function loadProducts() {

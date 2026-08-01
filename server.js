@@ -761,9 +761,9 @@ function effectiveStockExpression(productAlias = "products") {
   return `CASE
     WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) LIKE '%combo%'
       THEN 0
+    -- La configuración explícita del producto siempre tiene prioridad.
+    -- stock_enabled = 0 significa venta sin límite; stock_enabled = 1 consume stock real.
     WHEN COALESCE(${productAlias}.stock_enabled, 0) <> 1
-      OR ${reusableProductTextCondition(productAlias)}
-      OR ${reusableStockSubquery(productAlias)}
       THEN 1
     WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) LIKE '%manual%'
       THEN GREATEST(0, COALESCE(${productAlias}.stock, 0))::int
@@ -774,11 +774,7 @@ function effectiveStockExpression(productAlias = "products") {
 function reusableStockFlagExpression(productAlias = "products") {
   return `CASE
     WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) NOT LIKE '%combo%'
-      AND (
-        COALESCE(${productAlias}.stock_enabled, 0) <> 1
-        OR ${reusableProductTextCondition(productAlias)}
-        OR ${reusableStockSubquery(productAlias)}
-      )
+      AND COALESCE(${productAlias}.stock_enabled, 0) <> 1
       THEN 1
     ELSE 0
   END`;
@@ -1730,8 +1726,9 @@ async function findAvailableAccountForProduct(client, product, userId) {
   const productName = String(product.name || '').trim();
   const productCategory = String(product.category || '').trim();
   const ownerId = product.owner_admin_id || null;
-  const reusableProduct = Number(product.reusable_stock || 0) === 1 ||
-    isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
+  // El modo reutilizable depende únicamente de la configuración del producto.
+  // Así un perfil Netflix/HBO con stock limitado nunca se vuelve ilimitado por nombre o datos históricos.
+  const reusableProduct = Number(product.reusable_stock || 0) === 1;
 
   const statusCondition = reusableProduct
     ? `lower(COALESCE(status, 'available')) IN ('available', 'disponible', 'delivered')`
@@ -2442,8 +2439,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     console.log("Buscando cuenta para:", productName, productCategory);
 
     const isPlatformProduct = productType === 'streaming_auto';
-    const isReusableProduct = Number(product.reusable_stock || 0) === 1 ||
-      isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
+    // La casilla "Manejar stock limitado" tiene prioridad sobre nombre, categoría y cuentas reutilizables antiguas.
+    const isReusableProduct = Number(product.reusable_stock || 0) === 1;
 
     console.log(
       'PRODUCTO:',
@@ -2494,12 +2491,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         });
       }
 
-      const isReusableSale = isReusableProduct || isPdfOrCourseProduct(
-        productName,
-        productCategory,
-        product.product_type,
-        assignedAccount
-      );
+      // Solo conserva la cuenta para ventas sucesivas cuando el producto está configurado sin límite.
+      const isReusableSale = isReusableProduct;
 
       deliveredAccountData = buildDeliveredAccountData(
         assignedAccount,
