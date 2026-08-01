@@ -659,7 +659,7 @@
     <label class="field-label">Datos requeridos</label>
     <textarea id="productRequiredFields" placeholder="separados por coma"></textarea>
     <label class="field-label">Tipo de producto</label>
-    <select id="productType" onchange="toggleComboCreateBox()">
+    <select id="productType" onchange="toggleComboCreateBox();syncCreateProductStockControls()">
       <option value="streaming_auto">Automático streaming</option>
       <option value="manual">Manual</option>
       <option value="combo_auto">Combo automático</option>
@@ -677,10 +677,11 @@
       <option value="on_success">Descontar cuando el admin marque Éxito</option>
     </select>
     
-    <label class="checkbox-row">
-      <input type="checkbox" id="productStockEnabled" /> Activar stock
+    <label id="productStockEnabledRow" class="checkbox-row">
+      <input type="checkbox" id="productStockEnabled" checked onchange="syncCreateProductStockControls()" /> Manejar stock limitado
     </label>
-    <input id="productStock" type="number" min="0" value="0" />
+    <div id="productStockValueBox" class="hidden"><label class="field-label">Cantidad disponible</label><input id="productStock" type="number" min="0" value="0" /></div>
+    <p id="productStockHelp" class="small-text"></p>
     <button onclick="createProduct()" class="primary-btn">Crear producto</button>
     <hr class="divider">
   </div>
@@ -698,10 +699,10 @@
 <script src="shared-utils.js?v=2"></script>
 <script src="auth-session.js?v=4"></script>
 <script src="nav-dashboard.js?v=3"></script>
-<script src="product-shop.js?v=4"></script>
+<script src="product-shop.js?v=5"></script>
 <script src="user-orders-balance.js?v=6"></script>
-<script src="admin-commerce.js?v=5"></script>
-<script src="dashboard-stock-alerts.js?v=2"></script>
+<script src="admin-commerce.js?v=6"></script>
+<script src="dashboard-stock-alerts.js?v=3"></script>
 <script src="app.js?v=17"></script>
 <script src="admin-users-distributor.js?v=8"></script>
 

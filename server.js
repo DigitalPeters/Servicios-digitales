@@ -741,7 +741,7 @@ function reusableStockSubquery(productAlias = "products") {
           AND COALESCE(NULLIF(TRIM(pa.access_url), ''), '') <> ''
         )
       )
-      AND lower(COALESCE(pa.status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')
+      AND lower(COALESCE(pa.status, 'available')) IN ('available', 'disponible', 'delivered')
       AND ${productAccountOwnerCondition(productAlias, 'pa')}
       AND ${productAccountMatchCondition(productAlias, 'pa')}
   )`;
@@ -759,16 +759,29 @@ function dynamicStockSubquery(productAlias = "products") {
 
 function effectiveStockExpression(productAlias = "products") {
   return `CASE
+    WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) LIKE '%combo%'
+      THEN 0
+    WHEN COALESCE(${productAlias}.stock_enabled, 0) <> 1
+      OR ${reusableProductTextCondition(productAlias)}
+      OR ${reusableStockSubquery(productAlias)}
+      THEN 1
     WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) LIKE '%manual%'
       THEN GREATEST(0, COALESCE(${productAlias}.stock, 0))::int
-    WHEN ${reusableStockSubquery(productAlias)}
-      THEN 1
     ELSE ${dynamicStockSubquery(productAlias)}
   END`;
 }
 
 function reusableStockFlagExpression(productAlias = "products") {
-  return `CASE WHEN ${reusableStockSubquery(productAlias)} THEN 1 ELSE 0 END`;
+  return `CASE
+    WHEN lower(trim(COALESCE(${productAlias}.product_type, 'streaming_auto'))) NOT LIKE '%combo%'
+      AND (
+        COALESCE(${productAlias}.stock_enabled, 0) <> 1
+        OR ${reusableProductTextCondition(productAlias)}
+        OR ${reusableStockSubquery(productAlias)}
+      )
+      THEN 1
+    ELSE 0
+  END`;
 }
 
 function normalizeProductType(value) {
@@ -1721,7 +1734,7 @@ async function findAvailableAccountForProduct(client, product, userId) {
     isPdfOrCourseProduct(productName, productCategory, product.product_type, null);
 
   const statusCondition = reusableProduct
-    ? `(status IN ('available', 'disponible') OR ((COALESCE(reusable, 0) = 1 OR COALESCE(NULLIF(TRIM(access_url), ''), '') <> '') AND lower(COALESCE(status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')))`
+    ? `lower(COALESCE(status, 'available')) IN ('available', 'disponible', 'delivered')`
     : `status IN ('available', 'disponible')`;
 
   const result = await client.query(
@@ -1968,9 +1981,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
             return Number(product.price || 0);
           })();
       const normalizedType = normalizeProductType(product.product_type);
-      const unlimitedStock = normalizedType === 'manual'
-        ? Number(product.stock_enabled || 0) !== 1
-        : normalizedType === 'streaming_auto' && Number(product.reusable_stock || 0) === 1;
+      const unlimitedStock = normalizedType !== 'combo_auto' && Number(product.reusable_stock || 0) === 1;
       const stockMode = normalizedType === 'combo_auto'
         ? 'combo'
         : unlimitedStock
@@ -2023,9 +2034,7 @@ app.get("/api/admin/products", authMiddleware, adminMiddleware, async (req, res)
 
     res.json(result.rows.map(product => {
       const normalizedType = normalizeProductType(product.product_type);
-      const unlimitedStock = normalizedType === 'manual'
-        ? Number(product.stock_enabled || 0) !== 1
-        : normalizedType === 'streaming_auto' && Number(product.reusable_stock || 0) === 1;
+      const unlimitedStock = normalizedType !== 'combo_auto' && Number(product.reusable_stock || 0) === 1;
       const stockMode = normalizedType === 'combo_auto'
         ? 'combo'
         : unlimitedStock
@@ -2070,9 +2079,9 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 
     const normalizedType = normalizeProductType(product_type);
     const normalizedStock = Math.max(0, Number(stock || 0));
-    const normalizedStockEnabled = normalizedType === 'manual'
-      ? ((stock_enabled === true || stock_enabled === 1 || stock_enabled === '1' || normalizedStock > 0) ? 1 : 0)
-      : 1;
+    const normalizedStockEnabled = normalizedType === 'combo_auto'
+      ? 1
+      : ((stock_enabled === true || stock_enabled === 1 || stock_enabled === '1' || stock_enabled === 'true') ? 1 : 0);
 
     await pool.query(
       `INSERT INTO products
@@ -2127,9 +2136,9 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
 
     const normalizedType = normalizeProductType(product_type);
     const normalizedStock = Math.max(0, Number(stock || 0));
-    const normalizedStockEnabled = normalizedType === 'manual'
-      ? ((stock_enabled === true || stock_enabled === 1 || stock_enabled === '1' || normalizedStock > 0) ? 1 : 0)
-      : 1;
+    const normalizedStockEnabled = normalizedType === 'combo_auto'
+      ? 1
+      : ((stock_enabled === true || stock_enabled === 1 || stock_enabled === '1' || stock_enabled === 'true') ? 1 : 0);
 
     const result = await pool.query(
       `UPDATE products
@@ -2285,10 +2294,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     }
 
     const productType = normalizeProductType(product.product_type);
-    const reusableStock = productType === 'streaming_auto' && Number(product.reusable_stock || 0) === 1;
-    const enforceStock = productType === 'manual'
-      ? Number(product.stock_enabled || 0) === 1
-      : productType === 'streaming_auto' && !reusableStock;
+    const reusableStock = productType !== 'combo_auto' && Number(product.reusable_stock || 0) === 1;
+    const enforceStock = productType !== 'combo_auto' && !reusableStock;
 
     if (enforceStock && Number(product.stock || 0) <= 0) {
       await client.query("ROLLBACK");
@@ -2455,7 +2462,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     if (isPlatformProduct) {
       const availableCondition = isReusableProduct
-        ? `(status IN ('available', 'disponible') OR ((COALESCE(reusable, 0) = 1 OR COALESCE(NULLIF(TRIM(access_url), ''), '') <> '') AND lower(COALESCE(status, 'available')) NOT IN ('failed', 'discarded', 'recovery_pending')))`
+        ? `lower(COALESCE(status, 'available')) IN ('available', 'disponible', 'delivered')`
         : `status IN ('available', 'disponible')`;
       const inventoryOwnerId = viewerContext?.owner_admin_id || null;
 
@@ -2487,7 +2494,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         });
       }
 
-      const isReusableSale = isPdfOrCourseProduct(
+      const isReusableSale = isReusableProduct || isPdfOrCourseProduct(
         productName,
         productCategory,
         product.product_type,

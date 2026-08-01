@@ -3,7 +3,8 @@ let currentShopCategory = null;
 function getShopStockState(product) {
   const productType = String(product?.product_type || '').toLowerCase();
   const explicitMode = String(product?.stock_mode || '').toLowerCase();
-  const unlimited = explicitMode === 'unlimited' || Number(product?.unlimited_stock || 0) === 1;
+  const digitalReusable = /(pdf|curso|ebook|manual|guia|guía)/i.test(`${String(product?.name || '')} ${String(product?.category || '')}`);
+  const unlimited = explicitMode === 'unlimited' || Number(product?.unlimited_stock || 0) === 1 || digitalReusable;
   const combo = explicitMode === 'combo' || productType.includes('combo');
   const stockEnabled = Number(product?.stock_enabled || 0) === 1;
   const stock = Math.max(0, Number(product?.stock || 0));

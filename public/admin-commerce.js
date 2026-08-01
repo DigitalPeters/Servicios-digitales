@@ -31,6 +31,54 @@ function normalizeProductTypeAdmin(value){
   return 'streaming_auto';
 }
 
+function syncCreateProductStockControls(){
+  const type=normalizeProductTypeAdmin(document.getElementById('productType')?.value || 'streaming_auto');
+  const row=document.getElementById('productStockEnabledRow');
+  const checkbox=document.getElementById('productStockEnabled');
+  const valueBox=document.getElementById('productStockValueBox');
+  const help=document.getElementById('productStockHelp');
+  const isCombo=type==='combo_auto';
+  const isManual=type==='manual';
+
+  if(row) row.classList.toggle('hidden', isCombo);
+  if(checkbox){
+    checkbox.disabled=isCombo;
+    if(isCombo) checkbox.checked=true;
+  }
+  if(valueBox) valueBox.classList.toggle('hidden', !isManual || checkbox?.checked!==true);
+  if(help){
+    help.textContent=isCombo
+      ? 'El combo valida el stock de cada producto incluido.'
+      : checkbox?.checked===true
+        ? (isManual ? 'Se descontará la cantidad capturada después de cada venta.' : 'El stock se calculará con las cuentas disponibles del inventario.')
+        : 'Sin límite: el mismo enlace, PDF, curso o acceso reutilizable podrá venderse nuevamente.';
+  }
+}
+
+function syncEditProductStockControls(id){
+  const type=normalizeProductTypeAdmin(document.getElementById(`editProductType-${id}`)?.value || 'streaming_auto');
+  const row=document.getElementById(`editStockEnabledRow-${id}`);
+  const checkbox=document.getElementById(`editStockEnabled-${id}`);
+  const manualBox=document.getElementById(`editManualStockBox-${id}`);
+  const help=document.getElementById(`editStockHelp-${id}`);
+  const isCombo=type==='combo_auto';
+  const isManual=type==='manual';
+
+  if(row) row.classList.toggle('hidden', isCombo);
+  if(checkbox){
+    checkbox.disabled=isCombo;
+    if(isCombo) checkbox.checked=true;
+  }
+  if(manualBox) manualBox.classList.toggle('hidden', !isManual || checkbox?.checked!==true);
+  if(help){
+    help.textContent=isCombo
+      ? 'El combo valida la disponibilidad de cada producto incluido.'
+      : checkbox?.checked===true
+        ? (isManual ? 'Stock limitado: se descontará una unidad por venta.' : 'Stock limitado: se usarán únicamente cuentas disponibles del inventario.')
+        : 'Sin límite: el mismo enlace, PDF, curso o acceso reutilizable podrá venderse nuevamente.';
+  }
+}
+
 function setTodaySalesDate(){
   const input=document.getElementById('salesReportDate');
   if(input && !input.value){
@@ -183,7 +231,7 @@ async function createProduct(){
     const stockEl=document.getElementById('productStock');
     const selectedType=normalizeProductTypeAdmin(typeEl?.value || 'streaming_auto');
     const manualStock=Math.max(0, Number(stockEl?.value || 0));
-    const manualEnabled=selectedType==='manual' ? (manualStock>0 || stockEnabledEl?.checked===true) : true;
+    const stockEnabledFinal=selectedType==='combo_auto' ? true : stockEnabledEl?.checked===true;
 
     const data=await api('/api/admin/create-product',{
       method:'POST',
@@ -195,7 +243,7 @@ async function createProduct(){
         category:document.getElementById('productCategory')?.value || '',
         required_fields:getRequiredFieldsFromInput('productRequiredFields'),
         charge_mode:document.getElementById('productChargeMode')?.value || 'on_purchase',
-        stock_enabled:manualEnabled,
+        stock_enabled:stockEnabledFinal,
         stock:manualStock,
         product_type:selectedType,
         combo_items:getSelectedComboItems('create'),
@@ -235,7 +283,7 @@ async function loadAdminProducts(){
     const rf=parseJsonArray(p.required_fields);
     const type=normalizeProductTypeAdmin(p.product_type||'streaming_auto');
     const stockMode=String(p.stock_mode || '').toLowerCase() || (type==='combo_auto'?'combo':(Number(p.unlimited_stock||0)===1?'unlimited':'finite'));
-    const se=type==='manual' ? Number(p.stock_enabled||0)===1 : stockMode==='finite';
+    const se=stockMode==='finite';
     const stockStatus=stockMode==='unlimited'
       ? 'Stock: Sin límite'
       : stockMode==='combo'
@@ -263,12 +311,14 @@ async function loadAdminProducts(){
         <label class="field-label">Descripción</label><textarea id="editDescription-${p.id}">${safeText(p.description||'')}</textarea>
         <div class="three-row"><div><label class="field-label">Precio de venta</label><input id="editPrice-${p.id}" type="number" step="0.01" value="${p.price}" /></div><div><label class="field-label">Costo de compra</label><input id="editCostPrice-${p.id}" type="number" step="0.01" value="${Number(p.cost_price||0)}" /></div><div><label class="field-label">Categoría</label><input id="editCategory-${p.id}" value="${safeText(p.category||'Otros')}" /></div></div>
         <label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea>
-        <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
+        <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id});syncEditProductStockControls(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
         <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
         <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
-        ${type==='manual'
-          ? `<label class="checkbox-row"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''}/> Activar stock</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/>`
-          : `<input id="editStockEnabled-${p.id}" type="checkbox" class="hidden" ${se?'checked':''}/><input id="editStock-${p.id}" type="hidden" value="${Number(p.stock||0)}"/><div class="order-data"><b>${safeText(stockStatus)}</b><br><span class="small-text">${stockMode==='unlimited'?'El mismo enlace o acceso reutilizable puede venderse nuevamente.':stockMode==='combo'?'La compra valida el inventario de cada producto incluido.':'El stock se calcula automáticamente con las cuentas disponibles del inventario.'}</span></div>`}
+        <div class="order-data">
+          <label id="editStockEnabledRow-${p.id}" class="checkbox-row ${type==='combo_auto'?'hidden':''}"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''} onchange="syncEditProductStockControls(${p.id})"/> Manejar stock limitado</label>
+          <div id="editManualStockBox-${p.id}" class="${type==='manual'&&se?'':'hidden'}"><label class="field-label">Cantidad disponible</label><input id="editStock-${p.id}" type="number" min="0" value="${Number(p.stock||0)}"/></div>
+          <b>${safeText(stockStatus)}</b><br><span id="editStockHelp-${p.id}" class="small-text"></span>
+        </div>
         <div class="three-row"><button onclick="updateProduct(${p.id})">Guardar</button>${visibilityButton}${shopButton}</div>
       </div>
     </div>`;
@@ -289,6 +339,7 @@ async function loadAdminProducts(){
     if(normalizeProductTypeAdmin(String(p.product_type||''))==='combo_auto'){
       renderComboOptions(`editComboItemsBox-${p.id}`, parseJsonArray(p.combo_items), `edit-${p.id}`, p.id);
     }
+    syncEditProductStockControls(p.id);
   });
 }
 
@@ -297,7 +348,7 @@ async function updateProduct(id){
     const type=normalizeProductTypeAdmin(document.getElementById(`editProductType-${id}`)?.value || 'streaming_auto');
     const stockValue=Math.max(0, Number(document.getElementById('editStock-'+id)?.value || 0));
     const stockEnabledChecked=document.getElementById('editStockEnabled-'+id)?.checked === true;
-    const stockEnabledFinal=type==='manual' ? (stockValue>0 || stockEnabledChecked) : true;
+    const stockEnabledFinal=type==='combo_auto' ? true : stockEnabledChecked;
 
     const required_fields=document.getElementById('editRequiredFields-'+id).value.split(',').map(normalizeFieldName).filter(Boolean);
     const data=await api('/api/admin/products/'+id,{method:'PATCH',body:JSON.stringify({
@@ -390,4 +441,10 @@ async function updateOrderStatus(id){
       loadSalesReport()
     ]);
   }catch(e){showMessage(e.message||'Error actualizando pedido','error')}
+}
+
+if(typeof document!=='undefined'){
+  document.addEventListener('DOMContentLoaded',()=>{
+    syncCreateProductStockControls();
+  });
 }
