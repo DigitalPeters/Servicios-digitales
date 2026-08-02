@@ -481,6 +481,8 @@ function parseCurrentAccountsFromOrder(order) {
       profile_pin: order?.current_profile_pin || '',
       delivered_at: order?.current_delivered_at || null,
       expires_at: order?.current_expires_at || null,
+      official_purchase_date: order?.current_official_purchase_date || null,
+      mother_account_id: order?.current_mother_account_id || null,
       access_url: order?.current_access_url || ''
     });
   }
@@ -512,7 +514,8 @@ function renderCurrentOrderAccounts(order) {
       <p style="margin:4px 0"><b>Correo:</b> ${safeText(account.account_email || '-')}</p>
       <p style="margin:4px 0"><b>Contraseña:</b> ${safeText(account.account_password || '-')}</p>
       <p style="margin:4px 0"><b>Perfil:</b> ${safeText(account.profile_name || 'No aplica')} &nbsp; <b>PIN:</b> ${safeText(account.profile_pin || 'No aplica')}</p>
-      <p style="margin:4px 0"><b>Entregada:</b> ${safeText(formatCurrentAccountDate(account.delivered_at))} &nbsp; <b>Vence:</b> ${safeText(formatCurrentAccountDate(account.expires_at))}</p>
+      <p style="margin:4px 0"><b>Compra original:</b> ${safeText(formatCurrentAccountDate(account.official_purchase_date || order?.created_at))} &nbsp; <b>Vence:</b> ${safeText(formatCurrentAccountDate(account.expires_at))}</p>
+      <p style="margin:4px 0"><b>Última entrega/reemplazo:</b> ${safeText(formatCurrentAccountDate(account.delivered_at))}</p>
       ${account.access_url ? `<p style="margin:4px 0"><b>URL:</b> ${safeText(account.access_url)}</p>` : ''}
       <button class="copy-account-btn danger-btn" type="button" onclick="reportDeliveredAccount(${Number(order?.id || 0)}, ${Number(account.id)})">⚠ Reportar falla de este perfil</button>
     </div>`).join('')}</div>`;

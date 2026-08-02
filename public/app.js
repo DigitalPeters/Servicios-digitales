@@ -525,12 +525,11 @@ function replaceReportedAccountManual(reportId){
     <div id="replaceManualModal" class="modal-overlay">
       <div class="modal-card" style="max-width:720px;">
         <div style="display:flex;justify-content:space-between;align-items:center"><h3>Reemplazo manual</h3><button class="modal-close-btn" onclick="document.getElementById('replaceManualModal')?.remove()">×</button></div>
-        <p class="small-text">Ingresa los datos de la cuenta que vas a usar como reemplazo. La fecha de compra debe reflejar la fecha original cuando corresponde.</p>
+        <p class="small-text">Ingresa los datos de la cuenta nueva. La fecha original de compra y el vencimiento de 28 días se heredarán automáticamente del pedido.</p>
         <label class="field-label">Correo</label><input id="rm_email" type="email" />
         <label class="field-label">Contraseña</label><input id="rm_password" type="text" />
         <label class="field-label">Perfil (opcional)</label><input id="rm_profile" />
         <label class="field-label">PIN (opcional)</label><input id="rm_pin" />
-        <label class="field-label">Fecha de compra oficial</label><input id="rm_purchase_date" type="date" />
         <label class="field-label">URL / Nota (opcional)</label><input id="rm_url" />
         <div style="display:flex;gap:8px;margin-top:12px">
           <button class="green-btn" onclick="submitReplaceManual(${reportId})">Aplicar reemplazo</button>
@@ -550,7 +549,6 @@ async function submitReplaceManual(reportId){
     const account_password=(document.getElementById('rm_password')?.value||'').trim();
     const profile_name=(document.getElementById('rm_profile')?.value||'').trim();
     const profile_pin=(document.getElementById('rm_pin')?.value||'').trim();
-    const official_purchase_date=(document.getElementById('rm_purchase_date')?.value||'').trim();
     const access_url=(document.getElementById('rm_url')?.value||'').trim();
 
     if(!account_email || !account_password){
@@ -563,8 +561,7 @@ async function submitReplaceManual(reportId){
       account_password,
       profile_name,
       profile_pin,
-      access_url,
-      official_purchase_date
+      access_url
     };
 
     const data = await api('/api/admin/account-reports/'+reportId+'/replace',{
@@ -727,7 +724,7 @@ function hasAccountDelivery(order){
 
 function getWarrantyInfoFromOrder(o){
   const raw=String(o.delivered_account_data||o.admin_response||'');
-  const m=raw.match(/Fecha de entrega:\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
+  const m=raw.match(/Fecha (?:original de compra|de entrega):\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
   let start=o.created_at?new Date(o.created_at):null;
   if(m){
     const day=Number(m[1]), month=Number(m[2])-1, year=Number(m[3].length===2?'20'+m[3]:m[3]);

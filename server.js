@@ -330,19 +330,22 @@ async function markFailedAccountEmailGroup(client, {
     };
   }
 
-  // El perfil reportado define el correo, propietario y ciclo exactos.
-  // Un ciclo se identifica por account_email + official_purchase_date.
+  // El perfil exacto reportado siempre se marca como failed. Los demás perfiles
+  // solo se retiran del inventario si todavía están disponibles y pertenecen a
+  // la misma cuenta madre. Para registros antiguos sin mother_account_id se usa
+  // correo + fecha oficial como respaldo; created_at nunca define el ciclo.
   const sourceResult = await client.query(
-    `SELECT id,
-            account_email,
-            owner_admin_id,
-            official_purchase_date,
-            created_at,
-            COALESCE(official_purchase_date, created_at::date) AS cycle_date
-     FROM platform_accounts
-     WHERE id = $1
+    `SELECT pa.id,
+            pa.account_email,
+            pa.owner_admin_id,
+            pa.official_purchase_date,
+            pa.mother_account_id,
+            COALESCE(ma.original_purchase_date, pa.official_purchase_date) AS cycle_date
+     FROM platform_accounts pa
+     LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+     WHERE pa.id = $1
      LIMIT 1
-     FOR UPDATE`,
+     FOR UPDATE OF pa`,
     [accountId]
   );
 
@@ -361,26 +364,35 @@ async function markFailedAccountEmailGroup(client, {
   const inventoryOwnerId = sourceOwnerValue !== null && sourceOwnerValue !== undefined
     ? (Number(sourceOwnerValue || 0) || null)
     : (Number(ownerAdminId || 0) || null);
+  const motherAccountId = Number(sourceAccount.mother_account_id || 0) || null;
   const cycleDate = sourceAccount.cycle_date || null;
 
   const result = await client.query(
-    `UPDATE platform_accounts
+    `UPDATE platform_accounts pa
      SET status = 'failed'
-     WHERE id = $1
+     WHERE pa.id = $1
         OR (
-          status IN ('available', 'disponible')
-          AND $2::text <> ''
-          AND lower(regexp_replace(trim(COALESCE(account_email, '')), '\\s+', '', 'g')) =
-              lower(regexp_replace(trim($2), '\\s+', '', 'g'))
-          AND COALESCE(official_purchase_date, created_at::date) IS NOT DISTINCT FROM $4::date
+          pa.status IN ('available', 'disponible')
           AND (
-            (($3::int IS NULL OR $3::int = 0) AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-            OR ($3::int IS NOT NULL AND $3::int <> 0 AND owner_admin_id = $3)
+            ($4::int IS NOT NULL AND pa.mother_account_id = $4)
+            OR (
+              $4::int IS NULL
+              AND pa.mother_account_id IS NULL
+              AND $2::text <> ''
+              AND $5::date IS NOT NULL
+              AND lower(regexp_replace(trim(COALESCE(pa.account_email, '')), '\\s+', '', 'g')) =
+                  lower(regexp_replace(trim($2), '\\s+', '', 'g'))
+              AND pa.official_purchase_date IS NOT DISTINCT FROM $5::date
+            )
+          )
+          AND (
+            (($3::int IS NULL OR $3::int = 0) AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
+            OR ($3::int IS NOT NULL AND $3::int <> 0 AND pa.owner_admin_id = $3)
           )
         )
-     RETURNING id,
-               CASE WHEN id = $1 THEN 'reported' ELSE 'available_sibling' END AS failure_source`,
-    [accountId, cleanEmail, inventoryOwnerId, cycleDate]
+     RETURNING pa.id,
+               CASE WHEN pa.id = $1 THEN 'reported' ELSE 'available_sibling' END AS failure_source`,
+    [accountId, cleanEmail, inventoryOwnerId, motherAccountId, cycleDate]
   );
 
   const reportedAccountMarked = result.rows.filter(row => row.failure_source === 'reported').length;
@@ -390,7 +402,9 @@ async function markFailedAccountEmailGroup(client, {
     reportedAccountMarked,
     availableSiblingsMarked,
     totalMarked: result.rowCount,
-    accountIds: result.rows.map(row => Number(row.id)).filter(Number.isFinite)
+    accountIds: result.rows.map(row => Number(row.id)).filter(Number.isFinite),
+    motherAccountId,
+    cycleDate
   };
 }
 
@@ -1639,8 +1653,11 @@ function getValidExpirationDate(value, deliveryDate) {
 }
 
 function buildCurrentAccountDeliveryBlock(account, fallbackDeliveryDate = null) {
-  const deliveryDate = getValidDeliveryDate(account?.delivered_at, fallbackDeliveryDate);
-  const expirationDate = getValidExpirationDate(account?.expires_at, deliveryDate);
+  const originalPurchaseDate = getValidDeliveryDate(
+    account?.official_purchase_date,
+    fallbackDeliveryDate || account?.delivered_at
+  );
+  const expirationDate = getValidExpirationDate(account?.expires_at, originalPurchaseDate);
   const lines = [
     `📌 Plataforma: ${String(account?.platform || account?.product_name || '').toUpperCase()}`,
     `🆔 Cuenta entregada: ${Number(account?.id || 0) || ''}`,
@@ -1648,7 +1665,7 @@ function buildCurrentAccountDeliveryBlock(account, fallbackDeliveryDate = null) 
     `🔐 Contraseña: ${account?.account_password || ''}`,
     `👤 Perfil: ${account?.profile_name || 'No aplica'}`,
     `🔢 PIN de acceso: ${account?.profile_pin || 'No aplica'}`,
-    `📅 Fecha de entrega: ${formatFechaMX(deliveryDate)}`,
+    `📅 Fecha original de compra: ${formatFechaMX(originalPurchaseDate)}`,
     `📅 Fecha de vencimiento: ${formatFechaMX(expirationDate)}`
   ];
 
@@ -1706,7 +1723,8 @@ async function getCurrentOrderDeliveryState(client, orderId) {
   const accountsResult = await client.query(
     `SELECT id, platform, product_name, account_email, account_password,
             profile_name, profile_pin, access_url, extra_data, status,
-            assigned_order_id, assigned_user_id, delivered_at, expires_at
+            assigned_order_id, assigned_user_id, delivered_at, expires_at,
+            official_purchase_date, mother_account_id
      FROM platform_accounts
      WHERE assigned_order_id = $1
        AND assigned_user_id = $2
@@ -3442,6 +3460,8 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
         current_account.profile_pin AS current_profile_pin,
         current_account.delivered_at AS current_delivered_at,
         current_account.expires_at AS current_expires_at,
+        current_account.official_purchase_date AS current_official_purchase_date,
+        current_account.mother_account_id AS current_mother_account_id,
         current_account.access_url AS current_access_url,
         products.name AS product_name,
         products.category AS product_category,
@@ -3459,6 +3479,8 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
               'profile_pin', active_account.profile_pin,
               'delivered_at', active_account.delivered_at,
               'expires_at', active_account.expires_at,
+              'official_purchase_date', active_account.official_purchase_date,
+              'mother_account_id', active_account.mother_account_id,
               'access_url', active_account.access_url
             ) ORDER BY CASE WHEN active_account.id = orders.assigned_platform_account_id THEN 0 ELSE 1 END, active_account.id ASC
           )
@@ -4798,6 +4820,11 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
               pa.id AS matched_reported_account_id,
               pa.platform, pa.product_name AS account_product_name, pa.account_email,
               pa.owner_admin_id AS reported_account_owner_admin_id,
+              pa.mother_account_id AS reported_mother_account_id,
+              pa.official_purchase_date AS reported_official_purchase_date,
+              pa.expires_at AS reported_expires_at,
+              (((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date) AS warranty_purchase_date,
+              ((((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date) + 28) AS warranty_expiration_date,
               COALESCE(NULLIF(ar.reported_account_id, 0), NULLIF($2::int, 0)) AS resolved_reported_account_id,
               COALESCE(ar.owner_admin_id, o.owner_admin_id, p.owner_admin_id, pa.owner_admin_id) AS resolved_owner_admin_id
        FROM account_reports ar
@@ -4829,14 +4856,16 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       return res.status(400).json({ error: "No se pudo identificar el perfil exacto reportado dentro de este pedido" });
     }
 
-    // --- NUEVA LÓGICA: CALCULAR DÍAS RESTANTES ---
-    const purchaseDate = new Date(report.order_created_at);
+    // La garantía nunca se reinicia al reemplazar. Todos los reemplazos usan
+    // la fecha original del pedido y vencen exactamente 28 días después.
+    const warrantyPurchaseDate = report.warranty_purchase_date || report.reported_official_purchase_date || report.order_created_at;
+    const warrantyExpirationDate = report.warranty_expiration_date || report.reported_expires_at;
+    const expirationForMessage = warrantyExpirationDate ? new Date(warrantyExpirationDate) : null;
     const now = new Date();
     const msPerDay = 24 * 60 * 60 * 1000;
-    const daysUsed = Math.max(0, Math.ceil((now - purchaseDate) / msPerDay));
-    const daysRemaining = Math.max(0, 28 - daysUsed); 
-    const expirationDate = new Date(now.getTime() + (daysRemaining * msPerDay));
-    // ----------------------------------------------
+    const daysRemaining = expirationForMessage && !Number.isNaN(expirationForMessage.getTime())
+      ? Math.max(0, Math.ceil((expirationForMessage.getTime() - now.getTime()) / msPerDay))
+      : 0;
 
     const ownerAdminId = report.resolved_owner_admin_id || null;
     const failedAccountOwnerAdminId = Number(report.reported_account_owner_admin_id || 0) || null;
@@ -4874,8 +4903,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
           report.order_id,
           report.user_id,
           ownerAdminId,
-          expirationDate,
-          String(official_purchase_date || '').trim() || null
+          warrantyExpirationDate,
+          warrantyPurchaseDate
         ]
       );
 
@@ -4922,10 +4951,15 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
 
       const deliveredReplacementResult = await client.query(
         `UPDATE platform_accounts
-         SET status = 'delivered', assigned_order_id = $1, assigned_user_id = $2, delivered_at = NOW(), expires_at = $4
+         SET status = 'delivered',
+             assigned_order_id = $1,
+             assigned_user_id = $2,
+             delivered_at = NOW(),
+             expires_at = $4,
+             official_purchase_date = $5
          WHERE id = $3
          RETURNING *`,
-        [report.order_id, report.user_id, newAccount.id, expirationDate]
+        [report.order_id, report.user_id, newAccount.id, warrantyExpirationDate, warrantyPurchaseDate]
       );
       newAccount = deliveredReplacementResult.rows[0] || newAccount;
     }
@@ -4993,7 +5027,7 @@ if (!(manual === true || manual === "true")) {
       ? "Cuenta manual agregada y reemplazada correctamente"
       : "Cuenta reemplazada correctamente";
     const siblingMessage = failedGroupResult.availableSiblingsMarked > 0
-      ? ` Se marcaron también ${failedGroupResult.availableSiblingsMarked} cuenta(s) disponible(s) con el mismo correo como dañada(s).`
+      ? ` Se retiraron también ${failedGroupResult.availableSiblingsMarked} perfil(es) todavía disponible(s) de la misma cuenta madre y ciclo.`
       : "";
 
     res.json({
@@ -5004,6 +5038,15 @@ if (!(manual === true || manual === "true")) {
       replacement_account_id: newAccount.id,
       failed_email_group: {
         email: failedAccountEmail,
+        mother_account_id: failedGroupResult.motherAccountId || null,
+        cycle_date: failedGroupResult.cycleDate || null,
+        reported_account_marked: failedGroupResult.reportedAccountMarked,
+        available_siblings_marked: failedGroupResult.availableSiblingsMarked,
+        total_marked: failedGroupResult.totalMarked
+      },
+      failed_account_group: {
+        mother_account_id: failedGroupResult.motherAccountId || null,
+        cycle_date: failedGroupResult.cycleDate || null,
         reported_account_marked: failedGroupResult.reportedAccountMarked,
         available_siblings_marked: failedGroupResult.availableSiblingsMarked,
         total_marked: failedGroupResult.totalMarked
