@@ -2815,11 +2815,21 @@ window.buyProduct = async function(productId){
     try {
       const select=document.getElementById('reporteCuentaSelect');
       if(!select) return;
+      const preferredId=Number(
+        (typeof window.getExactReportAccountIdStable==='function' ? window.getExactReportAccountIdStable() : 0)
+        || select.value
+        || 0
+      );
       const accounts=await api('/api/reportable-accounts');
       select.innerHTML='<option value="">Selecciona cuenta/plataforma entregada</option>'+(accounts||[]).map(a=>{
-        const label=`Pedido #${a.order_id} | ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''}`;
+        const replacementLabel=a.is_replacement===true || a.is_replacement==='true' ? ' | Reemplazo vigente' : '';
+        const label=`Pedido #${a.order_id} | ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | ID #${a.id}${replacementLabel}`;
         return `<option value="${a.id}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
       }).join('');
+      if(preferredId>0 && Array.from(select.options).some(opt=>Number(opt.value||0)===preferredId)){
+        select.value=String(preferredId);
+        select.dispatchEvent(new Event('change',{bubbles:true}));
+      }
     } catch(e) {
       console.warn('No se pudieron cargar cuentas reportables', e);
     }
@@ -2842,7 +2852,12 @@ window.buyProduct = async function(productId){
   window.ensureReportSelectStable = ensureReportSelect;
 
   window.onSelectReportAccountStable=function(){
-    const opt=document.getElementById('reporteCuentaSelect')?.selectedOptions?.[0];
+    const select=document.getElementById('reporteCuentaSelect');
+    const opt=select?.selectedOptions?.[0];
+    const selectedId=Number(select?.value||0);
+    if(typeof window.setExactReportAccountIdStable==='function'){
+      window.setExactReportAccountIdStable(selectedId);
+    }
     const email=opt?.getAttribute('data-email')||'';
     const correo=document.getElementById('reporteCorreo');
     if(correo && email) correo.value=email;

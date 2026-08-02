@@ -1553,26 +1553,66 @@ async function findReportedPurchase(client, userId, accountEmail) {
        o.amount,
        o.created_at AS order_created_at,
        o.refunded,
+       o.assigned_platform_account_id,
        p.id AS product_id,
        p.name AS product_name,
        p.category AS product_category,
+       p.product_type,
        pa.id AS account_id,
        pa.platform,
        pa.product_name AS account_product_name,
        pa.account_email,
-       pa.status AS account_status
+       pa.status AS account_status,
+       pa.owner_admin_id
      FROM platform_accounts pa
      JOIN orders o ON o.id = pa.assigned_order_id
      JOIN products p ON p.id = o.product_id
      WHERE pa.assigned_user_id = $1
+       AND o.user_id = $1
        AND lower(pa.account_email) = lower($2)
        AND o.status = 'exito'
        AND pa.status = 'delivered'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM account_reports replaced_report
+         WHERE replaced_report.user_id = $1
+           AND replaced_report.order_id = o.id
+           AND replaced_report.reported_account_id = pa.id
+           AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+       )
        AND (
          lower(COALESCE(p.product_type, '')) LIKE '%combo%'
          OR pa.id = o.assigned_platform_account_id
+         OR EXISTS (
+           SELECT 1
+           FROM account_reports replacement_report
+           WHERE replacement_report.user_id = $1
+             AND replacement_report.order_id = o.id
+             AND replacement_report.replacement_account_id = pa.id
+         )
+         OR pa.id = (
+           SELECT current_pa.id
+           FROM platform_accounts current_pa
+           WHERE current_pa.assigned_order_id = o.id
+             AND current_pa.assigned_user_id = $1
+             AND current_pa.status = 'delivered'
+             AND NOT EXISTS (
+               SELECT 1
+               FROM account_reports previous_report
+               WHERE previous_report.user_id = $1
+                 AND previous_report.order_id = o.id
+                 AND previous_report.reported_account_id = current_pa.id
+                 AND NULLIF(previous_report.replacement_account_id, 0) IS NOT NULL
+             )
+           ORDER BY current_pa.delivered_at DESC NULLS LAST, current_pa.id DESC
+           LIMIT 1
+         )
        )
-     ORDER BY o.id DESC
+     ORDER BY
+       CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END,
+       pa.delivered_at DESC NULLS LAST,
+       o.id DESC,
+       pa.id DESC
      LIMIT 1`,
     [userId, String(accountEmail || "").trim()]
   );
@@ -3431,7 +3471,25 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
       `SELECT COUNT(*)::int AS total
        FROM orders
        JOIN products ON orders.product_id = products.id
-       LEFT JOIN platform_accounts current_account ON current_account.id = orders.assigned_platform_account_id AND current_account.status = 'delivered'
+       LEFT JOIN LATERAL (
+         SELECT candidate.*
+         FROM platform_accounts candidate
+         WHERE candidate.assigned_order_id = orders.id
+           AND candidate.assigned_user_id = orders.user_id
+           AND candidate.status = 'delivered'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM account_reports replaced_report
+             WHERE replaced_report.user_id = orders.user_id
+               AND replaced_report.order_id = orders.id
+               AND replaced_report.reported_account_id = candidate.id
+               AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+           )
+         ORDER BY CASE WHEN candidate.id = orders.assigned_platform_account_id THEN 0 ELSE 1 END,
+                  candidate.delivered_at DESC NULLS LAST,
+                  candidate.id DESC
+         LIMIT 1
+       ) current_account ON true
        ${whereSql}`,
       params
     );
@@ -3482,16 +3540,44 @@ app.get("/api/my-orders", authMiddleware, async (req, res) => {
               'official_purchase_date', active_account.official_purchase_date,
               'mother_account_id', active_account.mother_account_id,
               'access_url', active_account.access_url
-            ) ORDER BY CASE WHEN active_account.id = orders.assigned_platform_account_id THEN 0 ELSE 1 END, active_account.id ASC
+            ) ORDER BY CASE WHEN active_account.id = current_account.id THEN 0 ELSE 1 END,
+                       active_account.delivered_at DESC NULLS LAST,
+                       active_account.id ASC
           )
           FROM platform_accounts active_account
           WHERE active_account.assigned_order_id = orders.id
             AND active_account.assigned_user_id = orders.user_id
             AND active_account.status = 'delivered'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM account_reports replaced_report
+              WHERE replaced_report.user_id = orders.user_id
+                AND replaced_report.order_id = orders.id
+                AND replaced_report.reported_account_id = active_account.id
+                AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+            )
         ), '[]'::json) AS current_accounts
        FROM orders
        JOIN products ON orders.product_id = products.id
-       LEFT JOIN platform_accounts current_account ON current_account.id = orders.assigned_platform_account_id AND current_account.status = 'delivered'
+       LEFT JOIN LATERAL (
+         SELECT candidate.*
+         FROM platform_accounts candidate
+         WHERE candidate.assigned_order_id = orders.id
+           AND candidate.assigned_user_id = orders.user_id
+           AND candidate.status = 'delivered'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM account_reports replaced_report
+             WHERE replaced_report.user_id = orders.user_id
+               AND replaced_report.order_id = orders.id
+               AND replaced_report.reported_account_id = candidate.id
+               AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+           )
+         ORDER BY CASE WHEN candidate.id = orders.assigned_platform_account_id THEN 0 ELSE 1 END,
+                  candidate.delivered_at DESC NULLS LAST,
+                  candidate.id DESC
+         LIMIT 1
+       ) current_account ON true
        ${whereSql}
        ORDER BY orders.id DESC
        LIMIT $4 OFFSET $5`,
@@ -4315,7 +4401,41 @@ Entra a tu panel en Respuesta de fallos para ver/copiar los datos.`;
 app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT
+      `WITH latest_replacement AS (
+         SELECT DISTINCT ON (ar.order_id)
+                ar.order_id,
+                ar.replacement_account_id
+         FROM account_reports ar
+         JOIN platform_accounts replacement_pa
+           ON replacement_pa.id = ar.replacement_account_id
+          AND replacement_pa.assigned_order_id = ar.order_id
+          AND replacement_pa.assigned_user_id = ar.user_id
+          AND replacement_pa.status = 'delivered'
+         WHERE ar.user_id = $1
+           AND NULLIF(ar.replacement_account_id, 0) IS NOT NULL
+         ORDER BY ar.order_id,
+                  COALESCE(ar.reviewed_at, ar.created_at) DESC NULLS LAST,
+                  ar.id DESC
+       ), latest_delivered AS (
+         SELECT DISTINCT ON (candidate.assigned_order_id)
+                candidate.assigned_order_id AS order_id,
+                candidate.id AS account_id
+         FROM platform_accounts candidate
+         WHERE candidate.assigned_user_id = $1
+           AND candidate.status = 'delivered'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM account_reports replaced_report
+             WHERE replaced_report.user_id = $1
+               AND replaced_report.order_id = candidate.assigned_order_id
+               AND replaced_report.reported_account_id = candidate.id
+               AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+           )
+         ORDER BY candidate.assigned_order_id,
+                  candidate.delivered_at DESC NULLS LAST,
+                  candidate.id DESC
+       )
+       SELECT
          pa.id,
          pa.assigned_order_id AS order_id,
          pa.platform,
@@ -4324,20 +4444,42 @@ app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
          pa.profile_name,
          pa.profile_pin,
          pa.delivered_at,
+         pa.expires_at,
+         pa.official_purchase_date,
          o.created_at AS order_created_at,
-         COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, '') AS order_product_name
+         COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, '') AS order_product_name,
+         CASE
+           WHEN pa.id = lr.replacement_account_id THEN true
+           ELSE false
+         END AS is_replacement
        FROM platform_accounts pa
        JOIN orders o ON o.id = pa.assigned_order_id
        LEFT JOIN products p ON p.id = o.product_id
+       LEFT JOIN latest_replacement lr ON lr.order_id = o.id
+       LEFT JOIN latest_delivered ld ON ld.order_id = o.id
        WHERE pa.assigned_user_id = $1
          AND o.user_id = $1
          AND o.status = 'exito'
          AND pa.status = 'delivered'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM account_reports replaced_report
+           WHERE replaced_report.user_id = $1
+             AND replaced_report.order_id = o.id
+             AND replaced_report.reported_account_id = pa.id
+             AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+         )
          AND (
            lower(COALESCE(p.product_type, '')) LIKE '%combo%'
+           OR pa.id = lr.replacement_account_id
            OR pa.id = o.assigned_platform_account_id
+           OR pa.id = ld.account_id
          )
-       ORDER BY o.id DESC, pa.id ASC`,
+       ORDER BY o.id DESC,
+                CASE WHEN pa.id = lr.replacement_account_id THEN 0
+                     WHEN pa.id = o.assigned_platform_account_id THEN 1
+                     ELSE 2 END,
+                pa.id ASC`,
       [req.user.id]
     );
     res.json(result.rows);
@@ -4377,9 +4519,11 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
            o.amount,
            o.created_at AS order_created_at,
            o.refunded,
+           o.assigned_platform_account_id,
            p.id AS product_id,
            p.name AS product_name,
            p.category AS product_category,
+           p.product_type,
            pa.id AS account_id,
            pa.platform,
            pa.product_name AS account_product_name,
@@ -4394,9 +4538,41 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
            AND o.user_id = $2
            AND o.status = 'exito'
            AND pa.status = 'delivered'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM account_reports replaced_report
+             WHERE replaced_report.user_id = $2
+               AND replaced_report.order_id = o.id
+               AND replaced_report.reported_account_id = pa.id
+               AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
+           )
            AND (
              lower(COALESCE(p.product_type, '')) LIKE '%combo%'
              OR pa.id = o.assigned_platform_account_id
+             OR EXISTS (
+               SELECT 1
+               FROM account_reports replacement_report
+               WHERE replacement_report.user_id = $2
+                 AND replacement_report.order_id = o.id
+                 AND replacement_report.replacement_account_id = pa.id
+             )
+             OR pa.id = (
+               SELECT current_pa.id
+               FROM platform_accounts current_pa
+               WHERE current_pa.assigned_order_id = o.id
+                 AND current_pa.assigned_user_id = $2
+                 AND current_pa.status = 'delivered'
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM account_reports previous_report
+                   WHERE previous_report.user_id = $2
+                     AND previous_report.order_id = o.id
+                     AND previous_report.reported_account_id = current_pa.id
+                     AND NULLIF(previous_report.replacement_account_id, 0) IS NOT NULL
+                 )
+               ORDER BY current_pa.delivered_at DESC NULLS LAST, current_pa.id DESC
+               LIMIT 1
+             )
            )
          LIMIT 1`,
         [reportedAccountId, userId]
@@ -4404,8 +4580,23 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
 
       purchase = selectedResult.rows[0] || null;
       if (!purchase) {
-        return res.status(400).json({ error: "No se encontró la cuenta seleccionada en tus pedidos." });
+        return res.status(400).json({ error: "No se encontró ese perfil vigente dentro de tus pedidos o reemplazos." });
       }
+
+      // Repara de forma segura pedidos históricos cuyo reemplazo sí está ligado al
+      // usuario/pedido, pero el pedido todavía apunta a la cuenta anterior.
+      if (
+        normalizeProductType(purchase.product_type) !== 'combo_auto' &&
+        Number(purchase.assigned_platform_account_id || 0) !== Number(purchase.account_id || 0)
+      ) {
+        await pool.query(
+          `UPDATE orders
+           SET assigned_platform_account_id = $1
+           WHERE id = $2 AND user_id = $3`,
+          [purchase.account_id, purchase.order_id, userId]
+        );
+      }
+
       email = purchase.account_email || email;
     }
 
@@ -4457,17 +4648,22 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
     }
 
 // === INICIO DE NUEVA VALIDACIÓN: Bloquear reportes duplicados ===
-    const checkDuplicate = await pool.query(
-      `SELECT id FROM account_reports 
-       WHERE reported_account_id = $1 
-         AND status = 'pendiente' 
-       LIMIT 1`,
-      [purchase.account_id]
-    );
+    const checkDuplicate = Number(purchase.account_id || 0) > 0
+      ? await pool.query(
+          `SELECT id
+           FROM account_reports
+           WHERE reported_account_id = $1
+             AND user_id = $2
+             AND order_id = $3
+             AND lower(COALESCE(status, '')) IN ('pendiente', 'en_revision', 'en revisión')
+           LIMIT 1`,
+          [purchase.account_id, userId, purchase.order_id]
+        )
+      : { rows: [] };
 
     if (checkDuplicate.rows.length > 0) {
       return res.status(400).json({ 
-        error: "Ya existe un reporte en proceso para esta cuenta exacta. Por favor, espera a que sea resuelto antes de enviar otro." 
+        error: "Ya existe un reporte pendiente para este perfil exacto. Cuando se entregue un reemplazo, el perfil nuevo podrá reportarse con su propio ID." 
       });
     }
     // === FIN DE NUEVA VALIDACIÓN ===    

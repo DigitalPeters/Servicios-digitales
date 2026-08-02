@@ -1,3 +1,45 @@
+let __exactReportAccountId = 0;
+
+function setExactReportAccountId(value) {
+  const id = Number(value || 0);
+  __exactReportAccountId = Number.isInteger(id) && id > 0 ? id : 0;
+  return __exactReportAccountId;
+}
+
+function getExactReportAccountId() {
+  return Number(__exactReportAccountId || 0);
+}
+
+function ensureExactReportOption(select, account = {}) {
+  if (!select) return false;
+  const id = Number(account?.id || 0);
+  if (id <= 0) return false;
+
+  let option = Array.from(select.options || []).find((item) => Number(item.value || 0) === id);
+  if (!option) {
+    option = document.createElement('option');
+    option.value = String(id);
+    option.dataset.email = String(account?.account_email || account?.email || '').trim();
+    const label = [
+      account?.order_id ? `Pedido #${Number(account.order_id)}` : '',
+      account?.platform || account?.product_name || 'Cuenta de reemplazo',
+      account?.account_email || account?.email || '',
+      account?.profile_name ? `Perfil: ${account.profile_name}` : '',
+      `ID #${id}`
+    ].filter(Boolean).join(' | ');
+    option.textContent = label;
+    select.appendChild(option);
+  }
+
+  select.value = String(id);
+  setExactReportAccountId(id);
+  return select.value === String(id);
+}
+
+window.setExactReportAccountIdStable = setExactReportAccountId;
+window.getExactReportAccountIdStable = getExactReportAccountId;
+window.ensureExactReportOptionStable = ensureExactReportOption;
+
 async function loadMyOrders(page = 1) {
   const requestedPage = Math.max(1, Number(page || 1));
   const search = String(document.getElementById('myOrdersSearch')?.value || '').trim();
@@ -136,6 +178,7 @@ window.reportReplacementAccount = async function reportReplacementAccount(report
     return;
   }
 
+  setExactReportAccountId(accountId);
   showSection('reports');
 
   if (typeof window.ensureReportSelectStable === 'function') window.ensureReportSelectStable();
@@ -147,11 +190,14 @@ window.reportReplacementAccount = async function reportReplacementAccount(report
     return;
   }
 
-  select.value = String(accountId);
-  if (select.value !== String(accountId)) {
-    showMessage('La cuenta de reemplazo ya no está vigente o no está disponible para reportar', 'error');
-    return;
-  }
+  const replacementData = extractReplacementDeliveryData(report);
+  const replacementEmail = extractDeliveredAccountEmail(replacementData) || String(report?.email || '').trim();
+  ensureExactReportOption(select, {
+    id: accountId,
+    order_id: report?.order_id,
+    platform: report?.reported_platform || 'Cuenta de reemplazo',
+    account_email: replacementEmail
+  });
   select.dispatchEvent(new Event('change', { bubbles: true }));
 
   const description = document.getElementById('reporteExplicacion');
@@ -353,7 +399,7 @@ async function enviarReporteCuenta() {
       });
     }
 
-    const reportedAccountId = Number(document.getElementById('reporteCuentaSelect')?.value || 0);
+    const reportedAccountId = Number(getExactReportAccountId() || document.getElementById('reporteCuentaSelect')?.value || 0);
 
     const data = await api('/api/account-reports', {
       method: 'POST',
@@ -371,6 +417,7 @@ async function enviarReporteCuenta() {
     if (document.getElementById('reporteCorreo')) document.getElementById('reporteCorreo').value = '';
     if (document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value = '';
     if (document.getElementById('reporteCuentaSelect')) document.getElementById('reporteCuentaSelect').value = '';
+    setExactReportAccountId(0);
     if (fotoInput) fotoInput.value = '';
 
     if (typeof loadAccountReports === 'function') await loadAccountReports(1);
@@ -742,6 +789,7 @@ async function reportEntregaInmediata() {
   }
 
   closeModalEntregaInmediata();
+  setExactReportAccountId(accountId);
   showSection('reports');
 
   try {
@@ -754,10 +802,13 @@ async function reportEntregaInmediata() {
 
     const reportSelect = document.getElementById('reporteCuentaSelect');
     if (reportSelect) {
-      reportSelect.value = String(accountId);
-      if (reportSelect.value === String(accountId)) {
-        reportSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+      ensureExactReportOption(reportSelect, {
+        ...account,
+        id: accountId,
+        order_id: immediateDeliveryModalState.orderId,
+        product_name: immediateDeliveryModalState.productName
+      });
+      reportSelect.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     const emailInput = document.getElementById('reporteCorreo');
@@ -818,6 +869,7 @@ async function reportDeliveredAccount(orderId, accountId = 0) {
     return;
   }
 
+  setExactReportAccountId(exactAccountId);
   showSection('reports');
   if (typeof window.ensureReportSelectStable === 'function') window.ensureReportSelectStable();
   if (typeof window.loadReportableAccountsStable === 'function') await window.loadReportableAccountsStable();
@@ -828,11 +880,12 @@ async function reportDeliveredAccount(orderId, accountId = 0) {
     return;
   }
 
-  select.value = String(exactAccountId);
-  if (select.value !== String(exactAccountId)) {
-    showMessage('Ese perfil ya no es la cuenta vigente del pedido', 'error');
-    return;
-  }
+  ensureExactReportOption(select, {
+    ...account,
+    id: exactAccountId,
+    order_id: order.id,
+    product_name: order.product_name
+  });
   select.dispatchEvent(new Event('change', { bubbles: true }));
 
   const input = document.getElementById('reporteCorreo');
