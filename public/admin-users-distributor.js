@@ -58,6 +58,10 @@ function installDistributorHooks(){
       loadDistributorPanel();
       loadDistributorPrices();
     }
+    if(name === 'distributorEarnings' && isIndependentDistributorUser()){
+      initializeDistributorEarningsDates();
+      loadDistributorEarnings();
+    }
   });
 
   window.registerLoadAppHook(function distributorLoadAppHook(){
@@ -325,3 +329,183 @@ async function saveAdminSubadminPrice(userId, productId){
     await loadAdminSubadminPrices();
   }catch(e){ showMessage(e.message,'error'); }
 }
+
+
+// ==========================================
+// REPORTE DE GANANCIAS DEL DISTRIBUIDOR
+// ==========================================
+let distributorEarningsCache = null;
+
+function isIndependentDistributorUser(){
+  if(!currentUser) return false;
+  const role = String(currentUser.role || '').toLowerCase();
+  const flag = currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === '1' || currentUser.is_subadmin === 'true';
+  return role !== 'admin' && flag;
+}
+
+function getMexicoDateParts(){
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return {
+    today: `${values.year}-${values.month}-${values.day}`,
+    monthStart: `${values.year}-${values.month}-01`
+  };
+}
+
+function initializeDistributorEarningsDates(){
+  const start = document.getElementById('distributorEarningsStart');
+  const end = document.getElementById('distributorEarningsEnd');
+  if(!start || !end) return;
+  const dates = getMexicoDateParts();
+  if(!start.value) start.value = dates.monthStart;
+  if(!end.value) end.value = dates.today;
+}
+
+function setDistributorEarningsToday(){
+  const dates = getMexicoDateParts();
+  const start = document.getElementById('distributorEarningsStart');
+  const end = document.getElementById('distributorEarningsEnd');
+  if(start) start.value = dates.today;
+  if(end) end.value = dates.today;
+  return loadDistributorEarnings();
+}
+
+function setDistributorEarningsCurrentMonth(){
+  const dates = getMexicoDateParts();
+  const start = document.getElementById('distributorEarningsStart');
+  const end = document.getElementById('distributorEarningsEnd');
+  if(start) start.value = dates.monthStart;
+  if(end) end.value = dates.today;
+  return loadDistributorEarnings();
+}
+
+function setDistributorEarningsText(id, value){
+  const element = document.getElementById(id);
+  if(element) element.textContent = String(value);
+}
+
+function renderDistributorEarnings(data){
+  const summary = data?.summary || {};
+  const bySeller = Array.isArray(data?.by_seller) ? data.by_seller : [];
+  const byProduct = Array.isArray(data?.by_product) ? data.by_product : [];
+  const details = Array.isArray(data?.details) ? data.details : [];
+
+  setDistributorEarningsText('distributorEarningsOrders', Number(summary.total_orders || 0));
+  setDistributorEarningsText('distributorEarningsSales', formatMoney(summary.total_sales || 0));
+  setDistributorEarningsText('distributorEarningsCost', formatMoney(summary.total_cost || 0));
+  setDistributorEarningsText('distributorEarningsProfit', formatMoney(summary.total_profit || 0));
+  setDistributorEarningsText('distributorEarningsMargin', Number(summary.margin_percent || 0).toFixed(2));
+  const estimatedOrders = Number(summary.estimated_cost_orders || 0);
+  const estimatedNote = estimatedOrders > 0
+    ? ` · ${estimatedOrders} pedido${estimatedOrders === 1 ? '' : 's'} anterior${estimatedOrders === 1 ? '' : 'es'} calculado${estimatedOrders === 1 ? '' : 's'} con tu costo actual`
+    : '';
+  setDistributorEarningsText('distributorEarningsRangeLabel', `Periodo: ${safeText(data?.start_date || '')} al ${safeText(data?.end_date || '')} · Horario de México${estimatedNote}`);
+
+  const sellerBox = document.getElementById('distributorEarningsBySeller');
+  if(sellerBox){
+    sellerBox.innerHTML = bySeller.length
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Vendedor</th><th>Pedidos</th><th>Venta</th><th>Tu costo</th><th>Ganancia</th></tr></thead><tbody>${bySeller.map(row => `<tr><td><b>${safeText(row.seller_name || 'Vendedor')}</b><br><span class="small-text">${safeText(row.seller_email || '')}</span></td><td>${Number(row.total_orders || 0)}</td><td>$${formatMoney(row.total_sales || 0)}</td><td>$${formatMoney(row.total_cost || 0)}</td><td><b>$${formatMoney(row.total_profit || 0)}</b></td></tr>`).join('')}</tbody></table></div>`
+      : 'Sin ventas en el rango seleccionado.';
+  }
+
+  const productBox = document.getElementById('distributorEarningsByProduct');
+  if(productBox){
+    productBox.innerHTML = byProduct.length
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Pedidos</th><th>Venta</th><th>Tu costo</th><th>Ganancia</th></tr></thead><tbody>${byProduct.map(row => `<tr><td><b>${safeText(row.product_name || 'Producto')}</b><br><span class="small-text">${safeText(row.product_category || '')}</span></td><td>${Number(row.total_orders || 0)}</td><td>$${formatMoney(row.total_sales || 0)}</td><td>$${formatMoney(row.total_cost || 0)}</td><td><b>$${formatMoney(row.total_profit || 0)}</b></td></tr>`).join('')}</tbody></table></div>`
+      : 'Sin ventas en el rango seleccionado.';
+  }
+
+  const detailsBox = document.getElementById('distributorEarningsDetails');
+  if(detailsBox){
+    detailsBox.innerHTML = details.length
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Vendedor</th><th>Producto</th><th>Venta</th><th>Tu costo</th><th>Ganancia</th><th>Fecha México</th></tr></thead><tbody>${details.map(row => `<tr><td>#${Number(row.id || 0)}</td><td><b>${safeText(row.seller_name || 'Vendedor')}</b><br><span class="small-text">${safeText(row.seller_email || '')}</span></td><td>${safeText(row.product_name || 'Producto')}</td><td>$${formatMoney(row.sale_amount || 0)}</td><td>$${formatMoney(row.distributor_cost || 0)}</td><td><b>$${formatMoney(row.profit || 0)}</b></td><td>${safeText(row.created_at_mx || '')}</td></tr>`).join('')}</tbody></table></div>`
+      : 'Sin ventas en el rango seleccionado.';
+  }
+}
+
+async function loadDistributorEarnings(){
+  if(!isIndependentDistributorUser()){
+    showMessage('Este reporte está disponible únicamente para distribuidores', 'error');
+    return;
+  }
+
+  initializeDistributorEarningsDates();
+  const start = document.getElementById('distributorEarningsStart')?.value || '';
+  const end = document.getElementById('distributorEarningsEnd')?.value || '';
+  if(!start || !end){
+    showMessage('Selecciona la fecha inicial y final', 'error');
+    return;
+  }
+  if(start > end){
+    showMessage('La fecha inicial no puede ser posterior a la fecha final', 'error');
+    return;
+  }
+
+  const rangeLabel = document.getElementById('distributorEarningsRangeLabel');
+  if(rangeLabel) rangeLabel.textContent = 'Calculando ganancias...';
+
+  try{
+    const data = await api(`/api/distributor/earnings?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`);
+    distributorEarningsCache = data;
+    renderDistributorEarnings(data);
+  }catch(error){
+    distributorEarningsCache = null;
+    if(rangeLabel) rangeLabel.textContent = 'No se pudo cargar el reporte.';
+    showMessage(error.message || 'Error cargando reporte de ganancias', 'error');
+  }
+}
+
+function escapeDistributorCsvValue(value){
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function downloadDistributorEarningsCsv(){
+  const data = distributorEarningsCache;
+  const rows = Array.isArray(data?.details) ? data.details : [];
+  if(!rows.length){
+    showMessage('No hay ventas para descargar en el rango seleccionado', 'error');
+    return;
+  }
+
+  const csvRows = [
+    ['Pedido','Vendedor','Correo','Producto','Categoría','Venta','Costo distribuidor','Ganancia','Fecha México'],
+    ...rows.map(row => [
+      row.id,
+      row.seller_name || '',
+      row.seller_email || '',
+      row.product_name || '',
+      row.product_category || '',
+      Number(row.sale_amount || 0).toFixed(2),
+      Number(row.distributor_cost || 0).toFixed(2),
+      Number(row.profit || 0).toFixed(2),
+      row.created_at_mx || ''
+    ])
+  ];
+  const csv = '\ufeff' + csvRows.map(row => row.map(escapeDistributorCsvValue).join(',')).join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `ganancias_distribuidor_${data.start_date || 'inicio'}_${data.end_date || 'fin'}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+window.irADirectoAGanancias = function irADirectoAGanancias(){
+  if(!isIndependentDistributorUser()){
+    showMessage('Este reporte está disponible únicamente para distribuidores', 'error');
+    return false;
+  }
+  return showSection('distributorEarnings');
+};
+window.loadDistributorEarnings = loadDistributorEarnings;
+window.setDistributorEarningsToday = setDistributorEarningsToday;
+window.setDistributorEarningsCurrentMonth = setDistributorEarningsCurrentMonth;
+window.downloadDistributorEarningsCsv = downloadDistributorEarningsCsv;

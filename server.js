@@ -1209,6 +1209,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_category_snapshot TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_cost_snapshot NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS distributor_cost_snapshot NUMERIC`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
@@ -1653,6 +1654,22 @@ async function calculateComboPrice(client, user, comboProduct) {
   }
 
   return Math.max(0, Number((total - (discount * items.length)).toFixed(2)));
+}
+
+
+async function getDistributorCostSnapshot(client, buyerUser, product) {
+  const distributorId = Number(buyerUser?.owner_user_id || 0);
+  if (!distributorId) return null;
+
+  const distributor = await getFullUser(distributorId, client);
+  if (!distributor || distributor.is_subadmin !== true) return null;
+
+  const rawCost = normalizeProductType(product?.product_type) === 'combo_auto'
+    ? await calculateComboPrice(client, distributor, product)
+    : await getEffectiveProductPrice(client, distributor, product);
+
+  const numericCost = Number(rawCost);
+  return Number.isFinite(numericCost) ? Math.max(0, Number(numericCost.toFixed(2))) : null;
 }
 
 function buildComboDeliveredAccountData(accounts) {
@@ -2384,6 +2401,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     const price = isComboProduct
       ? await calculateComboPrice(client, user, product)
       : await getEffectiveProductPrice(client, user, product);
+    const distributorCostSnapshot = await getDistributorCostSnapshot(client, user, product);
     const balance = Number(user.balance);
     const chargeMode = product.charge_mode || "on_purchase";
 
@@ -2427,8 +2445,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
       const orderInsertResult = await client.query(
         `INSERT INTO orders
-         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
-         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11)
+         (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, distributor_cost_snapshot, owner_admin_id)
+         VALUES ($1, $2, $3, $4, 'exito', $5, $6, 0, $7, $5, $8, $9, $10, $11, $12)
          RETURNING id`,
         [
           userId,
@@ -2441,6 +2459,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
           product.name || 'Combo',
           product.category || 'Combo',
           comboCost,
+          distributorCostSnapshot,
           viewerContext?.owner_admin_id || null
         ]
       );
@@ -2576,8 +2595,8 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
 
     const orderInsertResult = await client.query(
       `INSERT INTO orders
-       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, owner_admin_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       (user_id, product_id, amount, order_data, status, admin_response, charged, refunded, assigned_platform_account_id, delivered_account_data, product_name_snapshot, product_category_snapshot, product_cost_snapshot, distributor_cost_snapshot, owner_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id`,
       [
         userId,
@@ -2595,6 +2614,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         assignedAccount
           ? getPlatformAccountPurchaseCost(assignedAccount, product.cost_price)
           : Math.max(0, Number(product.cost_price || 0)),
+        distributorCostSnapshot,
         viewerContext?.owner_admin_id || null
       ]
     );
@@ -6542,6 +6562,196 @@ app.patch("/api/distributor/prices", authMiddleware, distributorMiddleware, asyn
     res.status(500).json({ error: "Error guardando precio para vendedores" });
   }
 });
+
+// DISTRIBUIDOR: REPORTE DE GANANCIAS DE SUS VENDEDORES
+app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const defaultsResult = await pool.query(
+      `SELECT
+         date_trunc('month', NOW() AT TIME ZONE 'America/Mexico_City')::date::text AS month_start,
+         (NOW() AT TIME ZONE 'America/Mexico_City')::date::text AS today`
+    );
+
+    const defaults = defaultsResult.rows[0] || {};
+    const requestedStart = String(req.query.start_date || '').trim();
+    const requestedEnd = String(req.query.end_date || '').trim();
+    const startDate = dateRegex.test(requestedStart) ? requestedStart : defaults.month_start;
+    const endDate = dateRegex.test(requestedEnd) ? requestedEnd : defaults.today;
+
+    if (!startDate || !endDate || startDate > endDate) {
+      return res.status(400).json({ error: 'El rango de fechas no es válido' });
+    }
+
+    const rangeResult = await pool.query(
+      `SELECT ($2::date - $1::date)::int AS total_days`,
+      [startDate, endDate]
+    );
+    if (Number(rangeResult.rows[0]?.total_days || 0) > 366) {
+      return res.status(400).json({ error: 'Selecciona un rango máximo de 366 días' });
+    }
+
+    const distributor = await getFullUser(req.user.id);
+    if (!distributor || distributor.is_subadmin !== true) {
+      return res.status(403).json({ error: 'Distribuidor requerido' });
+    }
+
+    const ordersResult = await pool.query(
+      `SELECT
+         o.id,
+         o.user_id,
+         o.product_id,
+         o.amount,
+         o.distributor_cost_snapshot,
+         o.product_name_snapshot,
+         o.product_category_snapshot,
+         o.created_at,
+         u.name AS seller_name,
+         u.email AS seller_email,
+         p.name,
+         p.category,
+         p.price,
+         p.cost_price,
+         p.product_type,
+         p.combo_items,
+         p.combo_discount,
+         p.owner_admin_id,
+         to_char(((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
+       FROM orders o
+       INNER JOIN users u ON u.id = o.user_id
+       INNER JOIN products p ON p.id = o.product_id
+       WHERE u.owner_user_id = $1
+         AND o.status = 'exito'
+         AND COALESCE(o.refunded, 0) = 0
+         AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date >= $2::date
+         AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date <= $3::date
+       ORDER BY o.created_at DESC, o.id DESC`,
+      [req.user.id, startDate, endDate]
+    );
+
+    const currentCostCache = new Map();
+    const details = [];
+    const sellerMap = new Map();
+    const productMap = new Map();
+    let totalSales = 0;
+    let totalCost = 0;
+    let estimatedCostOrders = 0;
+
+    for (const row of ordersResult.rows) {
+      const saleAmount = Number(row.amount || 0);
+      let distributorCost = row.distributor_cost_snapshot === null || row.distributor_cost_snapshot === undefined
+        ? null
+        : Number(row.distributor_cost_snapshot);
+      let costSource = 'snapshot';
+
+      if (!Number.isFinite(distributorCost)) {
+        const productId = Number(row.product_id || 0);
+        if (!currentCostCache.has(productId)) {
+          const currentCost = normalizeProductType(row.product_type) === 'combo_auto'
+            ? await calculateComboPrice(pool, distributor, row)
+            : await getEffectiveProductPrice(pool, distributor, row);
+          currentCostCache.set(productId, Math.max(0, Number(currentCost || 0)));
+        }
+        distributorCost = currentCostCache.get(productId) || 0;
+        costSource = 'precio_actual';
+        estimatedCostOrders += 1;
+      }
+
+      distributorCost = Math.max(0, Number(distributorCost || 0));
+      const profit = Number((saleAmount - distributorCost).toFixed(2));
+      const productName = String(row.product_name_snapshot || row.name || 'Producto').trim();
+      const productCategory = String(row.product_category_snapshot || row.category || 'Otros').trim();
+      const sellerId = Number(row.user_id || 0);
+
+      totalSales += saleAmount;
+      totalCost += distributorCost;
+
+      details.push({
+        id: Number(row.id),
+        seller_id: sellerId,
+        seller_name: row.seller_name || 'Vendedor',
+        seller_email: row.seller_email || '',
+        product_id: Number(row.product_id || 0),
+        product_name: productName,
+        product_category: productCategory,
+        sale_amount: Number(saleAmount.toFixed(2)),
+        distributor_cost: Number(distributorCost.toFixed(2)),
+        profit,
+        cost_source: costSource,
+        created_at: row.created_at,
+        created_at_mx: row.created_at_mx || ''
+      });
+
+      const sellerKey = String(sellerId);
+      const sellerSummary = sellerMap.get(sellerKey) || {
+        seller_id: sellerId,
+        seller_name: row.seller_name || 'Vendedor',
+        seller_email: row.seller_email || '',
+        total_orders: 0,
+        total_sales: 0,
+        total_cost: 0,
+        total_profit: 0
+      };
+      sellerSummary.total_orders += 1;
+      sellerSummary.total_sales += saleAmount;
+      sellerSummary.total_cost += distributorCost;
+      sellerSummary.total_profit += profit;
+      sellerMap.set(sellerKey, sellerSummary);
+
+      const productKey = `${Number(row.product_id || 0)}:${productName}`;
+      const productSummary = productMap.get(productKey) || {
+        product_id: Number(row.product_id || 0),
+        product_name: productName,
+        product_category: productCategory,
+        total_orders: 0,
+        total_sales: 0,
+        total_cost: 0,
+        total_profit: 0
+      };
+      productSummary.total_orders += 1;
+      productSummary.total_sales += saleAmount;
+      productSummary.total_cost += distributorCost;
+      productSummary.total_profit += profit;
+      productMap.set(productKey, productSummary);
+    }
+
+    const roundSummary = (row) => ({
+      ...row,
+      total_sales: Number(Number(row.total_sales || 0).toFixed(2)),
+      total_cost: Number(Number(row.total_cost || 0).toFixed(2)),
+      total_profit: Number(Number(row.total_profit || 0).toFixed(2))
+    });
+
+    const totalProfit = Number((totalSales - totalCost).toFixed(2));
+    const bySeller = Array.from(sellerMap.values())
+      .map(roundSummary)
+      .sort((a, b) => b.total_profit - a.total_profit || b.total_sales - a.total_sales);
+    const byProduct = Array.from(productMap.values())
+      .map(roundSummary)
+      .sort((a, b) => b.total_profit - a.total_profit || b.total_sales - a.total_sales);
+
+    res.json({
+      start_date: startDate,
+      end_date: endDate,
+      timezone: 'America/Mexico_City',
+      summary: {
+        total_orders: details.length,
+        total_sales: Number(totalSales.toFixed(2)),
+        total_cost: Number(totalCost.toFixed(2)),
+        total_profit: totalProfit,
+        margin_percent: totalSales > 0 ? Number(((totalProfit / totalSales) * 100).toFixed(2)) : 0,
+        estimated_cost_orders: estimatedCostOrders
+      },
+      by_seller: bySeller,
+      by_product: byProduct,
+      details
+    });
+  } catch (err) {
+    console.error('Error generando reporte de ganancias del distribuidor:', err.message);
+    res.status(500).json({ error: 'Error generando reporte de ganancias' });
+  }
+});
+
 
 app.post("/api/distributor/add-balance", authMiddleware, distributorMiddleware, async (req, res) => {
   try {

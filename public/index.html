@@ -225,7 +225,7 @@
       <div class="dash-icon">💲</div>
       <div><div class="dash-label">Lista de precios</div><div class="small-text">Editar costos por vendedor</div></div>
     </div>
-    <div id="btn-dist-ganancias" onclick="irADirectoAGanancias()" class="dash-card clickable hidden">
+    <div id="btn-dist-ganancias" onclick="showSection('distributorEarnings')" class="dash-card clickable hidden">
       <div class="dash-icon">💰</div>
       <div><div class="dash-label">Mis ganancias</div><div class="small-text">Resumen del panel distribuidor</div></div>
     </div>
@@ -462,6 +462,59 @@
         <div class="panel">
           <div class="panel-head"><div><h2>Precios para mis vendedores</h2><p class="small-text">Tu costo es el precio que tú pagas. Precio vendedor es lo que verá tu vendedor.</p></div><button class="outline-btn" style="width:auto" onclick="loadDistributorPrices()">Actualizar</button></div>
           <div id="distributorPricesList">Sin precios.</div>
+        </div>
+      </section>
+
+      <section id="section-distributorEarnings" class="section">
+        <h1 class="section-title">💰 Mis ganancias</h1>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Reporte del panel distribuidor</h2>
+              <p class="small-text">La ganancia se calcula restando tu costo al precio que pagó cada uno de tus vendedores.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="loadDistributorEarnings()">Actualizar</button>
+          </div>
+          <div class="row">
+            <div>
+              <label class="field-label" for="distributorEarningsStart">Desde</label>
+              <input id="distributorEarningsStart" type="date" />
+            </div>
+            <div>
+              <label class="field-label" for="distributorEarningsEnd">Hasta</label>
+              <input id="distributorEarningsEnd" type="date" />
+            </div>
+          </div>
+          <div class="tools">
+            <button class="primary-btn" style="width:auto" onclick="loadDistributorEarnings()">Consultar</button>
+            <button class="outline-btn" style="width:auto" onclick="setDistributorEarningsToday()">Hoy</button>
+            <button class="outline-btn" style="width:auto" onclick="setDistributorEarningsCurrentMonth()">Mes actual</button>
+            <button class="green-btn" style="width:auto" onclick="downloadDistributorEarningsCsv()">Descargar CSV</button>
+          </div>
+          <p id="distributorEarningsRangeLabel" class="small-text">Selecciona un rango para consultar.</p>
+        </div>
+
+        <div class="grid-cards">
+          <div class="dash-card"><div class="dash-icon">🧾</div><div><div class="dash-label">Pedidos vendidos</div><div class="dash-value"><span id="distributorEarningsOrders">0</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">💳</div><div><div class="dash-label">Venta a vendedores</div><div class="dash-value">$<span id="distributorEarningsSales">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">🏷️</div><div><div class="dash-label">Tu costo</div><div class="dash-value">$<span id="distributorEarningsCost">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">📈</div><div><div class="dash-label">Ganancia</div><div class="dash-value">$<span id="distributorEarningsProfit">0.00</span></div><div class="small-text"><span id="distributorEarningsMargin">0.00</span>% de margen</div></div></div>
+        </div>
+
+        <div class="panel">
+          <h2>Ganancia por vendedor</h2>
+          <div id="distributorEarningsBySeller">Sin ventas en el rango seleccionado.</div>
+        </div>
+
+        <div class="panel">
+          <h2>Ganancia por producto</h2>
+          <div id="distributorEarningsByProduct">Sin ventas en el rango seleccionado.</div>
+        </div>
+
+        <div class="panel">
+          <h2>Detalle de ventas</h2>
+          <div id="distributorEarningsDetails">Sin ventas en el rango seleccionado.</div>
         </div>
       </section>
 
@@ -704,7 +757,7 @@
 <script src="admin-commerce.js?v=7"></script>
 <script src="dashboard-stock-alerts.js?v=4"></script>
 <script src="app.js?v=19"></script>
-<script src="admin-users-distributor.js?v=8"></script>
+<script src="admin-users-distributor.js?v=9"></script>
 
   <div id="modalStatusCSV" class="modal-status-csv hidden" aria-hidden="true">
     <div class="modal-status-csv-backdrop"></div>
