@@ -273,7 +273,16 @@ Entra al panel admin, revisa la explicación y da el veredicto final: Resuelto, 
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+  keepAlive: true
+});
+
+// Una desconexión momentánea de PostgreSQL no debe tumbar el proceso de Node.
+// pg emite este evento cuando una conexión ociosa del pool se pierde.
+pool.on('error', (err) => {
+  console.error('[POSTGRES] Conexión del pool interrumpida:', err?.code || err?.message || err);
 });
 
 console.log("DATABASE_URL existe:", !!process.env.DATABASE_URL);
@@ -7625,15 +7634,73 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
   }
 });
 
-initDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Servidor corriendo en puerto ${PORT}`);
-    });
-  })
-  .catch(err => {
-  console.error("ERROR COMPLETO");
+const DB_TRANSIENT_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  '08000',
+  '08001',
+  '08003',
+  '08004',
+  '08006',
+  '08007',
+  '08P01',
+  '57P01',
+  '57P02',
+  '57P03'
+]);
+
+function isTransientDatabaseError(err) {
+  const code = String(err?.code || '').toUpperCase();
+  if (DB_TRANSIENT_ERROR_CODES.has(code)) return true;
+
+  const message = String(err?.message || err || '');
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|connection terminated|server closed the connection|socket hang up|timeout/i.test(message);
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function initDatabaseWithRetry() {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      attempt += 1;
+      await initDatabase();
+      console.log(`[POSTGRES] Base de datos inicializada correctamente (intento ${attempt}).`);
+      return;
+    } catch (err) {
+      if (!isTransientDatabaseError(err)) {
+        console.error('[POSTGRES] Error no transitorio durante initDatabase.');
+        throw err;
+      }
+
+      const delay = Math.min(30000, 2000 * Math.max(1, attempt));
+      console.error(
+        `[POSTGRES] Conexión interrumpida durante initDatabase (${err?.code || err?.message || 'sin código'}). ` +
+        `Reintentando en ${Math.round(delay / 1000)} segundos...`
+      );
+      await wait(delay);
+    }
+  }
+}
+
+// Arrancamos HTTP inmediatamente para que Railway pueda alcanzar la aplicación
+// aunque PostgreSQL se esté reconectando durante unos segundos.
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
+
+initDatabaseWithRetry().catch(err => {
+  console.error('ERROR COMPLETO');
   console.error(err);
+  // Un error real de esquema/programación sí debe provocar reinicio para no
+  // dejar la aplicación ejecutándose en un estado inconsistente.
   process.exit(1);
 });
 
