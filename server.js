@@ -273,16 +273,7 @@ Entra al panel admin, revisa la explicación y da el veredicto final: Resuelto, 
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-  connectionTimeoutMillis: 10000,
-  idleTimeoutMillis: 30000,
-  keepAlive: true
-});
-
-// Una desconexión momentánea de PostgreSQL no debe tumbar el proceso de Node.
-// pg emite este evento cuando una conexión ociosa del pool se pierde.
-pool.on('error', (err) => {
-  console.error('[POSTGRES] Conexión del pool interrumpida:', err?.code || err?.message || err);
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 console.log("DATABASE_URL existe:", !!process.env.DATABASE_URL);
@@ -6942,10 +6933,18 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
     }
 
     const lowerSearch = search.toLowerCase();
-    const likeSearch = `%${lowerSearch}%`;
-    const likeRawSearch = `%${search}%`;
     const normalizedSearch = lowerSearch.replace(/\s+/g, '');
+    const likeSearch = `%${lowerSearch}%`;
     const likeNormalizedSearch = `%${normalizedSearch}%`;
+    const isEmailSearch = search.includes('@');
+    const isNumericSearch = /^\d+$/.test(search);
+    const numericSearch = isNumericSearch ? Number(search) : null;
+
+    // La trazabilidad pertenece al inventario efectivo del usuario actual.
+    // Admin principal y distribuidores convertidos usan owner 0/global;
+    // paneles independientes usan su propio owner_admin_id.
+    const viewer = await getViewerContext(req.user.id);
+    const scopeOwnerId = Number(viewer?.owner_admin_id || 0) || null;
 
     const officialDateExpression = `COALESCE(ma.original_purchase_date, pa.official_purchase_date)`;
     const expirationDateExpression = `COALESCE(
@@ -6957,7 +6956,7 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
       END
     )`;
 
-    const query = `
+    const selectSql = `
       SELECT
         pa.id AS perfil_id,
         pa.platform,
@@ -7010,26 +7009,110 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
       LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
       LEFT JOIN orders o ON pa.assigned_order_id = o.id
       LEFT JOIN users u ON pa.assigned_user_id = u.id
-      WHERE lower(pa.account_email) LIKE $1
-        OR regexp_replace(lower(COALESCE(pa.account_email, '')), '\\s+', '', 'g') LIKE $3
-        OR lower(pa.profile_name) LIKE $1
-        OR regexp_replace(lower(COALESCE(pa.profile_name, '')), '\\s+', '', 'g') LIKE $3
-        OR lower(pa.profile_pin) LIKE $1
-        OR regexp_replace(lower(COALESCE(pa.profile_pin, '')), '\\s+', '', 'g') LIKE $3
-        OR lower(COALESCE(u.email, '')) LIKE $1
-        OR regexp_replace(lower(COALESCE(u.email, '')), '\\s+', '', 'g') LIKE $3
-        OR lower(COALESCE(u.name, '')) LIKE $1
-        OR regexp_replace(lower(COALESCE(u.name, '')), '\\s+', '', 'g') LIKE $3
-        OR pa.assigned_order_id::text LIKE $2
-        OR o.id::text LIKE $2
-      ORDER BY
-        ${officialDateExpression} DESC NULLS LAST,
-        pa.created_at DESC NULLS LAST,
-        pa.delivered_at DESC NULLS LAST;
     `;
 
-    const result = await pool.query(query, [likeSearch, likeRawSearch, likeNormalizedSearch]);
-    res.json({ events: result.rows || [] });
+    let result;
+
+    if (isEmailSearch) {
+      // Un correo se interpreta exclusivamente como correo de CUENTA MADRE.
+      // Primero localizamos sus mother_account_id exactos y después seguimos
+      // únicamente la cadena de reemplazos relacionada con esos IDs.
+      // Nunca se usa el correo del comprador/vendedor para ampliar resultados.
+      const emailQuery = `
+        WITH RECURSIVE anchor_mothers AS (
+          SELECT DISTINCT pa_anchor.mother_account_id AS id
+          FROM platform_accounts pa_anchor
+          WHERE pa_anchor.mother_account_id IS NOT NULL
+            AND lower(regexp_replace(trim(COALESCE(pa_anchor.account_email, '')), '\\s+', '', 'g')) = $1
+            AND COALESCE(pa_anchor.owner_admin_id, 0) = COALESCE($2::int, 0)
+
+          UNION
+
+          SELECT ma_anchor.id
+          FROM mother_accounts ma_anchor
+          WHERE lower(regexp_replace(trim(COALESCE(ma_anchor.account_email, '')), '\\s+', '', 'g')) = $1
+            AND COALESCE(ma_anchor.owner_admin_id, 0) = COALESCE($2::int, 0)
+        ),
+        mother_family(id) AS (
+          SELECT id FROM anchor_mothers
+
+          UNION
+
+          SELECT linked.id
+          FROM mother_family mf
+          JOIN mother_accounts current_ma ON current_ma.id = mf.id
+          JOIN mother_accounts linked
+            ON linked.id = current_ma.replaces_mother_account_id
+            OR linked.id = current_ma.replaced_by_mother_account_id
+            OR linked.replaces_mother_account_id = current_ma.id
+            OR linked.replaced_by_mother_account_id = current_ma.id
+          WHERE COALESCE(linked.owner_admin_id, 0) = COALESCE($2::int, 0)
+        )
+        ${selectSql}
+        WHERE COALESCE(pa.owner_admin_id, 0) = COALESCE($2::int, 0)
+          AND (
+            pa.mother_account_id IN (SELECT id FROM mother_family)
+            OR (
+              pa.mother_account_id IS NULL
+              AND lower(regexp_replace(trim(COALESCE(pa.account_email, '')), '\\s+', '', 'g')) = $1
+            )
+          )
+        ORDER BY
+          ${officialDateExpression} DESC NULLS LAST,
+          pa.created_at DESC NULLS LAST,
+          pa.delivered_at DESC NULLS LAST,
+          pa.id DESC;
+      `;
+      result = await pool.query(emailQuery, [normalizedSearch, scopeOwnerId]);
+    } else if (isNumericSearch) {
+      // Para números priorizamos coincidencia exacta de pedido, ID de perfil o PIN.
+      // Ya no usamos LIKE sobre pedidos porque #12 no debe traer #120, #312, etc.
+      const numericQuery = `
+        ${selectSql}
+        WHERE COALESCE(pa.owner_admin_id, 0) = COALESCE($2::int, 0)
+          AND (
+            pa.assigned_order_id = $1::int
+            OR o.id = $1::int
+            OR pa.id = $1::int
+            OR regexp_replace(lower(COALESCE(pa.profile_pin, '')), '\\s+', '', 'g') = $3
+          )
+        ORDER BY
+          ${officialDateExpression} DESC NULLS LAST,
+          pa.created_at DESC NULLS LAST,
+          pa.delivered_at DESC NULLS LAST,
+          pa.id DESC;
+      `;
+      result = await pool.query(numericQuery, [numericSearch, scopeOwnerId, normalizedSearch]);
+    } else {
+      // Búsqueda textual: solo campos propios de la cuenta/perfil.
+      // Se excluyen nombre y correo del comprador para impedir mezclar sus otras compras.
+      const textQuery = `
+        ${selectSql}
+        WHERE COALESCE(pa.owner_admin_id, 0) = COALESCE($3::int, 0)
+          AND (
+            lower(COALESCE(pa.account_email, '')) LIKE $1
+            OR regexp_replace(lower(COALESCE(pa.account_email, '')), '\\s+', '', 'g') LIKE $2
+            OR lower(COALESCE(pa.profile_name, '')) LIKE $1
+            OR regexp_replace(lower(COALESCE(pa.profile_name, '')), '\\s+', '', 'g') LIKE $2
+            OR lower(COALESCE(pa.profile_pin, '')) LIKE $1
+            OR regexp_replace(lower(COALESCE(pa.profile_pin, '')), '\\s+', '', 'g') LIKE $2
+            OR lower(COALESCE(pa.product_name, '')) LIKE $1
+            OR lower(COALESCE(pa.platform, '')) LIKE $1
+          )
+        ORDER BY
+          ${officialDateExpression} DESC NULLS LAST,
+          pa.created_at DESC NULLS LAST,
+          pa.delivered_at DESC NULLS LAST,
+          pa.id DESC;
+      `;
+      result = await pool.query(textQuery, [likeSearch, likeNormalizedSearch, scopeOwnerId]);
+    }
+
+    res.json({
+      events: result.rows || [],
+      search_mode: isEmailSearch ? 'mother_email' : (isNumericSearch ? 'exact_number' : 'account_fields'),
+      query: search
+    });
   } catch (error) {
     console.error('Error en historial de inventario:', error.message);
     res.status(500).json({ error: 'Error interno obteniendo el historial de inventario.' });
@@ -7634,73 +7717,15 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
   }
 });
 
-const DB_TRANSIENT_ERROR_CODES = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-  'EPIPE',
-  'ENETUNREACH',
-  'EHOSTUNREACH',
-  '08000',
-  '08001',
-  '08003',
-  '08004',
-  '08006',
-  '08007',
-  '08P01',
-  '57P01',
-  '57P02',
-  '57P03'
-]);
-
-function isTransientDatabaseError(err) {
-  const code = String(err?.code || '').toUpperCase();
-  if (DB_TRANSIENT_ERROR_CODES.has(code)) return true;
-
-  const message = String(err?.message || err || '');
-  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|connection terminated|server closed the connection|socket hang up|timeout/i.test(message);
-}
-
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function initDatabaseWithRetry() {
-  let attempt = 0;
-
-  while (true) {
-    try {
-      attempt += 1;
-      await initDatabase();
-      console.log(`[POSTGRES] Base de datos inicializada correctamente (intento ${attempt}).`);
-      return;
-    } catch (err) {
-      if (!isTransientDatabaseError(err)) {
-        console.error('[POSTGRES] Error no transitorio durante initDatabase.');
-        throw err;
-      }
-
-      const delay = Math.min(30000, 2000 * Math.max(1, attempt));
-      console.error(
-        `[POSTGRES] Conexión interrumpida durante initDatabase (${err?.code || err?.message || 'sin código'}). ` +
-        `Reintentando en ${Math.round(delay / 1000)} segundos...`
-      );
-      await wait(delay);
-    }
-  }
-}
-
-// Arrancamos HTTP inmediatamente para que Railway pueda alcanzar la aplicación
-// aunque PostgreSQL se esté reconectando durante unos segundos.
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
-
-initDatabaseWithRetry().catch(err => {
-  console.error('ERROR COMPLETO');
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT}`);
+    });
+  })
+  .catch(err => {
+  console.error("ERROR COMPLETO");
   console.error(err);
-  // Un error real de esquema/programación sí debe provocar reinicio para no
-  // dejar la aplicación ejecutándose en un estado inconsistente.
   process.exit(1);
 });
 
