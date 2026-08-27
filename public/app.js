@@ -1272,15 +1272,26 @@ registerSectionHook(function manualPendingSectionHook(name){
 
 
 
+function isTruthyRoleFlag(v){
+  return v===true || v===1 || v==='1' || v==='true';
+}
+
+function isPanelOwnerAccountFinal(){
+  if(!currentUser) return false;
+  const role=String(currentUser.role||'').toLowerCase();
+  const type=String(currentUser.account_type||'').toLowerCase();
+  if(role!=='admin') return false;
+  if(type==='admin_global') return false;
+  if(type==='panel_propietario' || type==='panel_admin' || type==='admin_panel') return true;
+  return isTruthyRoleFlag(currentUser.is_panel_admin);
+}
+
 function __isAdminUserFinal(){
-  return currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin') && !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+  return !!currentUser && (String(currentUser.role||'').toLowerCase()==='admin' || String(currentUser.role||'').toLowerCase()==='super_admin') && !isPanelOwnerAccountFinal();
 }
 
 function isAdminUserSafe(){
-  if(typeof __isAdminUserFinal === 'function') return __isAdminUserFinal();
-  const role = String(currentUser?.role || '').toLowerCase();
-  const isPanelAdmin = currentUser?.is_panel_admin === true || currentUser?.is_panel_admin === 1 || currentUser?.is_panel_admin === 'true';
-  return (role === 'admin' || role === 'super_admin') && !isPanelAdmin;
+  return __isAdminUserFinal();
 }
 
 function toggleCompactItemFinal(id){
@@ -1652,7 +1663,7 @@ window.goFailureResponsesPageNext = function(){ loadMyFailureResponsesFinal(curr
 // Esta sección es solo para el admin principal.
 // ===============================
 function ensureAdminPanelsPhase1UI(){
-  if(!currentUser || String(currentUser.role||'').toLowerCase()!=='admin') return;
+  if(!isAdminUserSafe()) return;
 
   const adminSection=document.getElementById('section-admin');
   if(!adminSection) return;
@@ -1737,7 +1748,11 @@ function ensureAdminPanelsPhase1UI(){
           <label class="field-label">Fecha de vencimiento</label>
           <input id="panelExpiresAtPhase1" type="date" />
 
-          <button class="primary-btn" onclick="createAdminPanelPhase1()">Crear panel admin</button>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <button class="primary-btn" onclick="createAdminPanelPhase1()">Crear panel admin manualmente</button>
+            <button class="outline-btn" type="button" onclick="generateAdminPanelInvitePhase1()">Generar enlace para que el cliente se registre</button>
+          </div>
+          <div id="adminPanelInviteResultPhase1" class="small-text" style="margin-top:10px"></div>
         </div>
       </div>
 
@@ -1815,7 +1830,7 @@ async function loadAdminPanelsPhase1(){
           <tr>
             <td>
               <b>${safeText(p.business_name||'Sin nombre')}</b><br>
-              <span class="small-text">${safeText(p.email||'')}</span>
+              <span class="small-text">${safeText(p.email||'')}</span><br>${p.slug ? `<span class="small-text">https://${safeText(p.slug)}.katalogoclick.com</span>` : ""}
             </td>
             <td>
               ${safeText(p.admin_name||'')}<br>
@@ -1846,6 +1861,15 @@ async function loadAdminPanelsPhase1(){
     if(box) box.innerHTML='No se pudieron cargar los paneles admin.';
     showMessage(e.message||'Error cargando paneles admin','error');
   }
+}
+
+async function generateAdminPanelInvitePhase1(){
+  try{const planType=document.getElementById('panelPlanTypePhase1')?.value||'renta';const expiresAt=document.getElementById('panelExpiresAtPhase1')?.value||null;
+    const data=await api('/api/admin/admin-panels/invite',{method:'POST',body:JSON.stringify({plan_type:planType,expires_at:expiresAt})});
+    const box=document.getElementById('adminPanelInviteResultPhase1'),url=String(data.registration_url||'');
+    if(box){box.innerHTML='<b>Enlace generado:</b><br><input value="'+safeText(url)+'" readonly style="width:100%;margin-top:6px" onclick="this.select()">';}
+    navigator.clipboard?.writeText(url).then(()=>showMessage('Enlace generado y copiado al portapapeles')).catch(()=>showMessage('Enlace generado'));
+  }catch(e){showMessage(e.message||'Error generando enlace','error');}
 }
 
 async function createAdminPanelPhase1(){
@@ -1895,7 +1919,8 @@ function copyAdminPanelInfoPhase1(panelId){
     `Correo notificaciones: ${panel.notification_email||''}`,
     `Estado: ${panel.status||''}`,
     `Plan: ${panel.plan_type||''}`,
-    `Vence: ${panel.expires_at ? String(panel.expires_at).slice(0,10) : 'Sin fecha'}`
+    `Vence: ${panel.expires_at ? String(panel.expires_at).slice(0,10) : 'Sin fecha'}`,
+    `Liga: ${panel.slug ? `https://${panel.slug}.katalogoclick.com` : 'Sin subdominio'}`
   ].join('\n');
 
   navigator.clipboard?.writeText(text).then(
@@ -1922,7 +1947,7 @@ function copyAdminPanelInfoPhase1(panelId){
 // FASE 2 INICIO: Panel admin rentado con productos, inventario y banco
 // ===============================
 function isPanelAdminRented(){
-  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+  return isPanelOwnerAccountFinal();
 }
 function isAnyAdminUserPanel(){
   return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
@@ -1940,7 +1965,7 @@ function applyRentedAdminLayout(){
   const main = isMainAdminPrincipal();
 
   // Menú admin: solo principal ve el panel completo. El rentado entra desde tarjetas.
-  hideElementHard(document.getElementById('adminMenuBtn'), true);
+  hideElementHard(document.getElementById('adminMenuBtn'), panel);
   hideElementHard(document.getElementById('adminSalesMenuBtn'), !main);
 
   // Tarjetas dashboard para panel rentado.
@@ -2034,7 +2059,7 @@ registerLoadAppHook(async function rentedAdminLoadAppHook(){
 // MEJORA REAL: dashboard para panel independiente + reporte mensual + busquedas
 // ===============================
 function isPanelAdminCreatedFinal(){
-  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true');
+  return isPanelOwnerAccountFinal();
 }
 function isAdminAnyFinal(){
   return currentUser && String(currentUser.role || '').toLowerCase() === 'admin';
@@ -2260,10 +2285,7 @@ registerLoadAppHook(async function advancedReportsLoadAppHook(){
   let salesDetailsExpandedFinal = false;
 
   function isMainGlobalAdminFinal(){
-    return currentUser &&
-      String(currentUser.role || '').toLowerCase() === 'admin' &&
-      !(currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true') &&
-      !(currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
+    return isAdminUserSafe() && !isTruthyRoleFlag(currentUser?.is_subadmin);
   }
 
   function isAnyAdminFinal(){
@@ -4103,18 +4125,8 @@ function isGlobalAdminForDashboard(){
   return role==='admin' && !isPanelAdminForDashboard();
 }
 
-function isTruthyRoleFlag(v){
-  return v===true || v===1 || v==='1' || v==='true';
-}
-
 function isPanelAdminForDashboard(){
-  if(!currentUser) return false;
-  const role=String(currentUser.role||'').toLowerCase();
-  const accountType=String(currentUser.account_type||'').toLowerCase();
-  if(role!=='admin') return false;
-  return isTruthyRoleFlag(currentUser.is_panel_admin) ||
-    ['panel_propietario','panel_admin','admin_panel'].includes(accountType) ||
-    (isTruthyRoleFlag(currentUser.is_subadmin) && accountType!=='admin_distribuidor');
+  return isPanelOwnerAccountFinal();
 }
 
 function isDistributorForDashboard(){
@@ -4558,8 +4570,8 @@ function applyDashboardRoleVisibilityMatrix(){
     hardHide('dashMonthlyReportCard', true);
 
     // Oculta infraestructura global para panel admin independiente.
-    hardHide('adminMenuBtn', true);
-    hardHide('adminSalesMenuBtn', true);
+    hardHide('adminMenuBtn', isPanelAdmin);
+    hardHide('adminSalesMenuBtn', isPanelAdmin);
     hardHide('dashInventoryHistoryCard', !(isDistributor || isAdminGlobal));
     globalInfraIds.forEach(id=>hardHide(id, isPanelAdmin));
     hardHide('btnHistorialId', true);

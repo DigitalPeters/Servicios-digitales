@@ -2455,3 +2455,5 @@ body.modal-open{
     border-color:#fca5a5!important;
   }
 }
+
+.panel-invite-fields{margin-top:10px;padding:14px;border:1px solid #dfe6f3;border-radius:14px;background:#f8faff}.auth-invite-note{margin-bottom:12px;font-weight:700;color:#334155}

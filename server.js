@@ -1,6 +1,5 @@
-process.env.DATABASE_URL = "postgresql://postgres:tIUHZOwRTVTQVaNmQbOXoKTdqtMVSHyN@ballast.proxy.rlwy.net:10856/railway";
-
 const express = require("express");
+const crypto = require("crypto");
 console.log("VERSION RECUPERACION 11-JUN-2026");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
@@ -18,6 +17,48 @@ const codigosRecuperacion = new Map();
 
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
+
+const PANEL_BASE_DOMAIN = String(process.env.PANEL_BASE_DOMAIN || "katalogoclick.com")
+  .trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+const MAIN_ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+function isMainAdminEmail(email) {
+  return Boolean(MAIN_ADMIN_EMAIL) && String(email || "").trim().toLowerCase() === MAIN_ADMIN_EMAIL;
+}
+
+function getRequestHost(req) {
+  const forwarded = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  return String(forwarded || req.headers.host || "").split(":")[0].trim().toLowerCase();
+}
+function slugifyBusinessName(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/ñ/g, "n")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+}
+function getTenantSlugFromHost(req) {
+  const host = getRequestHost(req), base = PANEL_BASE_DOMAIN;
+  if (!host || host === base || host === `www.${base}`) return "";
+  const suffix = `.${base}`;
+  if (!host.endsWith(suffix)) return "";
+  const slug = host.slice(0, -suffix.length);
+  return slug && !slug.includes(".") ? slug : "";
+}
+function buildPanelUrl(slug) { return `https://${slug}.${PANEL_BASE_DOMAIN}`; }
+function isTenantHost(req) { return Boolean(getTenantSlugFromHost(req)); }
+async function getPanelBySlug(slug, client = pool) {
+  const clean = String(slug || "").trim().toLowerCase();
+  if (!clean) return null;
+  const result = await client.query(
+    `SELECT ap.*, owner.id AS owner_user_id, owner.name AS owner_user_name, owner.email AS owner_user_email
+     FROM admin_panels ap
+     LEFT JOIN users owner ON owner.id = ap.owner_user_id
+     WHERE lower(ap.slug) = lower($1) LIMIT 1`, [clean]);
+  return result.rows[0] || null;
+}
+async function getTenantPanelFromRequest(req, client = pool) {
+  const slug = getTenantSlugFromHost(req);
+  return slug ? getPanelBySlug(slug, client) : null;
+}
 
 app.use(bodyParser.json({ limit: "10mb" }));
 app.use(cors());
@@ -550,7 +591,7 @@ async function adminMiddleware(req, res, next) {
               ap.business_name AS admin_panel_business_name,
               ap.status AS admin_panel_status
        FROM users u
-       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
        WHERE u.id = $1`,
       [req.user.id]
     );
@@ -565,8 +606,8 @@ async function adminMiddleware(req, res, next) {
     }
 
     req.adminUser = user;
-    req.isPanelAdmin = Boolean(user.admin_panel_id);
-    req.isMainAdmin = !req.isPanelAdmin;
+    req.isPanelAdmin = Boolean(user.admin_panel_id) && !isMainAdminEmail(user.email);
+    req.isMainAdmin = isMainAdminEmail(user.email) || !req.isPanelAdmin;
     next();
   } catch (err) {
     console.error("Error validando admin:", err.message);
@@ -653,6 +694,20 @@ async function getAdminPanelForEmail(email, client = pool) {
   return result.rows[0] || null;
 }
 
+async function getAdminPanelForUserId(userId, client = pool) {
+  const id = Number(userId || 0);
+  if (!id) return null;
+  const result = await client.query(
+    `SELECT id, business_name, admin_name, email, status, plan_type, expires_at,
+            bank_name, bank_holder, bank_clabe, payment_concept, notification_email
+     FROM admin_panels
+     WHERE owner_user_id = $1
+     LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] || null;
+}
+
 
 async function getViewerContext(userId, client = pool) {
   const result = await client.query(
@@ -665,9 +720,9 @@ async function getViewerContext(userId, client = pool) {
             ap.notification_email, ap.status AS admin_panel_status,
             owner_panel.id AS owner_panel_id
      FROM users u
-     LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+     LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
      LEFT JOIN users owner_user ON owner_user.id = u.owner_user_id
-     LEFT JOIN admin_panels owner_panel ON lower(owner_panel.email) = lower(owner_user.email)
+     LEFT JOIN admin_panels owner_panel ON owner_panel.owner_user_id = owner_user.id
      WHERE u.id = $1`,
     [userId]
   );
@@ -699,8 +754,8 @@ async function getOwnerAndNotificationForUser(userId, client = pool) {
        self_panel.notification_email AS self_notification_email
      FROM users u
      LEFT JOIN users owner ON owner.id = u.owner_user_id
-     LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
-     LEFT JOIN admin_panels self_panel ON lower(self_panel.email) = lower(u.email)
+     LEFT JOIN admin_panels own_panel ON own_panel.owner_user_id = owner.id
+     LEFT JOIN admin_panels self_panel ON self_panel.owner_user_id = u.id
      WHERE u.id = $1
      LIMIT 1`,
     [userId]
@@ -1380,6 +1435,23 @@ async function initDatabase() {
     )
   `);
 
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS slug TEXT`);
+  await pool.query(`ALTER TABLE admin_panels ADD COLUMN IF NOT EXISTS owner_user_id INTEGER`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_panels_slug_unique ON admin_panels (lower(slug)) WHERE slug IS NOT NULL AND slug <> ''`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS panel_invites (
+      id SERIAL PRIMARY KEY, token TEXT UNIQUE NOT NULL, plan_type TEXT DEFAULT 'renta',
+      expires_at DATE, invite_expires_at TIMESTAMP DEFAULT (NOW() + INTERVAL '7 days'),
+      status TEXT DEFAULT 'activo', created_at TIMESTAMP DEFAULT NOW(), used_at TIMESTAMP
+    )
+  `);
+  await pool.query(`UPDATE admin_panels ap SET owner_user_id = u.id FROM users u WHERE ap.owner_user_id IS NULL AND lower(u.email) = lower(ap.email) AND ($1 = '' OR lower(u.email) <> $1)`, [MAIN_ADMIN_EMAIL]);
+  // Si una versión anterior asoció por error al administrador principal con un panel,
+  // deshacemos únicamente esa asociación; no eliminamos el panel ni al usuario.
+  if (MAIN_ADMIN_EMAIL) {
+    await pool.query(`UPDATE admin_panels SET owner_user_id = NULL WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email)=lower($1))`, [MAIN_ADMIN_EMAIL]);
+  }
+
 
   await pool.query(`UPDATE users SET role = 'user' WHERE role IS NULL`);
   await pool.query(`UPDATE users SET balance = 0 WHERE balance IS NULL`);
@@ -1392,7 +1464,7 @@ async function initDatabase() {
     UPDATE users u
     SET is_subadmin = FALSE
     FROM admin_panels ap
-    WHERE lower(u.email) = lower(ap.email)
+    WHERE ap.owner_user_id = u.id
   `);
 
   await pool.query(`UPDATE products SET cost_price = 0 WHERE cost_price IS NULL`);
@@ -1832,101 +1904,120 @@ async function findAvailableAccountForProduct(client, product, userId) {
 }
 
 // REGISTRO
+app.get("/api/tenant-context", async (req, res) => {
+  try {
+    const panel = await getTenantPanelFromRequest(req);
+    if (!panel) return res.json({ is_tenant: false, base_domain: PANEL_BASE_DOMAIN });
+    if (String(panel.status || "activo").toLowerCase() !== "activo") return res.status(403).json({ error: "Este panel se encuentra suspendido o inactivo." });
+    res.json({ is_tenant: true, business_name: panel.business_name || "", slug: panel.slug || "", status: panel.status || "activo", panel_url: panel.slug ? buildPanelUrl(panel.slug) : "" });
+  } catch (err) {
+    console.error("Error cargando contexto del panel:", err.message);
+    res.status(500).json({ error: "Error cargando el contexto del panel" });
+  }
+});
+
+app.get("/api/panel-invite/:token", async (req, res) => {
+  try {
+    const token = String(req.params.token || "").trim();
+    const result = await pool.query(`SELECT id, plan_type, expires_at, status, invite_expires_at FROM panel_invites WHERE token = $1 LIMIT 1`, [token]);
+    const invite = result.rows[0];
+    if (!invite || invite.status !== "activo" || new Date(invite.invite_expires_at) < new Date()) return res.status(404).json({ error: "El enlace de registro no existe, ya fue utilizado o expiró." });
+    res.json({ valid: true, plan_type: invite.plan_type || "renta", expires_at: invite.expires_at || null });
+  } catch (err) { res.status(500).json({ error: "Error validando invitación" }); }
+});
+
 app.post("/api/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: "Faltan datos" });
+    const cleanName = String(name || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    if (!cleanName || !cleanEmail || !password) return res.status(400).json({ error: "Faltan datos" });
+    const tenantPanel = await getTenantPanelFromRequest(req);
+    if (isTenantHost(req) && !tenantPanel) {
+      return res.status(404).json({ error: "Este subdominio no corresponde a un panel registrado." });
     }
-
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const result = await pool.query(
-      `INSERT INTO users (name, email, password, role, balance)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, name, email, role, balance`,
-      [name.trim(), email.trim().toLowerCase(), hashedPassword, "user", 0]
-    );
+    if (tenantPanel) {
+      const ownerId = Number(tenantPanel.owner_user_id || 0);
+      if (!ownerId) return res.status(500).json({ error: "Este panel todavía no tiene propietario configurado." });
+      if (String(tenantPanel.status || "activo").toLowerCase() !== "activo") return res.status(403).json({ error: "Este panel se encuentra suspendido o inactivo." });
+      const existing = await pool.query(`SELECT id FROM users WHERE lower(email) = lower($1)`, [cleanEmail]);
+      if (existing.rows.length) return res.status(400).json({ error: "Este correo ya tiene una cuenta. Inicia sesión con el panel al que pertenece." });
+      const result = await pool.query(`INSERT INTO users (name,email,password,role,balance,is_subadmin,owner_user_id,is_enabled) VALUES ($1,$2,$3,'user',0,false,$4,true) RETURNING id,name,email,role,balance,owner_user_id`, [cleanName,cleanEmail,hashedPassword,ownerId]);
+      const token = generateToken(result.rows[0]);
+      return res.json({ token, message: "Cuenta creada y vinculada al panel correctamente" });
+    }
 
-    const user = result.rows[0];
-    const token = generateToken(user);
-
-    res.json({
-      token,
-      message: "Usuario registrado con éxito"
-    });
+    const result = await pool.query(`INSERT INTO users (name,email,password,role,balance) VALUES ($1,$2,$3,'user',0) RETURNING id,name,email,role,balance`, [cleanName,cleanEmail,hashedPassword]);
+    res.json({ token: generateToken(result.rows[0]), message: "Usuario registrado con éxito" });
   } catch (err) {
     console.error(err.message);
     res.status(400).json({ error: "El usuario ya existe o los datos son inválidos" });
   }
 });
 
+app.post("/api/panel-register/:token", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const token = String(req.params.token || "").trim();
+    const b=req.body||{};
+    const business=String(b.business_name||"").trim(), adminName=String(b.admin_name||"").trim(), email=String(b.email||"").trim().toLowerCase(), password=String(b.password||"");
+    if (!token || !business || !adminName || !email || password.length < 6) return res.status(400).json({ error: "Completa nombre del negocio, nombre del administrador, correo y una contraseña de mínimo 6 caracteres." });
+    await client.query("BEGIN");
+    const invR=await client.query(`SELECT * FROM panel_invites WHERE token=$1 FOR UPDATE`,[token]);
+    const inv=invR.rows[0];
+    if(!inv || inv.status!=="activo" || new Date(inv.invite_expires_at)<new Date()){ await client.query("ROLLBACK"); return res.status(404).json({error:"El enlace de registro no existe, ya fue utilizado o expiró."}); }
+    const ex=await client.query(`SELECT id FROM users WHERE lower(email)=lower($1)`,[email]);
+    if(ex.rows.length){ await client.query("ROLLBACK"); return res.status(400).json({error:"Este correo ya está registrado en el sistema."}); }
+    let base=slugifyBusinessName(business)||`panel-${Date.now()}`, slug=base, n=2;
+    while((await client.query(`SELECT id FROM admin_panels WHERE lower(slug)=lower($1) LIMIT 1`,[slug])).rows.length){ slug=`${base}-${n++}`; }
+    const hash=await bcrypt.hash(password,10);
+    const panelR=await client.query(`INSERT INTO admin_panels (business_name,admin_name,email,password,phone,bank_name,bank_holder,bank_clabe,payment_concept,notification_email,status,plan_type,expires_at,slug) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'activo',$11,$12,$13) RETURNING id,business_name,admin_name,email,phone,status,plan_type,expires_at,slug`,[business,adminName,email,hash,String(b.phone||"").trim(),String(b.bank_name||"").trim(),String(b.bank_holder||"").trim(),String(b.bank_clabe||"").trim(),String(b.payment_concept||"").trim(),String(b.notification_email||email).trim(),String(inv.plan_type||"renta"),inv.expires_at||null,slug]);
+    const ownerR=await client.query(`INSERT INTO users (name,email,password,role,balance,is_subadmin,owner_user_id,is_enabled) VALUES ($1,$2,$3,'admin',0,false,NULL,true) RETURNING id,name,email,role,balance`,[adminName,email,hash]);
+    await client.query(`UPDATE admin_panels SET owner_user_id=$1,updated_at=NOW() WHERE id=$2`,[ownerR.rows[0].id,panelR.rows[0].id]);
+    await client.query(`UPDATE panel_invites SET status='usado',used_at=NOW() WHERE id=$1`,[inv.id]);
+    await client.query("COMMIT");
+    res.json({message:"Panel creado correctamente",token:generateToken(ownerR.rows[0]),panel:{...panelR.rows[0],owner_user_id:ownerR.rows[0].id,panel_url:buildPanelUrl(slug)}});
+  } catch(err){ try{await client.query("ROLLBACK")}catch(_){} console.error("Error en registro de panel:",err.message); res.status(500).json({error:"No fue posible crear el panel. Revisa los datos e inténtalo nuevamente."}); }
+  finally{client.release();}
+});
+
 // LOGIN
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const cleanEmail = String(email || "").trim().toLowerCase();
-
-    const result = await pool.query(
-      `SELECT *
-       FROM users
-       WHERE lower(regexp_replace(trim(email), '\\s+', '', 'g')) = lower(regexp_replace($1, '\\s+', '', 'g'))
-       ORDER BY id DESC
-       LIMIT 1`,
-      [cleanEmail]
-    );
-
-    let user = result.rows[0];
-
-    // Si todavía no existe en users, pero sí existe como panel admin rentado, crea su acceso automáticamente.
-    if (!user) {
-      const panel = await getAdminPanelForEmail(cleanEmail);
-      if (!panel) {
-        return res.status(404).json({ error: "Usuario no encontrado" });
-      }
-
-      if (String(panel.status || "activo").toLowerCase() !== "activo") {
-        return res.status(403).json({ error: "Panel suspendido o inactivo" });
-      }
-
-      const panelPass = await pool.query(`SELECT password FROM admin_panels WHERE id = $1`, [panel.id]);
-      const matchPanel = await bcrypt.compare(password || "", panelPass.rows[0]?.password || "");
-      if (!matchPanel) {
-        return res.status(401).json({ error: "Contraseña incorrecta" });
-      }
-
-      const created = await pool.query(
-        `INSERT INTO users (name, email, password, role, balance, is_subadmin)
-         VALUES ($1, $2, $3, 'admin', 0, false)
-         RETURNING *`,
-        [panel.admin_name || panel.business_name || cleanEmail, cleanEmail, panelPass.rows[0].password]
-      );
-      user = created.rows[0];
+    const cleanEmail=String(email||"").trim().toLowerCase();
+    const tenantPanel=await getTenantPanelFromRequest(req);
+    if (isTenantHost(req) && !tenantPanel) return res.status(404).json({error:"Este subdominio no corresponde a un panel registrado."});
+    let result;
+    if(tenantPanel){
+      const ownerId=Number(tenantPanel.owner_user_id||0);
+      if(!ownerId) return res.status(503).json({error:"Este panel todavía no tiene propietario configurado."});
+      if(String(tenantPanel.status||"activo").toLowerCase()!=="activo") return res.status(403).json({error:"Panel suspendido o inactivo"});
+      result=await pool.query(`SELECT * FROM users WHERE lower(regexp_replace(trim(email), '\\s+', '', 'g'))=lower(regexp_replace($1, '\\s+', '', 'g')) AND (id=$2 OR owner_user_id=$2) ORDER BY id DESC LIMIT 1`,[cleanEmail,ownerId]);
+    }else{
+      result=await pool.query(`SELECT * FROM users WHERE lower(regexp_replace(trim(email), '\\s+', '', 'g'))=lower(regexp_replace($1, '\\s+', '', 'g')) ORDER BY id DESC LIMIT 1`,[cleanEmail]);
     }
-
-    const panel = await getAdminPanelForEmail(user.email);
-    if (panel && String(panel.status || "activo").toLowerCase() !== "activo") {
-      return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    let user=result.rows[0];
+    if(!user && !tenantPanel){
+      const panel=await getAdminPanelForEmail(cleanEmail);
+      if(!panel) return res.status(404).json({error:"Usuario no encontrado"});
+      if(String(panel.status||"activo").toLowerCase()!=="activo") return res.status(403).json({error:"Panel suspendido o inactivo"});
+      const panelPass=await pool.query(`SELECT password FROM admin_panels WHERE id=$1`,[panel.id]);
+      if(!await bcrypt.compare(password||"",panelPass.rows[0]?.password||"")) return res.status(401).json({error:"Contraseña incorrecta"});
+      const created=await pool.query(`INSERT INTO users (name,email,password,role,balance,is_subadmin) VALUES ($1,$2,$3,'admin',0,false) RETURNING *`,[panel.admin_name||panel.business_name||cleanEmail,cleanEmail,panelPass.rows[0].password]);
+      user=created.rows[0];
+      await pool.query(`UPDATE admin_panels SET owner_user_id=$1,updated_at=NOW() WHERE id=$2 AND owner_user_id IS NULL`,[user.id,panel.id]);
     }
-
-    if (user.is_enabled === false) {
-      return res.status(403).json({ error: "Tu acceso está deshabilitado. Contacta al administrador de tu panel." });
-    }
-
-    const match = await bcrypt.compare(password || "", user.password);
-
-    if (!match) {
-      return res.status(401).json({ error: "Contraseña incorrecta" });
-    }
-
-    const token = generateToken(user);
-
-    res.json({ token });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error iniciando sesión" });
-  }
+    if(!user) return res.status(404).json({error:"Usuario no encontrado en este panel"});
+    if(tenantPanel && Number(user.id)!==Number(tenantPanel.owner_user_id||0) && Number(user.owner_user_id||0)!==Number(tenantPanel.owner_user_id||0)) return res.status(403).json({error:"Esta cuenta no pertenece a este panel."});
+    const panel = await getAdminPanelForUserId(user.id);
+    if(panel && String(panel.status||"activo").toLowerCase()!=="activo") return res.status(403).json({error:"Panel suspendido o inactivo"});
+    if(user.is_enabled===false) return res.status(403).json({error:"Tu acceso está deshabilitado. Contacta al administrador de tu panel."});
+    if(!await bcrypt.compare(password||"",user.password)) return res.status(401).json({error:"Contraseña incorrecta"});
+    res.json({token:generateToken(user)});
+  }catch(err){console.error(err.message);res.status(500).json({error:"Error iniciando sesión"});}
 });
 
 // MI CUENTA
@@ -1941,21 +2032,23 @@ app.get("/api/me", authMiddleware, async (req, res) => {
               ap.status AS admin_panel_status,
               CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin,
               CASE
+                WHEN lower(u.email) = lower($2) AND u.role = 'admin' THEN 'admin_global'
                 WHEN ap.id IS NOT NULL THEN 'panel_propietario'
                 WHEN COALESCE(u.is_subadmin, false) = true THEN 'admin_distribuidor'
                 WHEN u.role = 'admin' THEN 'admin_global'
                 ELSE 'usuario'
               END AS account_type,
               CASE
+                WHEN lower(u.email) = lower($2) AND u.role = 'admin' THEN 'Admin principal'
                 WHEN ap.id IS NOT NULL THEN 'Panel propietario'
                 WHEN COALESCE(u.is_subadmin, false) = true THEN 'Admin distribuidor'
                 WHEN u.role = 'admin' THEN 'Admin global'
                 ELSE 'Usuario'
               END AS role_label
        FROM users u
-       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
        WHERE u.id = $1`,
-      [req.user.id]
+      [req.user.id, MAIN_ADMIN_EMAIL]
     );
 
     const user = result.rows[0];
@@ -3702,8 +3795,8 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
            ) m
          ) activity ON TRUE
          LEFT JOIN users owner ON owner.id = u.owner_user_id
-         LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
-         LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+         LEFT JOIN admin_panels own_panel ON own_panel.owner_user_id = owner.id
+         LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
          WHERE u.owner_user_id = $1
          ORDER BY u.id DESC`,
         [req.user.id]
@@ -3740,8 +3833,8 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
          ) m
        ) activity ON TRUE
        LEFT JOIN users owner ON owner.id = u.owner_user_id
-       LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
-       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       LEFT JOIN admin_panels own_panel ON own_panel.owner_user_id = owner.id
+       LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
        ORDER BY u.id DESC`
       );
     }
@@ -5542,7 +5635,9 @@ app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (r
       req.isPanelAdmin
         ? pool.query(`SELECT COUNT(*)::int AS total FROM users WHERE owner_user_id = $1`, [req.user.id])
         : pool.query(`SELECT COUNT(*)::int AS total FROM users`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1`),
+      req.isPanelAdmin
+        ? pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1 AND owner_admin_id = $1`, [req.user.id])
+        : pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE active = 1 AND (owner_admin_id IS NULL OR owner_admin_id = 0)`),
       pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ($1::int IS NULL OR owner_admin_id = $1)`, [ownerId]),
       pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE status = 'available' AND ($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0) OR owner_admin_id = $1)`, [ownerId]),
       pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE status = 'pendiente' AND ($1::int IS NULL OR owner_admin_id = $1 OR user_id = $1 OR user_id IN (SELECT id FROM users WHERE owner_user_id = $1))`, [ownerId]),
@@ -5643,6 +5738,11 @@ function normalizeMiniBanner(item) {
 
 app.get("/api/mini-banners", authMiddleware, async (req, res) => {
   try {
+    // Los paneles rentados/propietarios empiezan limpios: los mini banners
+    // del administrador principal NO se comparten entre tenants.
+    const viewer = await getViewerContext(req.user.id);
+    if (viewer?.is_panel_admin) return res.json({ banners: [] });
+
     const banners = (await readMiniBannersFile())
       .map(normalizeMiniBanner)
       .filter(b => b.id > 0 && b.image_url && b.active)
@@ -5656,6 +5756,10 @@ app.get("/api/mini-banners", authMiddleware, async (req, res) => {
 
 app.get("/api/admin/mini-banners", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    // Hasta que exista almacenamiento de banners por tenant, no exponemos
+    // los banners globales al administrador de un panel rentado.
+    if (req.isPanelAdmin) return res.json({ banners: [] });
+
     const includeImages = String(req.query.with_images || "0") === "1";
     const banners = (await readMiniBannersFile())
       .map(normalizeMiniBanner)
@@ -6044,8 +6148,8 @@ app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, 
               ap.id AS target_panel_id
        FROM users u
        LEFT JOIN users owner ON owner.id = u.owner_user_id
-       LEFT JOIN admin_panels own_panel ON lower(own_panel.email) = lower(owner.email)
-       LEFT JOIN admin_panels ap ON lower(ap.email) = lower(u.email)
+       LEFT JOIN admin_panels own_panel ON own_panel.owner_user_id = owner.id
+       LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
        WHERE u.id = $1
        LIMIT 1`,
       [userId]
@@ -7341,7 +7445,7 @@ app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMid
     const result = await pool.query(
       `SELECT id, business_name, admin_name, email, phone, bank_name, bank_holder,
               bank_clabe, payment_concept, notification_email, status, plan_type,
-              expires_at, created_at, updated_at
+              expires_at, slug, owner_user_id, created_at, updated_at
        FROM admin_panels
        ORDER BY id DESC`
     );
@@ -7355,85 +7459,31 @@ app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMid
 
 app.post("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
-    const {
-      business_name,
-      admin_name,
-      email,
-      password,
-      phone,
-      bank_name,
-      bank_holder,
-      bank_clabe,
-      payment_concept,
-      notification_email,
-      status,
-      plan_type,
-      expires_at
-    } = req.body;
+    const {business_name,admin_name,email,password,phone,bank_name,bank_holder,bank_clabe,payment_concept,notification_email,status,plan_type,expires_at}=req.body||{};
+    const cleanEmail=String(email||"").trim().toLowerCase(), cleanPassword=String(password||"").trim();
+    if(!cleanEmail) return res.status(400).json({error:"El correo del admin es obligatorio"});
+    if(isMainAdminEmail(cleanEmail)) return res.status(400).json({error:"El correo del administrador principal no puede convertirse en panel rentado."});
+    if(cleanPassword.length<6) return res.status(400).json({error:"La contraseña debe tener mínimo 6 caracteres"});
+    const exists=await pool.query(`SELECT id FROM admin_panels WHERE lower(email)=lower($1)`,[cleanEmail]);
+    if(exists.rows.length) return res.status(400).json({error:"Este correo ya tiene un panel admin registrado"});
+    let base=slugifyBusinessName(business_name)||`panel-${Date.now()}`, slug=base, n=2;
+    while((await pool.query(`SELECT id FROM admin_panels WHERE lower(slug)=lower($1) LIMIT 1`,[slug])).rows.length){slug=`${base}-${n++}`;}
+    const hash=await bcrypt.hash(cleanPassword,10);
+    const result=await pool.query(`INSERT INTO admin_panels (business_name,admin_name,email,password,phone,bank_name,bank_holder,bank_clabe,payment_concept,notification_email,status,plan_type,expires_at,slug) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id,business_name,admin_name,email,phone,bank_name,bank_holder,bank_clabe,payment_concept,notification_email,status,plan_type,expires_at,slug,owner_user_id,created_at,updated_at`,[String(business_name||"").trim(),String(admin_name||"").trim(),cleanEmail,hash,String(phone||"").trim(),String(bank_name||"").trim(),String(bank_holder||"").trim(),String(bank_clabe||"").trim(),String(payment_concept||"").trim(),String(notification_email||"").trim(),String(status||"activo").trim()||"activo",String(plan_type||"renta").trim()||"renta",expires_at||null,slug]);
+    const owner=await pool.query(`INSERT INTO users (name,email,password,role,balance,is_subadmin,owner_user_id,is_enabled) VALUES ($1,$2,$3,'admin',0,false,NULL,true) RETURNING id`,[String(admin_name||business_name||cleanEmail).trim()||cleanEmail,cleanEmail,hash]);
+    await pool.query(`UPDATE admin_panels SET owner_user_id=$1,updated_at=NOW() WHERE id=$2`,[owner.rows[0].id,result.rows[0].id]);
+    result.rows[0].owner_user_id=owner.rows[0].id;
+    res.json({message:"Panel admin creado correctamente y acceso habilitado",panel:{...result.rows[0],panel_url:buildPanelUrl(slug)}});
+  }catch(err){console.error("Error creando panel admin:",err.message);res.status(500).json({error:"Error creando panel admin"});}
+});
 
-    const cleanEmail = String(email || "").trim().toLowerCase();
-    const cleanPassword = String(password || "").trim();
-
-    if (!cleanEmail) {
-      return res.status(400).json({ error: "El correo del admin es obligatorio" });
-    }
-
-    if (!cleanPassword || cleanPassword.length < 6) {
-      return res.status(400).json({ error: "La contraseña debe tener mínimo 6 caracteres" });
-    }
-
-    const exists = await pool.query(`SELECT id FROM admin_panels WHERE lower(email) = lower($1)`, [cleanEmail]);
-    if (exists.rows.length) {
-      return res.status(400).json({ error: "Este correo ya tiene un panel admin registrado" });
-    }
-
-    const hashedPassword = await bcrypt.hash(cleanPassword, 10);
-
-    const result = await pool.query(
-      `INSERT INTO admin_panels
-       (business_name, admin_name, email, password, phone, bank_name, bank_holder,
-        bank_clabe, payment_concept, notification_email, status, plan_type, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING id, business_name, admin_name, email, phone, bank_name, bank_holder,
-                 bank_clabe, payment_concept, notification_email, status, plan_type,
-                 expires_at, created_at, updated_at`,
-      [
-        String(business_name || "").trim(),
-        String(admin_name || "").trim(),
-        cleanEmail,
-        hashedPassword,
-        String(phone || "").trim(),
-        String(bank_name || "").trim(),
-        String(bank_holder || "").trim(),
-        String(bank_clabe || "").trim(),
-        String(payment_concept || "").trim(),
-        String(notification_email || "").trim(),
-        String(status || "activo").trim() || "activo",
-        String(plan_type || "renta").trim() || "renta",
-        expires_at || null
-      ]
-    );
-
-    await pool.query(
-      `INSERT INTO users (name, email, password, role, balance, is_subadmin)
-       VALUES ($1, $2, $3, 'admin', 0, false)
-       ON CONFLICT (email) DO UPDATE
-       SET name = EXCLUDED.name,
-           password = EXCLUDED.password,
-           role = 'admin',
-           is_subadmin = false
-       RETURNING id`,
-      [String(admin_name || business_name || cleanEmail).trim() || cleanEmail, cleanEmail, hashedPassword]
-    );
-
-    res.json({
-      message: "Panel admin creado correctamente y acceso habilitado",
-      panel: result.rows[0]
-    });
-  } catch (err) {
-    console.error("Error creando panel admin:", err.message);
-    res.status(500).json({ error: "Error creando panel admin" });
-  }
+app.post("/api/admin/admin-panels/invite", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const token=crypto.randomBytes(24).toString("hex"), planType=String(req.body?.plan_type||"renta").trim()||"renta", expiresAt=req.body?.expires_at||null;
+    const result=await pool.query(`INSERT INTO panel_invites(token,plan_type,expires_at) VALUES($1,$2,$3) RETURNING id,token,plan_type,expires_at,invite_expires_at,status,created_at`,[token,planType,expiresAt]);
+    const host=getRequestHost(req), protocol=String(req.headers["x-forwarded-proto"]||req.protocol||"https").split(",")[0], baseUrl=`${protocol}://${host}`;
+    res.json({message:"Enlace de registro generado",invite:result.rows[0],registration_url:`${baseUrl}/?panel_invite=${encodeURIComponent(token)}`});
+  }catch(err){console.error("Error generando invitación:",err.message);res.status(500).json({error:"No se pudo generar el enlace de registro"});}
 });
 
 app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
