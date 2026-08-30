@@ -88,6 +88,11 @@ function showSection(name) {
     normalizedName = 'dashboard';
   }
 
+  if(normalizedName === 'profit-quality' && typeof isMainAdminPrincipal === 'function' && !isMainAdminPrincipal()){
+    if(typeof showMessage === 'function') showMessage('Esta sección es exclusiva del administrador principal', 'error');
+    normalizedName = 'dashboard';
+  }
+
   if(normalizedName === 'inventory-history' && !canAccessInventoryHistory()){
     if(typeof showMessage === 'function'){
       showMessage('Solo el distribuidor puede acceder al historial de inventario', 'error');
@@ -323,7 +328,7 @@ window.loadPlatformInventory = async function(page = currentInventoryPage) {
     // --- LISTA COMPLETA ---
     if(listBox) {
       listBox.innerHTML = accounts.length 
-        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>` 
+        ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>ID</th><th>Producto</th><th>Correo / contraseña</th><th>Perfil / PIN</th><th>URL</th><th>Costo / proveedor</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${accounts.map(a => renderPlatformAccountRow(a)).join('')}</tbody></table></div>` 
         : 'Sin cuentas.';
     }
   } catch(e) {
@@ -348,6 +353,7 @@ function renderPlatformAccountRow(a){
     <td><input id="pa-email-${a.id}" value="${safeText(a.account_email||'')}" placeholder="Correo"/><input id="pa-pass-${a.id}" value="${safeText(a.account_password||'')}" placeholder="Contraseña"/></td>
     <td><input id="pa-profile-${a.id}" value="${safeText(a.profile_name||'')}" placeholder="Perfil"/><input id="pa-pin-${a.id}" value="${safeText(a.profile_pin||'')}" placeholder="PIN"/></td>
     <td><input id="pa-url-${a.id}" value="${safeText(a.access_url||'')}" placeholder="URL opcional"/></td>
+    <td><input id="pa-cost-${a.id}" type="number" min="0" step="0.01" value="${a.purchase_price??''}" placeholder="Costo perfil"/><br><span class="small-text">${safeText(a.proveedor_cuenta_madre||'Sin proveedor')} · Madre: ${a.costo_total_cuenta_madre==null?'sin costo':'$'+formatMoney(a.costo_total_cuenta_madre)}</span></td>
     <td><select id="pa-status-${a.id}">${statuses.map(st=>`<option value="${st}" ${a.status===st?'selected':''}>${st}</option>`).join('')}</select></td>
     <td><button class="primary-btn" style="width:auto;margin-bottom:6px" onclick="updatePlatformAccount(${a.id}, '${safeText(a.product_name||a.platform||'')}')">Guardar</button><br><button class="muted-btn" style="width:auto" onclick="markPlatformAccountSoldOutside(${a.id})">Vendido por fuera</button></td>
   </tr>`;
@@ -365,6 +371,7 @@ async function updatePlatformAccount(id, productName){
       profile_name: (document.getElementById('pa-profile-'+id)?.value || '').trim(),
       profile_pin: (document.getElementById('pa-pin-'+id)?.value || '').trim(),
       access_url: (document.getElementById('pa-url-'+id)?.value || '').trim(),
+      purchase_price: (document.getElementById('pa-cost-'+id)?.value || '').trim(),
       status: document.getElementById('pa-status-'+id)?.value || 'available'
     };
     const data = await api('/api/admin/platform-accounts/'+id, {method:'PATCH', body:JSON.stringify(payload)});
@@ -396,6 +403,9 @@ async function createPlatformAccount(){
     // 1. CAPTURAMOS LA CASILLA REUSABLE Y LA NUEVA FECHA
     const isReusable = document.getElementById('platformReusable')?.checked || false;
     const officialPurchaseDate = (document.getElementById('officialPurchaseDate')?.value || '').trim();
+    const providerName = (document.getElementById('platformProvider')?.value || '').trim();
+    const motherPurchaseCost = (document.getElementById('motherPurchaseCost')?.value || '').trim();
+    const purchasePrice = (document.getElementById('platformPurchasePrice')?.value || '').trim();
     
     const email=(document.getElementById('platformEmail')?.value||'').trim();
     const password=(document.getElementById('platformPassword')?.value||'').trim();
@@ -424,7 +434,10 @@ async function createPlatformAccount(){
         extra_data:'',
         terms_conditions:'',
         reusable: isReusable ? 1 : 0,
-        official_purchase_date: officialPurchaseDate || null // <-- NUEVO DATO ENVIADO AL SERVIDOR
+        official_purchase_date: officialPurchaseDate || null,
+        provider_name: providerName,
+        mother_purchase_cost: motherPurchaseCost === '' ? null : motherPurchaseCost,
+        purchase_price: purchasePrice === '' ? null : purchasePrice
       })
     });
     
@@ -437,6 +450,9 @@ async function createPlatformAccount(){
     if(document.getElementById('platformPin')) document.getElementById('platformPin').value='';
     if(document.getElementById('officialPurchaseDate')) document.getElementById('officialPurchaseDate').value=''; // <-- LIMPIA LA FECHA
     if(document.getElementById('platformAccessUrl')) document.getElementById('platformAccessUrl').value='';
+    if(document.getElementById('platformProvider')) document.getElementById('platformProvider').value='';
+    if(document.getElementById('motherPurchaseCost')) document.getElementById('motherPurchaseCost').value='';
+    if(document.getElementById('platformPurchasePrice')) document.getElementById('platformPurchasePrice').value='';
     if(document.getElementById('platformReusable')) document.getElementById('platformReusable').checked=false;
     
     await loadPlatformInventory();
@@ -1977,6 +1993,8 @@ if(userCard) userCard.classList.remove('hidden');
   hideElementHard(document.getElementById('dashboardChartsPanel'), !main);
   hideElementHard(document.getElementById('adminPanelsCardPhase1'), !main);
   hideElementHard(document.getElementById('adminPanelsPanelPhase1'), !main);
+  hideElementHard(document.getElementById('adminProfitQualityCard'), !main);
+  hideElementHard(document.getElementById('section-profit-quality'), !main);
 
   // Dentro del admin rentado solo mostramos lo que necesita para operar su panel.
   if(panel){
@@ -4884,7 +4902,7 @@ function parseInventoryCsvText(text){
   const separator=detectCsvSeparator(lines[0]);
   const headers=parseCsvLine(lines[0], separator).map(cleanCsvHeader);
   const required=['producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte','precio_compra'];
-  const optional=['cuenta_madre_id','reemplaza_cuenta_madre_id','fecha_original_cuenta_madre','vencimiento_cuenta_madre'];
+  const optional=['cuenta_madre_id','reemplaza_cuenta_madre_id','fecha_original_cuenta_madre','vencimiento_cuenta_madre','proveedor','costo_cuenta_madre'];
   const supported=[...required,...optional];
   const missing=required.filter(h=>!headers.includes(h));
   if(missing.length){
@@ -4989,7 +5007,7 @@ async function downloadInventoryCsv(){
     const headers = [
       'producto','correo','contrasena','perfil','pin','fecha_compra','cuenta_madre','url_soporte',
       'precio_compra','cuenta_madre_id','reemplaza_cuenta_madre_id',
-      'fecha_original_cuenta_madre','vencimiento_cuenta_madre'
+      'fecha_original_cuenta_madre','vencimiento_cuenta_madre','proveedor','costo_cuenta_madre'
     ];
 
     const lines = [headers.map(csvEscape).join(',')];
@@ -5007,7 +5025,9 @@ async function downloadInventoryCsv(){
         acc.mother_account_id ?? '',
         acc.reemplaza_cuenta_madre_id ?? '',
         formatInventoryCsvDate(acc.fecha_original_cuenta_madre),
-        formatInventoryCsvDate(acc.vencimiento_cuenta_madre)
+        formatInventoryCsvDate(acc.vencimiento_cuenta_madre),
+        acc.proveedor_cuenta_madre || '',
+        acc.costo_total_cuenta_madre ?? ''
       ].map(csvEscape).join(',');
       lines.push(line);
     });

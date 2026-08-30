@@ -628,9 +628,79 @@
         </div>
       </div>
 
+      <section id="section-profit-quality" class="section">
+        <div class="panel-head">
+          <div>
+            <h1 class="section-title" style="margin-bottom:4px">💹 Rentabilidad y calidad</h1>
+            <p class="small-text">Vista privada del administrador principal. Analiza utilidad, proveedores, cuentas madre, fallas, reemplazos y reembolsos.</p>
+          </div>
+          <button class="outline-btn" style="width:auto" onclick="showSection('admin')">← Panel admin</button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div><h2>Periodo de análisis</h2><p class="small-text">Las ventas se agrupan por fecha de compra; las fallas se agrupan por fecha del reporte, usando horario de México.</p></div>
+            <button class="primary-btn" style="width:auto" onclick="loadProfitQuality()">Actualizar</button>
+          </div>
+          <div class="tools">
+            <div><label class="field-label">Desde</label><input id="profitQualityStart" type="date" /></div>
+            <div><label class="field-label">Hasta</label><input id="profitQualityEnd" type="date" /></div>
+            <button class="outline-btn" style="width:auto" onclick="setProfitQualityCurrentMonth()">Mes actual</button>
+            <button class="outline-btn" style="width:auto" onclick="setProfitQualityLast30Days()">Últimos 30 días</button>
+          </div>
+        </div>
+
+        <div class="grid-cards">
+          <div class="dash-card"><div class="dash-icon">💵</div><div><div class="dash-label">Ingreso admin</div><div class="dash-value">$<span id="pqAdminRevenue">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">💸</div><div><div class="dash-label">Costo vendido</div><div class="dash-value">$<span id="pqSaleCost">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">🔁</div><div><div class="dash-label">Costo reemplazos</div><div class="dash-value">$<span id="pqReplacementCost">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">📈</div><div><div class="dash-label">Utilidad estimada</div><div class="dash-value">$<span id="pqProfit">0.00</span></div><div class="small-text"><span id="pqMargin">0.00</span>% margen</div></div></div>
+          <div class="dash-card"><div class="dash-icon">⚠️</div><div><div class="dash-label">Fallas</div><div id="pqFailures" class="dash-value">0</div></div></div>
+          <div class="dash-card"><div class="dash-icon">♻️</div><div><div class="dash-label">Reemplazos</div><div id="pqReplacements" class="dash-value">0</div></div></div>
+        </div>
+
+        <div class="tabs" style="margin-top:18px">
+          <button id="pqTabProfit" class="tab-btn active" type="button" onclick="showProfitQualityTab('profit')">Rentabilidad</button>
+          <button id="pqTabQuality" class="tab-btn" type="button" onclick="showProfitQualityTab('quality')">Fallas y reemplazos</button>
+        </div>
+
+        <div id="pqProfitTab">
+          <div class="panel">
+            <div class="panel-head"><div><h2>Rentabilidad por proveedor</h2><p class="small-text">Ingreso real del admin = venta − reembolso − ganancia final del distribuidor. La utilidad también descuenta costo vendido y costo conocido de reemplazos.</p></div></div>
+            <div id="pqProviders">Sin datos.</div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><h2>Rentabilidad por cuenta madre</h2><p class="small-text">Puedes completar proveedor y costo total para cuentas históricas. El costo total de cuenta madre se muestra como referencia; la utilidad del periodo usa costos históricos vendidos para evitar duplicar costos.</p></div></div>
+            <div id="pqMotherAccounts">Sin datos.</div>
+          </div>
+        </div>
+
+        <div id="pqQualityTab" class="hidden">
+          <div class="row">
+            <div class="panel" style="margin:0"><h2>Por plataforma</h2><div id="pqQualityPlatform">Sin datos.</div></div>
+            <div class="panel" style="margin:0"><h2>Por proveedor</h2><div id="pqQualityProvider">Sin datos.</div></div>
+          </div>
+          <div class="row" style="margin-top:16px">
+            <div class="panel" style="margin:0"><h2>Por vendedor</h2><div id="pqQualitySeller">Sin datos.</div></div>
+            <div class="panel" style="margin:0"><h2>Por producto</h2><div id="pqQualityProduct">Sin datos.</div></div>
+          </div>
+          <div class="panel">
+            <h2>Reportes recientes del periodo</h2>
+            <div id="pqRecentReports">Sin datos.</div>
+          </div>
+        </div>
+      </section>
+
       <section id="section-admin" class="section">
         <h1 class="section-title">Panel admin</h1>
-        <div class="grid-cards"><div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div><div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div></div>
+        <div class="grid-cards">
+          <div class="dash-card clickable" onclick="scrollToAdmin('adminUsersPanel')"><div class="dash-icon">👥</div><div><div class="dash-label">Usuarios</div><div id="adminUsersCount" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="scrollToAdmin('adminProductsPanel')"><div class="dash-icon">P</div><div><div class="dash-label">Productos</div><div id="adminProductsCount" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="scrollToAdmin('adminPlatformAccountsPanel')"><div class="dash-icon">🔐</div><div><div class="dash-label">Inventario</div><div id="adminPlatformAccountsCount" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="scrollToAdmin('adminOrdersPanel')"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="adminOrdersCount" class="dash-value">0</div></div></div>
+          <div class="dash-card clickable" onclick="openSalesReport()"><div class="dash-icon">📊</div><div><div class="dash-label">Ventas hoy</div><div class="dash-value">$<span id="adminSalesToday">0.00</span></div></div></div>
+          <div id="adminProfitQualityCard" class="dash-card clickable hidden" onclick="showSection('profit-quality')"><div class="dash-icon">💹</div><div><div class="dash-label">Rentabilidad y calidad</div><div class="small-text">Cuentas · proveedores · fallas</div></div></div>
+        </div>
         <div id="adminUsersPanel" class="panel"><div class="panel-head"><h2>Usuarios / vendedores registrados</h2></div><div class="row"><div><h3>Agregar saldo</h3><select id="balanceUserSelect"></select><input id="balanceUserId" type="number" placeholder="ID del usuario" /><input id="balanceAmount" type="number" step="0.01" placeholder="Cantidad" /><input id="balanceNote" placeholder="Nota" /><div class="two-row"><button class="green-btn" onclick="addBalance()">Agregar saldo</button><button class="danger-btn" onclick="removeBalance()">Quitar saldo</button></div><button id="adminResetPasswordBtn" class="primary-btn" style="margin-top:10px" onclick="botonDePanico()">🔑 Resetear Contraseña</button></div><div><h3>Usuarios</h3><div id="usersList"></div></div></div></div>
         <div id="adminSubadminPricesPanel" class="panel">
           <div class="panel-head">
@@ -719,6 +789,20 @@
               <label class="field-label">Fecha de compra (Cuenta Madre)</label>
               <input type="date" id="officialPurchaseDate" />
               <!-- ============================ -->
+
+              <div class="two-row">
+                <div>
+                  <label class="field-label">Proveedor (opcional)</label>
+                  <input id="platformProvider" placeholder="Ej. Proveedor A" />
+                </div>
+                <div>
+                  <label class="field-label">Costo total cuenta madre (opcional)</label>
+                  <input id="motherPurchaseCost" type="number" min="0" step="0.01" placeholder="Ej. 240" />
+                </div>
+              </div>
+              <label class="field-label">Costo de este perfil / acceso (opcional)</label>
+              <input id="platformPurchasePrice" type="number" min="0" step="0.01" placeholder="Se usa como costo histórico al vender este perfil" />
+              <p class="small-text">Proveedor y costo total se guardan en la cuenta madre. El costo por perfil se conserva en el pedido cuando se vende.</p>
 
               <label class="field-label">URL para código/soporte (opcional)</label>
               <input id="platformAccessUrl" placeholder="https://..." />
@@ -818,8 +902,9 @@
 <script src="user-orders-balance.js?v=8"></script>
 <script src="admin-commerce.js?v=7"></script>
 <script src="dashboard-stock-alerts.js?v=4"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 <script src="admin-users-distributor.js?v=11"></script>
+<script src="admin-profit-quality.js?v=1"></script>
 
   <div id="modalStatusCSV" class="modal-status-csv hidden" aria-hidden="true">
     <div class="modal-status-csv-backdrop"></div>

@@ -883,13 +883,22 @@ async function resolveMotherAccount(client, {
   originalPurchaseDate = null,
   expirationDate = null,
   replacesMotherAccountId = null,
-  forceCreateNew = false
+  forceCreateNew = false,
+  providerName = '',
+  purchaseCostTotal = null
 }) {
   const cleanProduct = String(productName || "").trim() || "Sin producto";
   const cleanEmail = String(accountEmail || "").trim();
   const cleanOwnerId = Number(ownerAdminId || 0) || null;
   const replacementId = Number(replacesMotherAccountId || 0) || null;
   const suppliedOriginalDate = originalPurchaseDate || purchaseDate || null;
+  const cleanProviderName = String(providerName || '').trim().slice(0, 160);
+  const parsedMotherCost = purchaseCostTotal === null || purchaseCostTotal === undefined || String(purchaseCostTotal).trim() === ''
+    ? null
+    : Number(purchaseCostTotal);
+  if (parsedMotherCost !== null && (!Number.isFinite(parsedMotherCost) || parsedMotherCost < 0)) {
+    throw new Error('El costo total de la cuenta madre debe ser mayor o igual a 0.');
+  }
 
   // Evita crear dos cuentas madre para el mismo grupo durante cargas simultáneas.
   await client.query("LOCK TABLE mother_accounts IN SHARE ROW EXCLUSIVE MODE");
@@ -939,11 +948,13 @@ async function resolveMotherAccount(client, {
         `UPDATE mother_accounts
          SET original_purchase_date = COALESCE($2::date, original_purchase_date),
              expiration_date = COALESCE($3::date, expiration_date),
+             provider_name = CASE WHEN $4::text <> '' THEN $4 ELSE provider_name END,
+             purchase_cost_total = COALESCE($5::numeric, purchase_cost_total),
              status = 'active',
              updated_at = NOW()
          WHERE id = $1
          RETURNING *`,
-        [existingReplacement.id, inheritedOriginalDate, inheritedExpirationDate]
+        [existingReplacement.id, inheritedOriginalDate, inheritedExpirationDate, cleanProviderName, parsedMotherCost]
       );
 
       return refreshedReplacementResult.rows[0];
@@ -959,14 +970,14 @@ async function resolveMotherAccount(client, {
     const newMotherResult = await client.query(
       `INSERT INTO mother_accounts
        (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date,
-        replaces_mother_account_id, status, created_at, updated_at)
+        replaces_mother_account_id, status, provider_name, purchase_cost_total, created_at, updated_at)
        VALUES (
          $1, $2, $3, $4,
          COALESCE($5::date, CASE WHEN $4::date IS NULL THEN NULL ELSE ($4::date + INTERVAL '30 days')::date END),
-         $6, 'active', NOW(), NOW()
+         $6, 'active', COALESCE(NULLIF($7, ''), $8), $9, NOW(), NOW()
        )
        RETURNING *`,
-      [cleanProduct, cleanEmail, cleanOwnerId, inheritedOriginalDate, inheritedExpirationDate, replacementId]
+      [cleanProduct, cleanEmail, cleanOwnerId, inheritedOriginalDate, inheritedExpirationDate, replacementId, cleanProviderName, previous.provider_name || '', parsedMotherCost]
     );
 
     const newMother = newMotherResult.rows[0];
@@ -983,14 +994,14 @@ async function resolveMotherAccount(client, {
   if (forceCreateNew) {
     const createdResult = await client.query(
       `INSERT INTO mother_accounts
-       (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status)
+       (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status, provider_name, purchase_cost_total)
        VALUES (
          $1, $2, $3, $4,
          COALESCE($5::date, CASE WHEN $4::date IS NULL THEN NULL ELSE ($4::date + INTERVAL '30 days')::date END),
-         'active'
+         'active', $6, $7
        )
        RETURNING *`,
-      [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate, expirationDate]
+      [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate, expirationDate, cleanProviderName, parsedMotherCost]
     );
 
     return createdResult.rows[0];
@@ -1024,24 +1035,26 @@ async function resolveMotherAccount(client, {
              CASE WHEN COALESCE(original_purchase_date, $2::date) IS NULL THEN NULL
                   ELSE (COALESCE(original_purchase_date, $2::date) + INTERVAL '30 days')::date END
            ),
+           provider_name = CASE WHEN $4::text <> '' THEN $4 ELSE provider_name END,
+           purchase_cost_total = COALESCE($5::numeric, purchase_cost_total),
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [existing.id, suppliedOriginalDate, expirationDate]
+      [existing.id, suppliedOriginalDate, expirationDate, cleanProviderName, parsedMotherCost]
     );
     return updatedResult.rows[0];
   }
 
   const createdResult = await client.query(
     `INSERT INTO mother_accounts
-     (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status)
+     (product_name, account_email, owner_admin_id, original_purchase_date, expiration_date, status, provider_name, purchase_cost_total)
      VALUES (
        $1, $2, $3, $4,
        COALESCE($5::date, CASE WHEN $4::date IS NULL THEN NULL ELSE ($4::date + INTERVAL '30 days')::date END),
-       'active'
+       'active', $6, $7
      )
      RETURNING *`,
-    [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate, expirationDate]
+    [cleanProduct, cleanEmail, cleanOwnerId, suppliedOriginalDate, expirationDate, cleanProviderName, parsedMotherCost]
   );
 
   return createdResult.rows[0];
@@ -1328,6 +1341,9 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'active'`);
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS provider_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS purchase_cost_total NUMERIC`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_provider ON mother_accounts (lower(provider_name))`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_group ON mother_accounts (lower(product_name), lower(account_email), COALESCE(owner_admin_id, 0), status)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_replaces ON mother_accounts (replaces_mother_account_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_expiration ON mother_accounts (status, expiration_date)`);
@@ -3390,7 +3406,9 @@ app.get("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async (
               ma.replaces_mother_account_id AS reemplaza_cuenta_madre_id,
               ma.original_purchase_date AS fecha_original_cuenta_madre,
               ma.expiration_date AS vencimiento_cuenta_madre,
-              ma.status AS estado_cuenta_madre
+              ma.status AS estado_cuenta_madre,
+              COALESCE(ma.provider_name, '') AS proveedor_cuenta_madre,
+              ma.purchase_cost_total AS costo_total_cuenta_madre
        FROM platform_accounts pa
        LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
        WHERE ${owner.clause.replace(/owner_admin_id/g, 'pa.owner_admin_id')}
@@ -3432,7 +3450,9 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       access_url,
       reusable,
       official_purchase_date,
-      purchase_price
+      purchase_price,
+      provider_name,
+      mother_purchase_cost
     } = req.body;
 
     if (!platform || !product_name) {
@@ -3455,7 +3475,9 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       productName: product_name,
       accountEmail: account_email || "",
       ownerAdminId,
-      purchaseDate: official_purchase_date || null
+      purchaseDate: official_purchase_date || null,
+      providerName: provider_name || '',
+      purchaseCostTotal: mother_purchase_cost
     });
 
     const result = await client.query(
@@ -3508,11 +3530,17 @@ app.patch("/api/admin/platform-accounts/:id", authMiddleware, adminMiddleware, a
         access_url,
         status,
         reusable,
-        official_purchase_date // <-- NUEVO AL EDITAR
+        official_purchase_date,
+        purchase_price
       } = req.body;
 
+      const rawPurchasePrice = String(purchase_price ?? '').trim();
+      const parsedPurchasePrice = rawPurchasePrice === '' ? null : Number(rawPurchasePrice);
+      if (parsedPurchasePrice !== null && (!Number.isFinite(parsedPurchasePrice) || parsedPurchasePrice < 0)) {
+        return res.status(400).json({ error: 'El costo del perfil/acceso debe ser mayor o igual a 0' });
+      }
+
       const result = await pool.query(
-        // <-- NUEVO: Agregamos official_purchase_date = $10 y recorremos el id a $11
         `UPDATE platform_accounts
          SET
            platform = $1,
@@ -3524,8 +3552,9 @@ app.patch("/api/admin/platform-accounts/:id", authMiddleware, adminMiddleware, a
            access_url = $7,
            status = $8,
            reusable = $9,
-           official_purchase_date = $10
-         WHERE id = $11
+           official_purchase_date = COALESCE($10::date, official_purchase_date),
+           purchase_price = $11
+         WHERE id = $12
          RETURNING *`,
         [
           platform,
@@ -3535,9 +3564,10 @@ app.patch("/api/admin/platform-accounts/:id", authMiddleware, adminMiddleware, a
           profile_name || "",
           profile_pin || "",
           access_url || "",
-          status,
+          status || 'available',
           reusable === 1 ? 1 : 0,
-          official_purchase_date || null, // <-- NUEVO
+          official_purchase_date || null,
+          parsedPurchasePrice,
           id
         ]
       );
@@ -3663,7 +3693,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
   ];
   const optionalHeaders = [
     "cuenta_madre_id", "reemplaza_cuenta_madre_id",
-    "fecha_original_cuenta_madre", "vencimiento_cuenta_madre"
+    "fecha_original_cuenta_madre", "vencimiento_cuenta_madre",
+    "proveedor", "costo_cuenta_madre"
   ];
   const supportedHeaders = [...requiredHeaders, ...optionalHeaders];
 
@@ -3752,6 +3783,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       const precioCompra = row.precio_compra;
       const explicitMotherId = normalizeOptionalPositiveId(row.cuenta_madre_id);
       const replacementMotherId = normalizeOptionalPositiveId(row.reemplaza_cuenta_madre_id);
+      const proveedor = String(row.proveedor || '').trim().slice(0, 160);
+      const costoCuentaMadre = normalizePurchasePrice(row.costo_cuenta_madre);
 
       if (!producto) {
         errors.push(`Fila ${rowNumber}: Falta el campo producto.`);
@@ -3797,6 +3830,10 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         errors.push(`Fila ${rowNumber}: precio_compra debe ser un número mayor o igual a 0.`);
         continue;
       }
+      if (costoCuentaMadre === undefined) {
+        errors.push(`Fila ${rowNumber}: costo_cuenta_madre debe ser un número mayor o igual a 0.`);
+        continue;
+      }
 
       if (explicitMotherId === undefined) {
         errors.push(`Fila ${rowNumber}: cuenta_madre_id debe ser un ID numérico positivo o quedar vacío.`);
@@ -3832,7 +3869,9 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         mother_expiration: parsedMotherExpiration,
         mother_account_id: explicitMotherId,
         replaces_mother_account_id: replacementMotherId,
-        is_new_mother_cycle: isNewMotherCycle
+        is_new_mother_cycle: isNewMotherCycle,
+        provider_name: proveedor,
+        mother_purchase_cost: costoCuentaMadre
       });
     }
 
@@ -3860,6 +3899,17 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
           if (Number(motherAccount.owner_admin_id || 0) !== Number(item.owner_admin_id || 0)) {
             throw new Error(`La cuenta madre #${item.mother_account_id} no pertenece a este propietario.`);
           }
+          if (item.provider_name || item.mother_purchase_cost !== null) {
+            const metaUpdate = await client.query(
+              `UPDATE mother_accounts
+               SET provider_name = CASE WHEN $2::text <> '' THEN $2 ELSE provider_name END,
+                   purchase_cost_total = COALESCE($3::numeric, purchase_cost_total),
+                   updated_at = NOW()
+               WHERE id = $1 RETURNING *`,
+              [motherAccount.id, item.provider_name || '', item.mother_purchase_cost]
+            );
+            motherAccount = metaUpdate.rows[0] || motherAccount;
+          }
         } else if (item.replaces_mother_account_id) {
           motherAccount = await resolveMotherAccount(client, {
             productName: item.product_name,
@@ -3868,7 +3918,9 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
             purchaseDate: item.official_purchase_date,
             originalPurchaseDate: item.original_mother_date,
             expirationDate: item.mother_expiration,
-            replacesMotherAccountId: item.replaces_mother_account_id
+            replacesMotherAccountId: item.replaces_mother_account_id,
+            providerName: item.provider_name || '',
+            purchaseCostTotal: item.mother_purchase_cost
           });
         } else {
           newCycleCacheKey = [
@@ -3887,7 +3939,9 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
               purchaseDate: item.official_purchase_date,
               originalPurchaseDate: item.official_purchase_date,
               expirationDate: null,
-              forceCreateNew: true
+              forceCreateNew: true,
+              providerName: item.provider_name || '',
+              purchaseCostTotal: item.mother_purchase_cost
             });
             shouldCacheNewMother = true;
           }
@@ -7487,6 +7541,339 @@ app.post("/api/distributor/add-balance", authMiddleware, distributorMiddleware, 
   }
 });
 
+
+
+// ============================================================
+// ADMIN PRINCIPAL: RENTABILIDAD Y CALIDAD
+// ============================================================
+function normalizeAnalyticsDateRange(startValue, endValue) {
+  const clean = (value) => String(value || '').trim();
+  const today = new Date();
+  const mxParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(today).reduce((acc, part) => { acc[part.type] = part.value; return acc; }, {});
+  const todayMx = `${mxParts.year}-${mxParts.month}-${mxParts.day}`;
+  const firstOfMonth = `${mxParts.year}-${mxParts.month}-01`;
+  const startDate = clean(startValue) || firstOfMonth;
+  const endDate = clean(endValue) || todayMx;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    throw new Error('Rango de fechas inválido. Usa YYYY-MM-DD.');
+  }
+  if (startDate > endDate) throw new Error('La fecha inicial no puede ser posterior a la final.');
+  return { startDate, endDate };
+}
+
+app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Cuenta madre inválida' });
+    const providerName = String(req.body?.provider_name || '').trim().slice(0, 160);
+    const rawCost = req.body?.purchase_cost_total;
+    const purchaseCost = rawCost === null || rawCost === undefined || String(rawCost).trim() === '' ? null : Number(rawCost);
+    if (purchaseCost !== null && (!Number.isFinite(purchaseCost) || purchaseCost < 0)) {
+      return res.status(400).json({ error: 'El costo total debe ser mayor o igual a 0' });
+    }
+    const result = await pool.query(
+      `UPDATE mother_accounts
+       SET provider_name = $2,
+           purchase_cost_total = $3,
+           updated_at = NOW()
+       WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0
+       RETURNING id, provider_name, purchase_cost_total`,
+      [id, providerName, purchaseCost]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Cuenta madre no encontrada' });
+    res.json({ message: 'Datos de rentabilidad actualizados', mother_account: result.rows[0] });
+  } catch (err) {
+    console.error('Error actualizando metadatos de cuenta madre:', err.message);
+    res.status(500).json({ error: 'Error actualizando proveedor/costo de cuenta madre' });
+  }
+});
+
+app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
+  try {
+    const { startDate, endDate } = normalizeAnalyticsDateRange(req.query.start_date, req.query.end_date);
+    const salesResult = await pool.query(
+      `SELECT
+         o.id, o.user_id, o.product_id, o.amount, o.product_cost_snapshot, o.distributor_cost_snapshot,
+         o.product_name_snapshot, o.product_category_snapshot, o.created_at,
+         u.name AS seller_name, u.email AS seller_email, u.owner_user_id AS distributor_id,
+         distributor.name AS distributor_name,
+         p.name AS current_product_name,
+         COALESCE(refunds.refund_amount, 0) AS refund_amount,
+         COALESCE(earnings.final_earning, 0) AS distributor_final_earning,
+         COALESCE(earnings.movement_count, 0)::int AS distributor_earning_movements
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       LEFT JOIN users distributor ON distributor.id = u.owner_user_id
+       LEFT JOIN products p ON p.id = o.product_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(ar.refund_amount), 0) AS refund_amount
+         FROM account_reports ar
+         WHERE ar.order_id = o.id AND COALESCE(ar.refund_amount, 0) > 0
+       ) refunds ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(del.amount), 0) AS final_earning, COUNT(*)::int AS movement_count
+         FROM distributor_earnings_ledger del
+         WHERE del.order_id = o.id
+           AND del.movement_type IN ('venta', 'ajuste_reembolso')
+       ) earnings ON TRUE
+       WHERE o.status = 'exito'
+         AND COALESCE(o.owner_admin_id, 0) = 0
+         AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+       ORDER BY o.created_at DESC, o.id DESC`,
+      [startDate, endDate]
+    );
+
+    const linksResult = await pool.query(
+      `SELECT DISTINCT o.id AS order_id, pa.mother_account_id,
+              COALESCE(NULLIF(TRIM(ma.provider_name), ''), 'Sin proveedor') AS provider_name,
+              COALESCE(NULLIF(TRIM(pa.platform), ''), NULLIF(TRIM(pa.product_name), ''), ma.product_name, 'Sin plataforma') AS platform_name,
+              COALESCE(NULLIF(TRIM(pa.product_name), ''), ma.product_name, 'Sin producto') AS account_product_name,
+              ma.product_name AS mother_product_name
+       FROM orders o
+       JOIN platform_accounts pa ON pa.assigned_order_id = o.id
+       LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+       WHERE o.status = 'exito'
+         AND COALESCE(o.owner_admin_id, 0) = 0
+         AND COALESCE(pa.owner_admin_id, 0) = 0
+         AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+         AND pa.mother_account_id IS NOT NULL
+         AND (pa.delivered_at IS NULL OR pa.delivered_at <= o.created_at + INTERVAL '15 minutes')`,
+      [startDate, endDate]
+    );
+
+    const reportsResult = await pool.query(
+      `SELECT
+         ar.id, ar.order_id, ar.user_id, ar.issue_type, ar.status, ar.resolution_type,
+         ar.refund_amount, ar.created_at, ar.reviewed_at, ar.reported_account_id, ar.replacement_account_id,
+         COALESCE(NULLIF(TRIM(ar.reported_platform), ''), NULLIF(TRIM(rpa.product_name), ''), NULLIF(TRIM(rpa.platform), ''), NULLIF(TRIM(o.product_name_snapshot), ''), p.name, 'Sin plataforma') AS platform_name,
+         COALESCE(NULLIF(TRIM(o.product_name_snapshot), ''), p.name, 'Sin producto') AS product_name,
+         COALESCE(NULLIF(TRIM(rma.provider_name), ''), 'Sin proveedor') AS provider_name,
+         rpa.mother_account_id AS reported_mother_account_id,
+         seller.name AS seller_name, seller.email AS seller_email, seller.owner_user_id AS distributor_id,
+         distributor.name AS distributor_name,
+         COALESCE(repl.purchase_price, 0) AS replacement_cost,
+         CASE WHEN ar.replacement_account_id IS NOT NULL AND repl.purchase_price IS NULL THEN true ELSE false END AS replacement_cost_missing,
+         COALESCE(NULLIF(TRIM(repma.provider_name), ''), 'Sin proveedor') AS replacement_provider_name
+       FROM account_reports ar
+       LEFT JOIN orders o ON o.id = ar.order_id
+       LEFT JOIN products p ON p.id = o.product_id
+       LEFT JOIN users seller ON seller.id = ar.user_id
+       LEFT JOIN users distributor ON distributor.id = seller.owner_user_id
+       LEFT JOIN platform_accounts rpa ON rpa.id = ar.reported_account_id
+       LEFT JOIN mother_accounts rma ON rma.id = rpa.mother_account_id
+       LEFT JOIN platform_accounts repl ON repl.id = ar.replacement_account_id
+       LEFT JOIN mother_accounts repma ON repma.id = repl.mother_account_id
+       WHERE COALESCE(ar.owner_admin_id, o.owner_admin_id, p.owner_admin_id, rpa.owner_admin_id, 0) = 0
+         AND ((ar.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+       ORDER BY ar.created_at DESC, ar.id DESC`,
+      [startDate, endDate]
+    );
+
+    const mothersResult = await pool.query(
+      `SELECT ma.id, ma.product_name, ma.account_email, ma.provider_name, ma.purchase_cost_total,
+              ma.original_purchase_date, ma.expiration_date, ma.status,
+              COUNT(pa.id)::int AS profile_count,
+              COUNT(pa.id) FILTER (WHERE pa.status = 'available')::int AS available_profiles,
+              COUNT(pa.id) FILTER (WHERE pa.status = 'delivered')::int AS delivered_profiles,
+              COUNT(pa.id) FILTER (WHERE pa.status = 'failed')::int AS failed_profiles
+       FROM mother_accounts ma
+       LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
+       WHERE COALESCE(ma.owner_admin_id, 0) = 0
+       GROUP BY ma.id
+       ORDER BY ma.id DESC`,
+      []
+    );
+
+    const money = (value) => roundMoney(value);
+    const orderMap = new Map();
+    const sellerSales = new Map();
+    const productSales = new Map();
+    let grossSales = 0, refunds = 0, distributorEarnings = 0, adminRevenue = 0, saleCost = 0;
+
+    for (const row of salesResult.rows) {
+      const gross = Math.max(0, money(row.amount));
+      const refund = Math.max(0, Math.min(gross, money(row.refund_amount)));
+      let distEarn = money(row.distributor_final_earning);
+      if (Number(row.distributor_id || 0) > 0 && Number(row.distributor_earning_movements || 0) === 0 && row.distributor_cost_snapshot !== null && row.distributor_cost_snapshot !== undefined) {
+        const distributorCost = Math.max(0, money(row.distributor_cost_snapshot));
+        const originalMargin = money(gross - distributorCost);
+        const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
+        distEarn = money(originalMargin * (1 - refundRatio));
+      }
+      const revenue = money(gross - refund - distEarn);
+      const cost = Math.max(0, money(row.product_cost_snapshot));
+      const productName = String(row.product_name_snapshot || row.current_product_name || 'Sin producto').trim();
+      const item = { ...row, gross, refund, distributor_earning: distEarn, admin_revenue: revenue, sale_cost: cost, product_name: productName };
+      orderMap.set(Number(row.id), item);
+      grossSales += gross; refunds += refund; distributorEarnings += distEarn; adminRevenue += revenue; saleCost += cost;
+      const sellerKey = String(Number(row.user_id || 0));
+      if (!sellerSales.has(sellerKey)) sellerSales.set(sellerKey, new Set());
+      sellerSales.get(sellerKey).add(Number(row.id));
+      const productKey = productName.toLowerCase();
+      if (!productSales.has(productKey)) productSales.set(productKey, new Set());
+      productSales.get(productKey).add(Number(row.id));
+    }
+
+    const orderLinks = new Map();
+    const providerSales = new Map();
+    const platformSales = new Map();
+    const accountProductSales = new Map();
+    for (const link of linksResult.rows) {
+      const oid = Number(link.order_id || 0);
+      if (!orderLinks.has(oid)) orderLinks.set(oid, new Map());
+      orderLinks.get(oid).set(Number(link.mother_account_id), link);
+      const providerKey = String(link.provider_name || 'Sin proveedor').trim().toLowerCase();
+      if (!providerSales.has(providerKey)) providerSales.set(providerKey, new Set());
+      providerSales.get(providerKey).add(oid);
+      const platformKey = String(link.platform_name || 'Sin plataforma').trim().toLowerCase();
+      if (!platformSales.has(platformKey)) platformSales.set(platformKey, new Set());
+      platformSales.get(platformKey).add(oid);
+      const accountProductKey = String(link.account_product_name || 'Sin producto').trim().toLowerCase();
+      if (!accountProductSales.has(accountProductKey)) accountProductSales.set(accountProductKey, new Set());
+      accountProductSales.get(accountProductKey).add(oid);
+    }
+
+    const motherStats = new Map(mothersResult.rows.map(row => [Number(row.id), {
+      id: Number(row.id), product_name: row.product_name || 'Sin producto', account_email: row.account_email || '',
+      provider_name: row.provider_name || '', purchase_cost_total: row.purchase_cost_total === null ? null : money(row.purchase_cost_total),
+      original_purchase_date: row.original_purchase_date, expiration_date: row.expiration_date, status: row.status || '',
+      profile_count: Number(row.profile_count || 0), available_profiles: Number(row.available_profiles || 0),
+      delivered_profiles: Number(row.delivered_profiles || 0), failed_profiles: Number(row.failed_profiles || 0),
+      orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0
+    }]));
+    const unassignedMother = { id: 0, product_name: 'Sin cuenta madre', account_email: '', provider_name: '', purchase_cost_total: null,
+      original_purchase_date: null, expiration_date: null, status: '', profile_count: 0, available_profiles: 0, delivered_profiles: 0, failed_profiles: 0,
+      orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0 };
+
+    for (const [orderId, order] of orderMap.entries()) {
+      const links = Array.from((orderLinks.get(orderId) || new Map()).values());
+      if (!links.length) {
+        unassignedMother.orders.add(orderId); unassignedMother.admin_revenue += order.admin_revenue; unassignedMother.sale_cost += order.sale_cost;
+        continue;
+      }
+      const share = 1 / links.length;
+      for (const link of links) {
+        const stat = motherStats.get(Number(link.mother_account_id));
+        if (!stat) continue;
+        stat.orders.add(orderId);
+        stat.admin_revenue += order.admin_revenue * share;
+        stat.sale_cost += order.sale_cost * share;
+      }
+    }
+
+    const qualityMaps = { platform: new Map(), provider: new Map(), seller: new Map(), product: new Map() };
+    const addQuality = (map, key, label, report, salesCount) => {
+      const safeKey = String(key || 'sin-dato').toLowerCase();
+      const row = map.get(safeKey) || { label: label || 'Sin dato', reports: 0, replacements: 0, refunds: 0, refund_amount: 0, replacement_cost: 0, replacement_cost_missing: 0, sales: Number(salesCount || 0), affected_orders: new Set() };
+      row.sales = Math.max(Number(row.sales || 0), Number(salesCount || 0));
+      row.reports += 1;
+      row.affected_orders.add(Number(report.order_id || report.id || 0));
+      const isReplacement = Number(report.replacement_account_id || 0) > 0 || String(report.resolution_type || '').toLowerCase() === 'reemplazo';
+      const isRefund = Number(report.refund_amount || 0) > 0 || String(report.resolution_type || '').toLowerCase() === 'reembolso';
+      if (isReplacement) row.replacements += 1;
+      if (isRefund) { row.refunds += 1; row.refund_amount += Number(report.refund_amount || 0); }
+      row.replacement_cost += Number(report.replacement_cost || 0);
+      if (report.replacement_cost_missing) row.replacement_cost_missing += 1;
+      map.set(safeKey, row);
+    };
+
+    let replacementCost = 0, replacementCostMissing = 0, replacementCount = 0, refundReportCount = 0;
+    for (const report of reportsResult.rows) {
+      const isReplacement = Number(report.replacement_account_id || 0) > 0 || String(report.resolution_type || '').toLowerCase() === 'reemplazo';
+      const isRefund = Number(report.refund_amount || 0) > 0 || String(report.resolution_type || '').toLowerCase() === 'reembolso';
+      if (isReplacement) { replacementCount += 1; replacementCost += Number(report.replacement_cost || 0); if (report.replacement_cost_missing) replacementCostMissing += 1; }
+      if (isRefund) refundReportCount += 1;
+      const platformKey = String(report.platform_name || 'Sin plataforma').trim().toLowerCase();
+      const productKey = String(report.product_name || 'Sin producto').trim().toLowerCase();
+      const providerKey = String(report.provider_name || 'Sin proveedor').trim().toLowerCase();
+      const sellerKey = String(Number(report.user_id || 0));
+      addQuality(qualityMaps.platform, platformKey, report.platform_name, report, platformSales.get(platformKey)?.size || productSales.get(platformKey)?.size || productSales.get(productKey)?.size || 0);
+      addQuality(qualityMaps.product, productKey, report.product_name, report, accountProductSales.get(productKey)?.size || productSales.get(productKey)?.size || 0);
+      addQuality(qualityMaps.provider, providerKey, report.provider_name || 'Sin proveedor', report, providerSales.get(providerKey)?.size || 0);
+      const sellerLabel = `${report.seller_name || report.seller_email || `Usuario #${report.user_id}`}${report.distributor_name ? ` · Dist: ${report.distributor_name}` : ''}`;
+      addQuality(qualityMaps.seller, sellerKey, sellerLabel, report, sellerSales.get(sellerKey)?.size || 0);
+
+      const mid = Number(report.reported_mother_account_id || 0);
+      const m = mid ? motherStats.get(mid) : unassignedMother;
+      if (m) {
+        m.failures += 1;
+        if (isReplacement) { m.replacements += 1; m.replacement_cost += Number(report.replacement_cost || 0); }
+        if (isRefund) { m.refunds += 1; m.refund_amount += Number(report.refund_amount || 0); }
+      }
+    }
+
+    const finalizeQuality = (map) => Array.from(map.values()).map(row => ({
+      label: row.label,
+      reports: row.reports,
+      affected_sales: row.affected_orders.size,
+      replacements: row.replacements,
+      refunds: row.refunds,
+      refund_amount: money(row.refund_amount),
+      replacement_cost: money(row.replacement_cost),
+      replacement_cost_missing: row.replacement_cost_missing,
+      sales: row.sales,
+      failure_rate: row.sales > 0 ? Number(((row.affected_orders.size / row.sales) * 100).toFixed(2)) : null
+    })).sort((a, b) => (b.failure_rate ?? -1) - (a.failure_rate ?? -1) || b.reports - a.reports);
+
+    const motherRows = Array.from(motherStats.values());
+    if (unassignedMother.orders.size || unassignedMother.failures) motherRows.push(unassignedMother);
+    const finalizedMothers = motherRows.map(row => {
+      const profit = money(row.admin_revenue - row.sale_cost - row.replacement_cost);
+      const revenue = money(row.admin_revenue);
+      return {
+        ...row, orders: row.orders.size, admin_revenue: revenue, sale_cost: money(row.sale_cost), replacement_cost: money(row.replacement_cost),
+        refund_amount: money(row.refund_amount), profit,
+        margin_percent: revenue > 0 ? Number(((profit / revenue) * 100).toFixed(2)) : 0,
+        profitability_status: profit < 0 ? 'perdida' : (revenue > 0 && profit / revenue < 0.15 ? 'margen_bajo' : 'rentable')
+      };
+    }).sort((a, b) => a.profit - b.profit || b.failures - a.failures);
+
+    const providerMap = new Map();
+    for (const row of finalizedMothers) {
+      const label = String(row.provider_name || 'Sin proveedor').trim() || 'Sin proveedor';
+      const key = label.toLowerCase();
+      const p = providerMap.get(key) || { provider_name: label, mother_accounts: 0, orders: 0, admin_revenue: 0, sale_cost: 0, replacement_cost: 0, profit: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0, registered_mother_cost: 0, mother_cost_missing: 0 };
+      if (row.id) p.mother_accounts += 1;
+      p.orders += row.orders; p.admin_revenue += row.admin_revenue; p.sale_cost += row.sale_cost; p.replacement_cost += row.replacement_cost; p.profit += row.profit;
+      p.failures += row.failures; p.replacements += row.replacements; p.refunds += row.refunds; p.refund_amount += row.refund_amount;
+      if (row.purchase_cost_total === null) p.mother_cost_missing += row.id ? 1 : 0; else p.registered_mother_cost += Number(row.purchase_cost_total || 0);
+      providerMap.set(key, p);
+    }
+    const providers = Array.from(providerMap.values()).map(p => ({
+      ...p, admin_revenue: money(p.admin_revenue), sale_cost: money(p.sale_cost), replacement_cost: money(p.replacement_cost), profit: money(p.profit), refund_amount: money(p.refund_amount), registered_mother_cost: money(p.registered_mother_cost),
+      margin_percent: p.admin_revenue > 0 ? Number(((p.profit / p.admin_revenue) * 100).toFixed(2)) : 0,
+      failure_rate: (() => {
+        const key = String(p.provider_name).toLowerCase();
+        const sold = providerSales.get(key)?.size || 0;
+        const affected = qualityMaps.provider.get(key)?.affected_orders?.size || 0;
+        return sold > 0 ? Number(((affected / sold) * 100).toFixed(2)) : null;
+      })()
+    })).sort((a,b) => a.profit - b.profit || b.failures - a.failures);
+
+    const adjustedProfit = money(adminRevenue - saleCost - replacementCost);
+    res.json({
+      start_date: startDate, end_date: endDate, timezone: 'America/Mexico_City',
+      summary: {
+        orders: salesResult.rows.length, gross_sales: money(grossSales), refunds: money(refunds), distributor_earnings: money(distributorEarnings),
+        admin_revenue: money(adminRevenue), sale_cost: money(saleCost), replacement_cost: money(replacementCost), replacement_cost_missing: replacementCostMissing,
+        profit: adjustedProfit, margin_percent: adminRevenue > 0 ? Number(((adjustedProfit / adminRevenue) * 100).toFixed(2)) : 0,
+        failures: reportsResult.rows.length, replacements: replacementCount, refund_reports: refundReportCount
+      },
+      profitability: { providers, mother_accounts: finalizedMothers },
+      quality: {
+        by_platform: finalizeQuality(qualityMaps.platform), by_provider: finalizeQuality(qualityMaps.provider),
+        by_seller: finalizeQuality(qualityMaps.seller), by_product: finalizeQuality(qualityMaps.product),
+        recent_reports: reportsResult.rows.slice(0, 80).map(r => ({ ...r, replacement_cost: money(r.replacement_cost), refund_amount: money(r.refund_amount) }))
+      }
+    });
+  } catch (err) {
+    console.error('Error generando rentabilidad y calidad:', err.message);
+    const status = /fecha|rango/i.test(err.message || '') ? 400 : 500;
+    res.status(status).json({ error: err.message || 'Error generando rentabilidad y calidad' });
+  }
+});
 
 function getReportScopeOwnerId(req) {
   try {
