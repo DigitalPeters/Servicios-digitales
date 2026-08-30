@@ -1509,8 +1509,69 @@ async function initDatabase() {
   await pool.query(`UPDATE account_reports SET resolution_type = '' WHERE resolution_type IS NULL`);
 }
 
+function getDateOnlyParts(value) {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    const clean = value.trim();
+    const match = clean.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T00:00:00(?:\.000)?Z?$)/);
+    if (match) {
+      return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+    }
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // Los DATE/TIMESTAMP a medianoche que vienen de PostgreSQL representan una
+    // fecha de servicio, no un instante que deba desplazarse por zona horaria.
+    if (
+      value.getUTCHours() === 0 &&
+      value.getUTCMinutes() === 0 &&
+      value.getUTCSeconds() === 0 &&
+      value.getUTCMilliseconds() === 0
+    ) {
+      return {
+        year: value.getUTCFullYear(),
+        month: value.getUTCMonth() + 1,
+        day: value.getUTCDate()
+      };
+    }
+  }
+
+  return null;
+}
+
+function dateOnlyToSafeDate(value) {
+  const parts = getDateOnlyParts(value);
+  if (!parts) return null;
+  // Mediodía UTC evita que America/Mexico_City retroceda al día anterior.
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0));
+}
+
+function normalizeServiceDate(value, fallbackValue = null) {
+  const safeDateOnly = dateOnlyToSafeDate(value);
+  if (safeDateOnly) return safeDateOnly;
+
+  const parsed = value ? new Date(value) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) return parsed;
+
+  const safeFallbackDateOnly = dateOnlyToSafeDate(fallbackValue);
+  if (safeFallbackDateOnly) return safeFallbackDateOnly;
+
+  const fallback = fallbackValue ? new Date(fallbackValue) : null;
+  if (fallback && !Number.isNaN(fallback.getTime())) return fallback;
+  return new Date();
+}
+
 function formatFechaMX(fecha) {
-  return fecha.toLocaleDateString("es-MX", {
+  const parts = getDateOnlyParts(fecha);
+  if (parts) {
+    return `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}/${String(parts.year).slice(-2)}`;
+  }
+
+  const parsed = fecha instanceof Date ? fecha : new Date(fecha);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  return parsed.toLocaleDateString("es-MX", {
     timeZone: "America/Mexico_City",
     day: "2-digit",
     month: "2-digit",
@@ -1567,10 +1628,10 @@ async function addTraceEvent(client, {
 // AÑADIMOS EL PARÁMETRO "originalDate = null"
 function buildDeliveredAccountData(assignedAccount, productName = "", productCategory = "", originalDate = null, productType = "") {
   // Si nos mandan una fecha vieja (reemplazo), usamos esa. Si no (venta nueva), usamos la de hoy.
-  const fechaEntrega = originalDate ? new Date(originalDate) : new Date();
-  
+  const fechaEntrega = originalDate ? normalizeServiceDate(originalDate) : new Date();
+
   const fechaVencimiento = new Date(fechaEntrega);
-  fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+  fechaVencimiento.setUTCDate(fechaVencimiento.getUTCDate() + 28);
 
   const isDigitalClean = isPdfOrCourseProduct(productName, productCategory, productType, assignedAccount);
 
@@ -1747,7 +1808,7 @@ async function getDistributorCostSnapshot(client, buyerUser, product) {
 function buildComboDeliveredAccountData(accounts) {
   const fechaEntrega = new Date();
   const fechaVencimiento = new Date(fechaEntrega);
-  fechaVencimiento.setDate(fechaVencimiento.getDate() + 28);
+  fechaVencimiento.setUTCDate(fechaVencimiento.getUTCDate() + 28);
 
   const blocks = accounts.map(account => [
     `📌 Plataforma: ${String(account.platform || account.product_name || '').toUpperCase()}`,
@@ -1767,17 +1828,13 @@ function buildComboDeliveredAccountData(accounts) {
 }
 
 function getValidDeliveryDate(value, fallbackValue = null) {
-  const primary = value ? new Date(value) : null;
-  if (primary && !Number.isNaN(primary.getTime())) return primary;
-  const fallback = fallbackValue ? new Date(fallbackValue) : null;
-  return fallback && !Number.isNaN(fallback.getTime()) ? fallback : new Date();
+  return normalizeServiceDate(value, fallbackValue);
 }
 
 function getValidExpirationDate(value, deliveryDate) {
-  const explicit = value ? new Date(value) : null;
-  if (explicit && !Number.isNaN(explicit.getTime())) return explicit;
+  if (value) return normalizeServiceDate(value, deliveryDate);
   const calculated = new Date(deliveryDate);
-  calculated.setDate(calculated.getDate() + 28);
+  calculated.setUTCDate(calculated.getUTCDate() + 28);
   return calculated;
 }
 
@@ -5169,7 +5226,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
     // la fecha original del pedido y vencen exactamente 28 días después.
     const warrantyPurchaseDate = report.warranty_purchase_date || report.reported_official_purchase_date || report.order_created_at;
     const warrantyExpirationDate = report.warranty_expiration_date || report.reported_expires_at;
-    const expirationForMessage = warrantyExpirationDate ? new Date(warrantyExpirationDate) : null;
+    const expirationForMessage = warrantyExpirationDate ? normalizeServiceDate(warrantyExpirationDate) : null;
     const now = new Date();
     const msPerDay = 24 * 60 * 60 * 1000;
     const daysRemaining = expirationForMessage && !Number.isNaN(expirationForMessage.getTime())

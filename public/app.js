@@ -4620,8 +4620,9 @@ function applyDashboardRoleVisibilityMatrix(){
     actionButtons.forEach(id=>hardHide(id,false));
     distOnlyButtons.forEach(id=>hardHide(id,false));
     vendorOnlyCards.forEach(id=>hardHide(id,true));
-    hardHide('distributorMenuBtn', true);
-    hardHide('distributorEarningsBtn', true);
+    // El distribuidor debe tener acceso directo y visible a sus vendedores y ganancias.
+    hardHide('distributorMenuBtn', false);
+    hardHide('distributorEarningsBtn', false);
     return;
   }
 

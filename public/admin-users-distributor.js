@@ -46,7 +46,9 @@ function isDistributorUser(){
   return currentUser && (currentUser.role === 'admin' || currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true');
 }
 function isSubadminOnly(){
-  return currentUser && (currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === 'true' || (currentUser.role !== 'admin' && (currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === 'true')));
+  if(!currentUser) return false;
+  const isPanelOwner = currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === '1' || currentUser.is_panel_admin === 'true';
+  return isPanelOwner || isIndependentDistributorUser();
 }
 
 function installDistributorHooks(){
@@ -66,7 +68,10 @@ function installDistributorHooks(){
 
   window.registerLoadAppHook(function distributorLoadAppHook(){
     const distributorVisible = isSubadminOnly();
+    const earningsVisible = isIndependentDistributorUser();
     document.getElementById('distributorMenuBtn')?.classList.toggle('hidden', !distributorVisible);
+    document.getElementById('distributorEarningsBtn')?.classList.toggle('hidden', !earningsVisible);
+    document.getElementById('btn-dist-ganancias')?.classList.toggle('hidden', !earningsVisible);
     document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
     if(currentUser?.role === 'admin'){
       renderAdminSubadminSelect();
@@ -338,9 +343,11 @@ let distributorEarningsCache = null;
 
 function isIndependentDistributorUser(){
   if(!currentUser) return false;
-  const role = String(currentUser.role || '').toLowerCase();
+  const accountType = String(currentUser.account_type || '').toLowerCase();
+  const isPanelOwner = currentUser.is_panel_admin === true || currentUser.is_panel_admin === 1 || currentUser.is_panel_admin === '1' || currentUser.is_panel_admin === 'true';
   const flag = currentUser.is_subadmin === true || currentUser.is_subadmin === 1 || currentUser.is_subadmin === '1' || currentUser.is_subadmin === 'true';
-  return role !== 'admin' && flag;
+  if(['admin_distribuidor','distribuidor_del_panel'].includes(accountType)) return true;
+  return !isPanelOwner && flag;
 }
 
 function getMexicoDateParts(){
