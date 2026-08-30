@@ -73,6 +73,18 @@ function installDistributorHooks(){
     document.getElementById('distributorEarningsBtn')?.classList.toggle('hidden', !earningsVisible);
     document.getElementById('btn-dist-ganancias')?.classList.toggle('hidden', !earningsVisible);
     document.getElementById('dashDistributorCard')?.classList.toggle('hidden', !distributorVisible);
+
+    const balanceLabel = document.getElementById('actionBalanceLabel');
+    const balanceDescription = document.getElementById('actionBalanceDescription');
+    const balanceDash = document.getElementById('distributorPurchaseBalanceDash');
+    if(balanceDash) balanceDash.textContent = formatMoney(currentUser?.balance || 0);
+    if(balanceLabel) balanceLabel.textContent = earningsVisible ? 'Mi saldo' : 'Cargar saldo';
+    if(balanceDescription) balanceDescription.textContent = earningsVisible ? 'Saldo para mis compras personales' : 'Enviar solicitud de recarga';
+
+    if(earningsVisible && typeof loadDistributorEarningsWallet === 'function'){
+      loadDistributorEarningsWallet({ silent:true });
+    }
+
     if(currentUser?.role === 'admin'){
       renderAdminSubadminSelect();
     }
@@ -340,6 +352,7 @@ async function saveAdminSubadminPrice(userId, productId){
 // REPORTE DE GANANCIAS DEL DISTRIBUIDOR
 // ==========================================
 let distributorEarningsCache = null;
+let distributorEarningsWalletCache = null;
 
 function isIndependentDistributorUser(){
   if(!currentUser) return false;
@@ -396,41 +409,163 @@ function setDistributorEarningsText(id, value){
   if(element) element.textContent = String(value);
 }
 
+function distributorMoneySigned(value){
+  const n = Number(value || 0);
+  if(!Number.isFinite(n) || Math.abs(n) < 0.005) return '$0.00';
+  return `${n < 0 ? '-$' : '+$'}${formatMoney(Math.abs(n))}`;
+}
+
+function distributorMovementLabel(type){
+  const key=String(type||'').toLowerCase();
+  if(key==='venta') return 'Ganancia por venta';
+  if(key==='ajuste_reembolso') return 'Ajuste por reembolso';
+  if(key==='transferencia_saldo') return 'Transferencia a saldo';
+  return 'Movimiento';
+}
+
+function renderDistributorEarningsWallet(wallet){
+  const data = wallet || {};
+  distributorEarningsWalletCache = data;
+  const available = Number(data.available || 0);
+  const purchaseBalance = Number(data.purchase_balance || 0);
+  const earned = Number(data.earned_from_sales || 0);
+  const refundAdjustments = Number(data.refund_adjustments || 0);
+  const transferred = Number(data.transferred_to_balance || 0);
+  const movements = Array.isArray(data.movements) ? data.movements : [];
+
+  setDistributorEarningsText('distributorWalletAvailable', formatMoney(available));
+  setDistributorEarningsText('distributorWalletPurchaseBalance', formatMoney(purchaseBalance));
+  setDistributorEarningsText('distributorWalletEarned', formatMoney(earned));
+  setDistributorEarningsText('distributorWalletRefundAdjustments', refundAdjustments < 0 ? `-${formatMoney(Math.abs(refundAdjustments))}` : formatMoney(refundAdjustments));
+  setDistributorEarningsText('distributorWalletTransferred', formatMoney(transferred));
+  setDistributorEarningsText('distributorAvailableEarningsDash', formatMoney(available));
+  setDistributorEarningsText('distributorPurchaseBalanceDash', formatMoney(purchaseBalance));
+
+  if(currentUser){
+    currentUser.balance = purchaseBalance;
+    const top = document.getElementById('topUserBalance');
+    const userBalance = document.getElementById('userBalance');
+    if(top) top.textContent = formatMoney(purchaseBalance);
+    if(userBalance) userBalance.textContent = formatMoney(purchaseBalance);
+  }
+
+  const warning = document.getElementById('distributorEarningsWalletWarning');
+  if(warning){
+    if(available < 0){
+      warning.innerHTML = `<b>Ganancias en ajuste:</b> tu cuenta está en -$${formatMoney(Math.abs(available))}. Esto puede ocurrir si ya habías transferido ganancias y después hubo un reembolso. Tu saldo de compra no se descontó; las próximas ganancias cubrirán primero este ajuste.`;
+    }else if(available === 0){
+      warning.textContent = 'No tienes ganancias disponibles para transferir en este momento.';
+    }else{
+      warning.textContent = `Disponible para transferir: $${formatMoney(available)}. Tu saldo de compra se mantiene separado.`;
+    }
+  }
+
+  const box = document.getElementById('distributorEarningsMovements');
+  if(box){
+    box.innerHTML = movements.length
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Fecha</th><th>Movimiento</th><th>Vendedor / pedido</th><th>Detalle</th><th>Importe</th></tr></thead><tbody>${movements.map(row=>{
+          const amount = Number(row.amount || 0);
+          const context = row.order_id ? `${safeText(row.seller_name || 'Vendedor')} · Pedido #${Number(row.order_id)}` : 'Cuenta del distribuidor';
+          const detailParts=[];
+          if(row.product_name) detailParts.push(safeText(row.product_name));
+          if(Number(row.refund_amount || 0)>0) detailParts.push(`Reembolso $${formatMoney(row.refund_amount)}`);
+          if(row.note) detailParts.push(safeText(row.note));
+          return `<tr><td>${safeText(row.created_at_mx || '')}</td><td><b>${safeText(distributorMovementLabel(row.movement_type))}</b></td><td>${context}</td><td>${detailParts.join('<br>') || '-'}</td><td style="font-weight:800;${amount<0?'color:#b91c1c':'color:#166534'}">${distributorMoneySigned(amount)}</td></tr>`;
+        }).join('')}</tbody></table></div>`
+      : 'Sin movimientos de ganancias.';
+  }
+}
+
+async function loadDistributorEarningsWallet(options={}){
+  if(!isIndependentDistributorUser()) return null;
+  try{
+    const wallet = await api('/api/distributor/earnings/wallet');
+    renderDistributorEarningsWallet(wallet);
+    return wallet;
+  }catch(error){
+    if(!options.silent) showMessage(error.message || 'Error cargando cuenta de ganancias', 'error');
+    return null;
+  }
+}
+
+async function transferDistributorEarningsToBalance(){
+  if(!isIndependentDistributorUser()){
+    showMessage('Esta función es únicamente para distribuidores', 'error');
+    return;
+  }
+
+  const amountInput = document.getElementById('distributorEarningsTransferAmount');
+  const noteInput = document.getElementById('distributorEarningsTransferNote');
+  const amount = Number(amountInput?.value || 0);
+  const available = Number(distributorEarningsWalletCache?.available || 0);
+
+  if(!Number.isFinite(amount) || amount <= 0){
+    showMessage('Ingresa una cantidad mayor a 0', 'error');
+    return;
+  }
+  if(available <= 0 || amount > available){
+    showMessage(`Solo tienes $${formatMoney(available)} disponibles en Ganancias`, 'error');
+    return;
+  }
+
+  try{
+    const data = await api('/api/distributor/earnings/transfer', {
+      method:'POST',
+      body:JSON.stringify({ amount, note:(noteInput?.value || '').trim() })
+    });
+    if(amountInput) amountInput.value='';
+    if(noteInput) noteInput.value='';
+    if(data.wallet) renderDistributorEarningsWallet(data.wallet);
+    showMessage(data.message || 'Ganancias transferidas a saldo');
+  }catch(error){
+    showMessage(error.message || 'No se pudieron transferir las ganancias', 'error');
+    await loadDistributorEarningsWallet({ silent:true });
+  }
+}
+
 function renderDistributorEarnings(data){
   const summary = data?.summary || {};
   const bySeller = Array.isArray(data?.by_seller) ? data.by_seller : [];
   const byProduct = Array.isArray(data?.by_product) ? data.by_product : [];
   const details = Array.isArray(data?.details) ? data.details : [];
 
+  if(data?.wallet) renderDistributorEarningsWallet(data.wallet);
+
   setDistributorEarningsText('distributorEarningsOrders', Number(summary.total_orders || 0));
+  setDistributorEarningsText('distributorEarningsGrossSales', formatMoney(summary.gross_sales || 0));
+  setDistributorEarningsText('distributorEarningsRefunds', formatMoney(summary.total_refunds || 0));
   setDistributorEarningsText('distributorEarningsSales', formatMoney(summary.total_sales || 0));
   setDistributorEarningsText('distributorEarningsCost', formatMoney(summary.total_cost || 0));
   setDistributorEarningsText('distributorEarningsProfit', formatMoney(summary.total_profit || 0));
   setDistributorEarningsText('distributorEarningsMargin', Number(summary.margin_percent || 0).toFixed(2));
   const estimatedOrders = Number(summary.estimated_cost_orders || 0);
+  const refundedOrders = Number(summary.refunded_orders || 0);
   const estimatedNote = estimatedOrders > 0
     ? ` · ${estimatedOrders} pedido${estimatedOrders === 1 ? '' : 's'} anterior${estimatedOrders === 1 ? '' : 'es'} calculado${estimatedOrders === 1 ? '' : 's'} con tu costo actual`
     : '';
-  setDistributorEarningsText('distributorEarningsRangeLabel', `Periodo: ${safeText(data?.start_date || '')} al ${safeText(data?.end_date || '')} · Horario de México${estimatedNote}`);
+  const refundNote = refundedOrders > 0
+    ? ` · ${refundedOrders} pedido${refundedOrders === 1 ? '' : 's'} con reembolso ajustado proporcionalmente`
+    : '';
+  setDistributorEarningsText('distributorEarningsRangeLabel', `Periodo: ${safeText(data?.start_date || '')} al ${safeText(data?.end_date || '')} · Horario de México${refundNote}${estimatedNote}`);
 
   const sellerBox = document.getElementById('distributorEarningsBySeller');
   if(sellerBox){
     sellerBox.innerHTML = bySeller.length
-      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Vendedor</th><th>Pedidos</th><th>Venta</th><th>Tu costo</th><th>Ganancia</th></tr></thead><tbody>${bySeller.map(row => `<tr><td><b>${safeText(row.seller_name || 'Vendedor')}</b><br><span class="small-text">${safeText(row.seller_email || '')}</span></td><td>${Number(row.total_orders || 0)}</td><td>$${formatMoney(row.total_sales || 0)}</td><td>$${formatMoney(row.total_cost || 0)}</td><td><b>$${formatMoney(row.total_profit || 0)}</b></td></tr>`).join('')}</tbody></table></div>`
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Vendedor</th><th>Pedidos</th><th>Venta bruta</th><th>Reembolsos</th><th>Venta neta</th><th>Tu costo</th><th>Ganancia neta</th></tr></thead><tbody>${bySeller.map(row => `<tr><td><b>${safeText(row.seller_name || 'Vendedor')}</b><br><span class="small-text">${safeText(row.seller_email || '')}</span></td><td>${Number(row.total_orders || 0)}</td><td>$${formatMoney(row.gross_sales || 0)}</td><td>${Number(row.total_refunds || 0)>0?`-$${formatMoney(row.total_refunds || 0)}`:'$0.00'}</td><td>$${formatMoney(row.total_sales || 0)}</td><td>$${formatMoney(row.total_cost || 0)}</td><td><b>$${formatMoney(row.total_profit || 0)}</b></td></tr>`).join('')}</tbody></table></div>`
       : 'Sin ventas en el rango seleccionado.';
   }
 
   const productBox = document.getElementById('distributorEarningsByProduct');
   if(productBox){
     productBox.innerHTML = byProduct.length
-      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Pedidos</th><th>Venta</th><th>Tu costo</th><th>Ganancia</th></tr></thead><tbody>${byProduct.map(row => `<tr><td><b>${safeText(row.product_name || 'Producto')}</b><br><span class="small-text">${safeText(row.product_category || '')}</span></td><td>${Number(row.total_orders || 0)}</td><td>$${formatMoney(row.total_sales || 0)}</td><td>$${formatMoney(row.total_cost || 0)}</td><td><b>$${formatMoney(row.total_profit || 0)}</b></td></tr>`).join('')}</tbody></table></div>`
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Pedidos</th><th>Venta bruta</th><th>Reembolsos</th><th>Venta neta</th><th>Tu costo</th><th>Ganancia neta</th></tr></thead><tbody>${byProduct.map(row => `<tr><td><b>${safeText(row.product_name || 'Producto')}</b><br><span class="small-text">${safeText(row.product_category || '')}</span></td><td>${Number(row.total_orders || 0)}</td><td>$${formatMoney(row.gross_sales || 0)}</td><td>${Number(row.total_refunds || 0)>0?`-$${formatMoney(row.total_refunds || 0)}`:'$0.00'}</td><td>$${formatMoney(row.total_sales || 0)}</td><td>$${formatMoney(row.total_cost || 0)}</td><td><b>$${formatMoney(row.total_profit || 0)}</b></td></tr>`).join('')}</tbody></table></div>`
       : 'Sin ventas en el rango seleccionado.';
   }
 
   const detailsBox = document.getElementById('distributorEarningsDetails');
   if(detailsBox){
     detailsBox.innerHTML = details.length
-      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Vendedor</th><th>Producto</th><th>Venta</th><th>Tu costo</th><th>Ganancia</th><th>Fecha México</th></tr></thead><tbody>${details.map(row => `<tr><td>#${Number(row.id || 0)}</td><td><b>${safeText(row.seller_name || 'Vendedor')}</b><br><span class="small-text">${safeText(row.seller_email || '')}</span></td><td>${safeText(row.product_name || 'Producto')}</td><td>$${formatMoney(row.sale_amount || 0)}</td><td>$${formatMoney(row.distributor_cost || 0)}</td><td><b>$${formatMoney(row.profit || 0)}</b></td><td>${safeText(row.created_at_mx || '')}</td></tr>`).join('')}</tbody></table></div>`
+      ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Pedido</th><th>Vendedor</th><th>Producto</th><th>Venta bruta</th><th>Reembolso</th><th>Venta neta</th><th>Ganancia original</th><th>Ajuste de ganancia</th><th>Ganancia final</th><th>Fecha México</th></tr></thead><tbody>${details.map(row => `<tr><td>#${Number(row.id || 0)}</td><td><b>${safeText(row.seller_name || 'Vendedor')}</b><br><span class="small-text">${safeText(row.seller_email || '')}</span></td><td>${safeText(row.product_name || 'Producto')}</td><td>$${formatMoney(row.gross_sale_amount || 0)}</td><td>${Number(row.refund_amount || 0)>0?`-$${formatMoney(row.refund_amount || 0)}<br><span class="small-text">${Number(row.refund_percent||0).toFixed(2)}%</span>`:'$0.00'}</td><td>$${formatMoney(row.sale_amount || 0)}</td><td>$${formatMoney(row.original_profit || 0)}</td><td>${Number(row.refund_profit_adjustment || 0)>0?`-$${formatMoney(row.refund_profit_adjustment || 0)}`:'$0.00'}</td><td><b>$${formatMoney(row.profit || 0)}</b></td><td>${safeText(row.created_at_mx || '')}</td></tr>`).join('')}</tbody></table></div>`
       : 'Sin ventas en el rango seleccionado.';
   }
 }
@@ -480,15 +615,19 @@ function downloadDistributorEarningsCsv(){
   }
 
   const csvRows = [
-    ['Pedido','Vendedor','Correo','Producto','Categoría','Venta','Costo distribuidor','Ganancia','Fecha México'],
+    ['Pedido','Vendedor','Correo','Producto','Categoría','Venta bruta','Reembolso','Venta neta','Costo distribuidor proporcional','Ganancia original','Ajuste ganancia por reembolso','Ganancia final','Fecha México'],
     ...rows.map(row => [
       row.id,
       row.seller_name || '',
       row.seller_email || '',
       row.product_name || '',
       row.product_category || '',
+      Number(row.gross_sale_amount || 0).toFixed(2),
+      Number(row.refund_amount || 0).toFixed(2),
       Number(row.sale_amount || 0).toFixed(2),
       Number(row.distributor_cost || 0).toFixed(2),
+      Number(row.original_profit || 0).toFixed(2),
+      Number(row.refund_profit_adjustment || 0).toFixed(2),
       Number(row.profit || 0).toFixed(2),
       row.created_at_mx || ''
     ])
@@ -516,3 +655,5 @@ window.loadDistributorEarnings = loadDistributorEarnings;
 window.setDistributorEarningsToday = setDistributorEarningsToday;
 window.setDistributorEarningsCurrentMonth = setDistributorEarningsCurrentMonth;
 window.downloadDistributorEarningsCsv = downloadDistributorEarningsCsv;
+window.loadDistributorEarningsWallet = loadDistributorEarningsWallet;
+window.transferDistributorEarningsToBalance = transferDistributorEarningsToBalance;

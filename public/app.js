@@ -2726,8 +2726,10 @@ function applyCurrentUserPurchaseSnapshot(user){
   const formattedBalance = formatMoney(currentUser.balance);
   const userBalanceEl = document.getElementById('userBalance');
   const topUserBalanceEl = document.getElementById('topUserBalance');
+  const distributorPurchaseBalanceDash = document.getElementById('distributorPurchaseBalanceDash');
   if(userBalanceEl) userBalanceEl.textContent = formattedBalance;
   if(topUserBalanceEl) topUserBalanceEl.textContent = formattedBalance;
+  if(distributorPurchaseBalanceDash) distributorPurchaseBalanceDash.textContent = formattedBalance;
 }
 
 async function refreshAfterPurchase(){

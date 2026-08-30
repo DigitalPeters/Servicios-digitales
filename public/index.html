@@ -207,7 +207,11 @@
     </div>
     <div id="actionBalanceBtn" onclick="showSection('balance')" class="dash-card clickable hidden">
       <div class="dash-icon">💳</div>
-      <div><div class="dash-label">Cargar saldo</div><div class="small-text">Enviar solicitud de recarga</div></div>
+      <div>
+        <div id="actionBalanceLabel" class="dash-label">Cargar saldo</div>
+        <div class="dash-value">$<span id="distributorPurchaseBalanceDash">0.00</span></div>
+        <div id="actionBalanceDescription" class="small-text">Enviar solicitud de recarga</div>
+      </div>
     </div>
     <div id="actionReportBtn" onclick="openReportFaultFormFinal()" class="dash-card clickable hidden">
       <div class="dash-icon">🛟</div>
@@ -227,7 +231,11 @@
     </div>
     <div id="btn-dist-ganancias" onclick="showSection('distributorEarnings')" class="dash-card clickable hidden">
       <div class="dash-icon">💰</div>
-      <div><div class="dash-label">Mis ganancias</div><div class="small-text">Resumen del panel distribuidor</div></div>
+      <div>
+        <div class="dash-label">Mis ganancias</div>
+        <div class="dash-value">$<span id="distributorAvailableEarningsDash">0.00</span></div>
+        <div class="small-text">Ganancias disponibles de mis vendedores</div>
+      </div>
     </div>
   </div>
 </div>
@@ -468,6 +476,53 @@
       <section id="section-distributorEarnings" class="section">
         <h1 class="section-title">💰 Mis ganancias</h1>
 
+        <div class="grid-cards">
+          <div class="dash-card">
+            <div class="dash-icon">💳</div>
+            <div><div class="dash-label">Saldo para mis compras</div><div class="dash-value">$<span id="distributorWalletPurchaseBalance">0.00</span></div><div class="small-text">Saldo recargado o transferido para comprar</div></div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-icon">💰</div>
+            <div><div class="dash-label">Ganancias disponibles</div><div class="dash-value">$<span id="distributorWalletAvailable">0.00</span></div><div class="small-text">Puedes pasar este monto a tu saldo cuando lo necesites</div></div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-icon">📈</div>
+            <div><div class="dash-label">Ganado por ventas</div><div class="dash-value">$<span id="distributorWalletEarned">0.00</span></div><div class="small-text">Ganancia histórica antes de ajustes</div></div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-icon">↩️</div>
+            <div><div class="dash-label">Ajustes por reembolsos</div><div class="dash-value">$<span id="distributorWalletRefundAdjustments">0.00</span></div><div class="small-text">Ganancia descontada por reembolsos a vendedores</div></div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-icon">🔁</div>
+            <div><div class="dash-label">Transferido a saldo</div><div class="dash-value">$<span id="distributorWalletTransferred">0.00</span></div><div class="small-text">Ganancias que ya convertiste en saldo de compra</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Pasar ganancias a saldo</h2>
+              <p class="small-text">Tus ganancias y tu saldo de compra son cuentas separadas. Tú decides cuánto transferir.</p>
+            </div>
+            <button class="outline-btn" style="width:auto" onclick="showSection('balance')">Ver mi saldo</button>
+          </div>
+          <div class="row">
+            <div>
+              <label class="field-label" for="distributorEarningsTransferAmount">Cantidad a transferir</label>
+              <input id="distributorEarningsTransferAmount" type="number" min="0.01" step="0.01" placeholder="0.00" />
+            </div>
+            <div>
+              <label class="field-label" for="distributorEarningsTransferNote">Nota opcional</label>
+              <input id="distributorEarningsTransferNote" type="text" maxlength="300" placeholder="Ej. saldo para compras de esta semana" />
+            </div>
+          </div>
+          <div class="tools">
+            <button class="green-btn" style="width:auto" onclick="transferDistributorEarningsToBalance()">Transferir a mi saldo</button>
+          </div>
+          <p id="distributorEarningsWalletWarning" class="small-text"></p>
+        </div>
+
         <div class="panel">
           <div class="panel-head">
             <div>
@@ -497,9 +552,11 @@
 
         <div class="grid-cards">
           <div class="dash-card"><div class="dash-icon">🧾</div><div><div class="dash-label">Pedidos vendidos</div><div class="dash-value"><span id="distributorEarningsOrders">0</span></div></div></div>
-          <div class="dash-card"><div class="dash-icon">💳</div><div><div class="dash-label">Venta a vendedores</div><div class="dash-value">$<span id="distributorEarningsSales">0.00</span></div></div></div>
-          <div class="dash-card"><div class="dash-icon">🏷️</div><div><div class="dash-label">Tu costo</div><div class="dash-value">$<span id="distributorEarningsCost">0.00</span></div></div></div>
-          <div class="dash-card"><div class="dash-icon">📈</div><div><div class="dash-label">Ganancia</div><div class="dash-value">$<span id="distributorEarningsProfit">0.00</span></div><div class="small-text"><span id="distributorEarningsMargin">0.00</span>% de margen</div></div></div>
+          <div class="dash-card"><div class="dash-icon">🛒</div><div><div class="dash-label">Venta bruta</div><div class="dash-value">$<span id="distributorEarningsGrossSales">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">↩️</div><div><div class="dash-label">Reembolsado</div><div class="dash-value">$<span id="distributorEarningsRefunds">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">💳</div><div><div class="dash-label">Venta neta</div><div class="dash-value">$<span id="distributorEarningsSales">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">🏷️</div><div><div class="dash-label">Tu costo proporcional</div><div class="dash-value">$<span id="distributorEarningsCost">0.00</span></div></div></div>
+          <div class="dash-card"><div class="dash-icon">📈</div><div><div class="dash-label">Ganancia neta</div><div class="dash-value">$<span id="distributorEarningsProfit">0.00</span></div><div class="small-text"><span id="distributorEarningsMargin">0.00</span>% de margen</div></div></div>
         </div>
 
         <div class="panel">
@@ -515,6 +572,11 @@
         <div class="panel">
           <h2>Detalle de ventas</h2>
           <div id="distributorEarningsDetails">Sin ventas en el rango seleccionado.</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><div><h2>Movimientos de mis ganancias</h2><p class="small-text">Ventas, ajustes por reembolso y transferencias a saldo.</p></div><button class="outline-btn" style="width:auto" onclick="loadDistributorEarningsWallet()">Actualizar</button></div>
+          <div id="distributorEarningsMovements">Sin movimientos.</div>
         </div>
       </section>
 
@@ -756,8 +818,8 @@
 <script src="user-orders-balance.js?v=8"></script>
 <script src="admin-commerce.js?v=7"></script>
 <script src="dashboard-stock-alerts.js?v=4"></script>
-<script src="app.js?v=20"></script>
-<script src="admin-users-distributor.js?v=10"></script>
+<script src="app.js?v=21"></script>
+<script src="admin-users-distributor.js?v=11"></script>
 
   <div id="modalStatusCSV" class="modal-status-csv hidden" aria-hidden="true">
     <div class="modal-status-csv-backdrop"></div>

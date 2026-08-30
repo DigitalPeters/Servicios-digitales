@@ -1412,6 +1412,50 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_platform TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
+  // Ganancias del distribuidor: cuenta separada del saldo comprado.
+  // Cada movimiento conserva su origen para evitar créditos/retiros duplicados.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS distributor_earnings_ledger (
+      id SERIAL PRIMARY KEY,
+      distributor_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      seller_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+      report_id INTEGER REFERENCES account_reports(id) ON DELETE SET NULL,
+      movement_type TEXT NOT NULL,
+      amount NUMERIC NOT NULL DEFAULT 0,
+      sale_amount NUMERIC DEFAULT 0,
+      distributor_cost NUMERIC DEFAULT 0,
+      refund_amount NUMERIC DEFAULT 0,
+      reference_key TEXT UNIQUE,
+      note TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS seller_id INTEGER`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS order_id INTEGER`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS report_id INTEGER`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS movement_type TEXT DEFAULT 'ajuste'`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS amount NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS sale_amount NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS distributor_cost NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS refund_amount NUMERIC DEFAULT 0`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS reference_key TEXT`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE distributor_earnings_ledger ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS distributor_earnings_reference_key_uq ON distributor_earnings_ledger(reference_key)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS distributor_earnings_distributor_date_idx ON distributor_earnings_ledger(distributor_id, created_at DESC, id DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS distributor_earnings_order_idx ON distributor_earnings_ledger(order_id)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS distributor_earnings_state (
+      distributor_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      initialized_at TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE distributor_earnings_state ADD COLUMN IF NOT EXISTS initialized_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE distributor_earnings_state ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
 
   await pool.query(`
@@ -1803,6 +1847,320 @@ async function getDistributorCostSnapshot(client, buyerUser, product) {
 
   const numericCost = Number(rawCost);
   return Number.isFinite(numericCost) ? Math.max(0, Number(numericCost.toFixed(2))) : null;
+}
+
+function roundMoney(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? Math.round((number + Number.EPSILON) * 100) / 100 : 0;
+}
+
+async function getDistributorEarningOrderBase(client, orderId) {
+  const result = await client.query(
+    `SELECT
+       o.id, o.user_id, o.product_id, o.amount, o.status, o.refunded, o.created_at,
+       o.distributor_cost_snapshot, o.product_name_snapshot, o.product_category_snapshot, o.owner_admin_id,
+       seller.owner_user_id AS distributor_id, seller.name AS seller_name, seller.email AS seller_email,
+       COALESCE(distributor.is_subadmin, false) AS distributor_is_subadmin,
+       p.name, p.category, p.price, p.cost_price, p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id AS product_owner_admin_id
+     FROM orders o
+     JOIN users seller ON seller.id = o.user_id
+     LEFT JOIN users distributor ON distributor.id = seller.owner_user_id
+     JOIN products p ON p.id = o.product_id
+     WHERE o.id = $1
+     LIMIT 1`,
+    [orderId]
+  );
+
+  const row = result.rows[0];
+  if (!row || !Number(row.distributor_id || 0) || row.distributor_is_subadmin !== true) return null;
+  return row;
+}
+
+async function resolveDistributorOrderCost(client, row) {
+  let distributorCost = row?.distributor_cost_snapshot === null || row?.distributor_cost_snapshot === undefined
+    ? null
+    : Number(row.distributor_cost_snapshot);
+  let source = 'snapshot';
+
+  if (!Number.isFinite(distributorCost)) {
+    const distributor = await getFullUser(Number(row.distributor_id || 0), client);
+    if (!distributor) return { cost: 0, source: 'sin_distribuidor' };
+    const rawCost = normalizeProductType(row.product_type) === 'combo_auto'
+      ? await calculateComboPrice(client, distributor, row)
+      : await getEffectiveProductPrice(client, distributor, row);
+    distributorCost = Number(rawCost);
+    source = 'precio_actual';
+  }
+
+  return {
+    cost: Math.max(0, roundMoney(distributorCost)),
+    source
+  };
+}
+
+async function ensureDistributorSaleEarningForOrder(client, orderId) {
+  const row = await getDistributorEarningOrderBase(client, orderId);
+  if (!row || String(row.status || '').toLowerCase() !== 'exito') return null;
+
+  const { cost, source } = await resolveDistributorOrderCost(client, row);
+  const saleAmount = Math.max(0, roundMoney(row.amount));
+  const profit = roundMoney(saleAmount - cost);
+  const referenceKey = `sale:${Number(row.id)}`;
+  const productName = String(row.product_name_snapshot || row.name || 'Producto').trim();
+
+  const inserted = await client.query(
+    `INSERT INTO distributor_earnings_ledger
+       (distributor_id, seller_id, order_id, movement_type, amount, sale_amount, distributor_cost, refund_amount, reference_key, note, created_at)
+     VALUES ($1, $2, $3, 'venta', $4, $5, $6, 0, $7, $8, COALESCE($9, NOW()))
+     ON CONFLICT (reference_key) DO NOTHING
+     RETURNING *`,
+    [
+      Number(row.distributor_id),
+      Number(row.user_id),
+      Number(row.id),
+      profit,
+      saleAmount,
+      cost,
+      referenceKey,
+      `Ganancia pedido #${Number(row.id)} · ${productName} · costo ${source}`,
+      row.created_at || null
+    ]
+  );
+
+  if (inserted.rows[0]) return inserted.rows[0];
+
+  const existing = await client.query(
+    `SELECT * FROM distributor_earnings_ledger WHERE reference_key = $1 LIMIT 1`,
+    [referenceKey]
+  );
+  return existing.rows[0] || null;
+}
+
+async function recordDistributorRefundEarningAdjustment(client, {
+  orderId,
+  refundAmount,
+  reportId = null,
+  referenceKey = '',
+  note = ''
+}) {
+  const saleMovement = await ensureDistributorSaleEarningForOrder(client, orderId);
+  if (!saleMovement) return null;
+
+  const saleAmount = Math.max(0, roundMoney(saleMovement.sale_amount));
+  if (saleAmount <= 0) return null;
+
+  const refund = Math.max(0, roundMoney(refundAmount));
+  if (refund <= 0) return null;
+
+  const ratio = Math.max(0, Math.min(1, refund / saleAmount));
+  const originalProfit = roundMoney(saleMovement.amount);
+  const adjustmentAmount = roundMoney(-(originalProfit * ratio));
+  const effectiveReference = String(referenceKey || (reportId ? `refund-report:${Number(reportId)}` : `refund-order:${Number(orderId)}`));
+
+  // Serializa reembolsos y transferencias del mismo distribuidor. Si ya transfirió
+  // las ganancias, el ajuste puede dejar la cuenta de ganancias en negativo sin tocar
+  // el saldo que compró con su propio dinero.
+  await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [Number(saleMovement.distributor_id)]);
+
+  const inserted = await client.query(
+    `INSERT INTO distributor_earnings_ledger
+       (distributor_id, seller_id, order_id, report_id, movement_type, amount, sale_amount, distributor_cost, refund_amount, reference_key, note, created_at)
+     VALUES ($1, $2, $3, $4, 'ajuste_reembolso', $5, $6, $7, $8, $9, $10, NOW())
+     ON CONFLICT (reference_key) DO NOTHING
+     RETURNING *`,
+    [
+      Number(saleMovement.distributor_id),
+      Number(saleMovement.seller_id || 0) || null,
+      Number(orderId),
+      reportId ? Number(reportId) : null,
+      adjustmentAmount,
+      saleAmount,
+      roundMoney(saleMovement.distributor_cost),
+      refund,
+      effectiveReference,
+      note || `Ajuste proporcional por reembolso de $${refund.toFixed(2)} en pedido #${Number(orderId)}`
+    ]
+  );
+
+  if (inserted.rows[0]) {
+    return {
+      ...inserted.rows[0],
+      adjustment_amount: adjustmentAmount,
+      original_profit: originalProfit,
+      refund_ratio: Number((ratio * 100).toFixed(2))
+    };
+  }
+
+  const existing = await client.query(
+    `SELECT * FROM distributor_earnings_ledger WHERE reference_key = $1 LIMIT 1`,
+    [effectiveReference]
+  );
+  const row = existing.rows[0];
+  return row ? {
+    ...row,
+    adjustment_amount: roundMoney(row.amount),
+    original_profit: originalProfit,
+    refund_ratio: Number((ratio * 100).toFixed(2))
+  } : null;
+}
+
+async function ensureDistributorEarningsInitialized(client, distributorId) {
+  const id = Number(distributorId || 0);
+  if (!id) return;
+
+  const state = await client.query(
+    `SELECT distributor_id, initialized_at FROM distributor_earnings_state WHERE distributor_id = $1 LIMIT 1`,
+    [id]
+  );
+  if (state.rows[0]?.initialized_at) return;
+
+  const distributor = await getFullUser(id, client);
+  if (!distributor || distributor.is_subadmin !== true) return;
+
+  // La mayoría de pedidos modernos ya tiene distributor_cost_snapshot; esos se
+  // migran de forma masiva para que el primer acceso no sea lento aun con miles de ventas.
+  await client.query(
+    `INSERT INTO distributor_earnings_ledger
+       (distributor_id, seller_id, order_id, movement_type, amount, sale_amount, distributor_cost, refund_amount, reference_key, note, created_at)
+     SELECT
+       $1, o.user_id, o.id, 'venta',
+       ROUND((COALESCE(o.amount, 0) - COALESCE(o.distributor_cost_snapshot, 0))::numeric, 2),
+       ROUND(COALESCE(o.amount, 0)::numeric, 2),
+       ROUND(COALESCE(o.distributor_cost_snapshot, 0)::numeric, 2),
+       0,
+       'sale:' || o.id::text,
+       'Ganancia histórica pedido #' || o.id::text || ' · costo snapshot',
+       o.created_at
+     FROM orders o
+     JOIN users seller ON seller.id = o.user_id
+     WHERE seller.owner_user_id = $1
+       AND o.status = 'exito'
+       AND o.distributor_cost_snapshot IS NOT NULL
+     ON CONFLICT (reference_key) DO NOTHING`,
+    [id]
+  );
+
+  const legacyOrders = await client.query(
+    `SELECT o.id
+     FROM orders o
+     JOIN users seller ON seller.id = o.user_id
+     WHERE seller.owner_user_id = $1
+       AND o.status = 'exito'
+       AND o.distributor_cost_snapshot IS NULL
+     ORDER BY o.id ASC`,
+    [id]
+  );
+
+  for (const order of legacyOrders.rows) {
+    await ensureDistributorSaleEarningForOrder(client, order.id);
+  }
+
+  const refundedReports = await client.query(
+    `SELECT ar.id, ar.order_id, ar.refund_amount
+     FROM account_reports ar
+     JOIN orders o ON o.id = ar.order_id
+     JOIN users seller ON seller.id = o.user_id
+     WHERE seller.owner_user_id = $1
+       AND COALESCE(ar.refund_amount, 0) > 0
+       AND lower(COALESCE(ar.resolution_type, '')) = 'reembolso'
+     ORDER BY ar.id ASC`,
+    [id]
+  );
+
+  for (const report of refundedReports.rows) {
+    await recordDistributorRefundEarningAdjustment(client, {
+      orderId: report.order_id,
+      reportId: report.id,
+      refundAmount: report.refund_amount,
+      referenceKey: `refund-report:${Number(report.id)}`,
+      note: `Ajuste histórico por reembolso del reporte #${Number(report.id)}`
+    });
+  }
+
+  const refundedWithoutReport = await client.query(
+    `SELECT o.id, o.amount
+     FROM orders o
+     JOIN users seller ON seller.id = o.user_id
+     WHERE seller.owner_user_id = $1
+       AND COALESCE(o.refunded, 0) = 1
+       AND NOT EXISTS (
+         SELECT 1 FROM account_reports ar
+         WHERE ar.order_id = o.id
+           AND COALESCE(ar.refund_amount, 0) > 0
+           AND lower(COALESCE(ar.resolution_type, '')) = 'reembolso'
+       )
+     ORDER BY o.id ASC`,
+    [id]
+  );
+
+  for (const order of refundedWithoutReport.rows) {
+    await recordDistributorRefundEarningAdjustment(client, {
+      orderId: order.id,
+      refundAmount: order.amount,
+      referenceKey: `refund-order:${Number(order.id)}`,
+      note: `Ajuste histórico por reembolso completo del pedido #${Number(order.id)}`
+    });
+  }
+
+  await client.query(
+    `INSERT INTO distributor_earnings_state (distributor_id, initialized_at, updated_at)
+     VALUES ($1, NOW(), NOW())
+     ON CONFLICT (distributor_id) DO UPDATE
+     SET initialized_at = COALESCE(distributor_earnings_state.initialized_at, EXCLUDED.initialized_at),
+         updated_at = NOW()`,
+    [id]
+  );
+}
+
+async function getDistributorEarningsWallet(client, distributorId, movementLimit = 60) {
+  const id = Number(distributorId || 0);
+  await ensureDistributorEarningsInitialized(client, id);
+
+  const [summaryResult, userResult, movementsResult] = await Promise.all([
+    client.query(
+      `SELECT
+         COALESCE(SUM(amount), 0) AS available,
+         COALESCE(SUM(CASE WHEN movement_type = 'venta' THEN amount ELSE 0 END), 0) AS earned_from_sales,
+         COALESCE(SUM(CASE WHEN movement_type = 'ajuste_reembolso' THEN amount ELSE 0 END), 0) AS refund_adjustments,
+         COALESCE(SUM(CASE WHEN movement_type = 'transferencia_saldo' THEN -amount ELSE 0 END), 0) AS transferred_to_balance
+       FROM distributor_earnings_ledger
+       WHERE distributor_id = $1`,
+      [id]
+    ),
+    client.query(`SELECT balance FROM users WHERE id = $1 LIMIT 1`, [id]),
+    client.query(
+      `SELECT
+         l.id, l.movement_type, l.amount, l.sale_amount, l.distributor_cost, l.refund_amount,
+         l.order_id, l.report_id, l.note, l.created_at,
+         seller.name AS seller_name, seller.email AS seller_email,
+         COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, 'Producto') AS product_name,
+         to_char(((l.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
+       FROM distributor_earnings_ledger l
+       LEFT JOIN users seller ON seller.id = l.seller_id
+       LEFT JOIN orders o ON o.id = l.order_id
+       LEFT JOIN products p ON p.id = o.product_id
+       WHERE l.distributor_id = $1
+       ORDER BY l.created_at DESC, l.id DESC
+       LIMIT $2`,
+      [id, Math.max(1, Math.min(200, Number(movementLimit || 60)))]
+    )
+  ]);
+
+  const summary = summaryResult.rows[0] || {};
+  return {
+    available: roundMoney(summary.available),
+    earned_from_sales: roundMoney(summary.earned_from_sales),
+    refund_adjustments: roundMoney(summary.refund_adjustments),
+    transferred_to_balance: roundMoney(summary.transferred_to_balance),
+    purchase_balance: roundMoney(userResult.rows[0]?.balance || 0),
+    movements: movementsResult.rows.map(row => ({
+      ...row,
+      amount: roundMoney(row.amount),
+      sale_amount: roundMoney(row.sale_amount),
+      distributor_cost: roundMoney(row.distributor_cost),
+      refund_amount: roundMoney(row.refund_amount)
+    }))
+  };
 }
 
 function buildComboDeliveredAccountData(accounts) {
@@ -2629,6 +2987,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
         await client.query(`UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0`, [productId]);
       }
 
+      await ensureDistributorSaleEarningForOrder(client, newOrderId);
       await client.query("COMMIT");
 
       sendNewOrderEmail({
@@ -2791,6 +3150,7 @@ if (Number(product.stock_enabled || 0) === 1 && normalizeProductType(product.pro
     );
 }
 
+await ensureDistributorSaleEarningForOrder(client, newOrderId);
 await client.query("COMMIT");
 
 sendNewOrderEmail({
@@ -5487,6 +5847,14 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
       [report.order_id]
     );
 
+    const distributorEarningsAdjustment = await recordDistributorRefundEarningAdjustment(client, {
+      orderId: report.order_id,
+      reportId,
+      refundAmount,
+      referenceKey: `refund-report:${Number(reportId)}`,
+      note: `Reembolso proporcional del reporte #${Number(reportId)} · $${refundAmount.toFixed(2)}`
+    });
+
     await markFailedAccountEmailGroup(client, {
       reportedAccountId: report.reported_account_id
     });
@@ -5499,13 +5867,20 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
            admin_response = $2,
            reviewed_at = NOW()
        WHERE id = $3`,
-      [refundAmount, `Reembolso proporcional aplicado: $${refundAmount.toFixed(2)}. Días usados: ${daysUsed}. Días restantes: ${daysRemaining}.`, reportId]
+      [refundAmount, `Reembolso proporcional aplicado: $${refundAmount.toFixed(2)}. Días usados: ${daysUsed}. Días restantes: ${daysRemaining}.${distributorEarningsAdjustment ? ` Ajuste de ganancia del distribuidor: $${Math.abs(Number(distributorEarningsAdjustment.adjustment_amount || 0)).toFixed(2)} (${Number(distributorEarningsAdjustment.refund_ratio || 0).toFixed(2)}%).` : ''}`, reportId]
     );
 
     await client.query("COMMIT");
     transactionStarted = false;
 
-    res.json({ message: `Reembolso aplicado por $${refundAmount.toFixed(2)}`, refund_amount: refundAmount, days_used: daysUsed, days_remaining: daysRemaining });
+    const adjustmentValue = distributorEarningsAdjustment ? Math.abs(Number(distributorEarningsAdjustment.adjustment_amount || 0)) : 0;
+    res.json({
+      message: `Reembolso aplicado por $${refundAmount.toFixed(2)}${adjustmentValue > 0 ? ` · Ganancia distribuidor ajustada: -$${adjustmentValue.toFixed(2)}` : ''}`,
+      refund_amount: refundAmount,
+      days_used: daysUsed,
+      days_remaining: daysRemaining,
+      distributor_earnings_adjustment: distributorEarningsAdjustment || null
+    });
   } catch (err) {
     if (transactionStarted) {
       try { await client.query("ROLLBACK"); } catch (_) {}
@@ -5564,6 +5939,14 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
 
     await client.query(`UPDATE orders SET refunded = 1 WHERE id = $1`, [report.order_id]);
 
+    const distributorEarningsAdjustment = await recordDistributorRefundEarningAdjustment(client, {
+      orderId: report.order_id,
+      reportId,
+      refundAmount: amountPaid,
+      referenceKey: `refund-report:${Number(reportId)}`,
+      note: `Reembolso completo del reporte #${Number(reportId)} · $${amountPaid.toFixed(2)}`
+    });
+
     await markFailedAccountEmailGroup(client, {
       reportedAccountId: report.reported_account_id
     });
@@ -5576,13 +5959,18 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
            admin_response = $2,
            reviewed_at = NOW()
        WHERE id = $3`,
-      [amountPaid, `Reembolso completo aplicado: $${amountPaid.toFixed(2)}`, reportId]
+      [amountPaid, `Reembolso completo aplicado: $${amountPaid.toFixed(2)}${distributorEarningsAdjustment ? ` · Ajuste de ganancia del distribuidor: $${Math.abs(Number(distributorEarningsAdjustment.adjustment_amount || 0)).toFixed(2)}` : ''}`, reportId]
     );
 
     await client.query("COMMIT");
     transactionStarted = false;
 
-    res.json({ message: `Reembolso completo aplicado por $${amountPaid.toFixed(2)}`, refund_amount: amountPaid });
+    const adjustmentValue = distributorEarningsAdjustment ? Math.abs(Number(distributorEarningsAdjustment.adjustment_amount || 0)) : 0;
+    res.json({
+      message: `Reembolso completo aplicado por $${amountPaid.toFixed(2)}${adjustmentValue > 0 ? ` · Ganancia distribuidor ajustada: -$${adjustmentValue.toFixed(2)}` : ''}`,
+      refund_amount: amountPaid,
+      distributor_earnings_adjustment: distributorEarningsAdjustment || null
+    });
   } catch (err) {
     if (transactionStarted) {
       try { await client.query("ROLLBACK"); } catch (_) {}
@@ -6029,6 +6417,13 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
         `UPDATE orders SET refunded = 1 WHERE id = $1`,
         [orderId]
       );
+
+      await recordDistributorRefundEarningAdjustment(client, {
+        orderId,
+        refundAmount: amount,
+        referenceKey: `refund-order:${Number(orderId)}`,
+        note: `Reembolso completo por pedido rechazado #${Number(orderId)}`
+      });
     }
 
     let finalResponseMessage = response_message || "";
@@ -6157,6 +6552,10 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
        WHERE id = $3`,
       [status, finalResponseMessage, orderId, deliveredAccountDataToSave]
     );
+
+    if (status === "exito") {
+      await ensureDistributorSaleEarningForOrder(client, orderId);
+    }
 
     await client.query("COMMIT");
 
@@ -6757,13 +7156,19 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
       return res.status(403).json({ error: 'Distribuidor requerido' });
     }
 
+    // Inicializa el historial anterior a esta versión una sola vez. Después, cada venta
+    // y reembolso se registra al momento de ocurrir.
+    const wallet = await getDistributorEarningsWallet(pool, req.user.id, 80);
+
     const ordersResult = await pool.query(
       `SELECT
          o.id,
          o.user_id,
          o.product_id,
          o.amount,
+         o.refunded,
          o.distributor_cost_snapshot,
+         sale_ledger.distributor_cost AS ledger_distributor_cost,
          o.product_name_snapshot,
          o.product_category_snapshot,
          o.created_at,
@@ -6777,13 +7182,23 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
          p.combo_items,
          p.combo_discount,
          p.owner_admin_id,
+         CASE WHEN COALESCE(refunds.refund_amount, 0) > 0 THEN refunds.refund_amount WHEN COALESCE(o.refunded, 0) = 1 THEN o.amount ELSE 0 END AS refund_amount_total,
          to_char(((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
        FROM orders o
        INNER JOIN users u ON u.id = o.user_id
        INNER JOIN products p ON p.id = o.product_id
+       LEFT JOIN distributor_earnings_ledger sale_ledger
+         ON sale_ledger.order_id = o.id
+        AND sale_ledger.movement_type = 'venta'
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(ar.refund_amount), 0) AS refund_amount
+         FROM account_reports ar
+         WHERE ar.order_id = o.id
+           AND COALESCE(ar.refund_amount, 0) > 0
+           AND lower(COALESCE(ar.resolution_type, '')) = 'reembolso'
+       ) refunds ON TRUE
        WHERE u.owner_user_id = $1
          AND o.status = 'exito'
-         AND COALESCE(o.refunded, 0) = 0
          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date >= $2::date
          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date <= $3::date
        ORDER BY o.created_at DESC, o.id DESC`,
@@ -6794,16 +7209,25 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
     const details = [];
     const sellerMap = new Map();
     const productMap = new Map();
+    let grossSales = 0;
+    let totalRefunds = 0;
     let totalSales = 0;
     let totalCost = 0;
+    let totalProfit = 0;
+    let refundedOrders = 0;
     let estimatedCostOrders = 0;
 
     for (const row of ordersResult.rows) {
-      const saleAmount = Number(row.amount || 0);
+      const grossSaleAmount = Math.max(0, roundMoney(row.amount));
       let distributorCost = row.distributor_cost_snapshot === null || row.distributor_cost_snapshot === undefined
         ? null
         : Number(row.distributor_cost_snapshot);
       let costSource = 'snapshot';
+
+      if (!Number.isFinite(distributorCost) && row.ledger_distributor_cost !== null && row.ledger_distributor_cost !== undefined) {
+        distributorCost = Number(row.ledger_distributor_cost);
+        costSource = 'historial_ganancias';
+      }
 
       if (!Number.isFinite(distributorCost)) {
         const productId = Number(row.product_id || 0);
@@ -6818,14 +7242,24 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
         estimatedCostOrders += 1;
       }
 
-      distributorCost = Math.max(0, Number(distributorCost || 0));
-      const profit = Number((saleAmount - distributorCost).toFixed(2));
+      distributorCost = Math.max(0, roundMoney(distributorCost));
+      const refundAmount = Math.max(0, Math.min(grossSaleAmount, roundMoney(row.refund_amount_total)));
+      const refundRatio = grossSaleAmount > 0 ? Math.max(0, Math.min(1, refundAmount / grossSaleAmount)) : 0;
+      const netSaleAmount = roundMoney(grossSaleAmount - refundAmount);
+      const netDistributorCost = roundMoney(distributorCost * (1 - refundRatio));
+      const originalProfit = roundMoney(grossSaleAmount - distributorCost);
+      const profitAdjustment = roundMoney(originalProfit * refundRatio);
+      const profit = roundMoney(originalProfit - profitAdjustment);
       const productName = String(row.product_name_snapshot || row.name || 'Producto').trim();
       const productCategory = String(row.product_category_snapshot || row.category || 'Otros').trim();
       const sellerId = Number(row.user_id || 0);
 
-      totalSales += saleAmount;
-      totalCost += distributorCost;
+      grossSales += grossSaleAmount;
+      totalRefunds += refundAmount;
+      totalSales += netSaleAmount;
+      totalCost += netDistributorCost;
+      totalProfit += profit;
+      if (refundAmount > 0) refundedOrders += 1;
 
       details.push({
         id: Number(row.id),
@@ -6835,8 +7269,14 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
         product_id: Number(row.product_id || 0),
         product_name: productName,
         product_category: productCategory,
-        sale_amount: Number(saleAmount.toFixed(2)),
-        distributor_cost: Number(distributorCost.toFixed(2)),
+        gross_sale_amount: roundMoney(grossSaleAmount),
+        refund_amount: roundMoney(refundAmount),
+        sale_amount: roundMoney(netSaleAmount),
+        original_distributor_cost: roundMoney(distributorCost),
+        distributor_cost: roundMoney(netDistributorCost),
+        original_profit: roundMoney(originalProfit),
+        refund_profit_adjustment: roundMoney(profitAdjustment),
+        refund_percent: Number((refundRatio * 100).toFixed(2)),
         profit,
         cost_source: costSource,
         created_at: row.created_at,
@@ -6849,13 +7289,17 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
         seller_name: row.seller_name || 'Vendedor',
         seller_email: row.seller_email || '',
         total_orders: 0,
+        gross_sales: 0,
+        total_refunds: 0,
         total_sales: 0,
         total_cost: 0,
         total_profit: 0
       };
       sellerSummary.total_orders += 1;
-      sellerSummary.total_sales += saleAmount;
-      sellerSummary.total_cost += distributorCost;
+      sellerSummary.gross_sales += grossSaleAmount;
+      sellerSummary.total_refunds += refundAmount;
+      sellerSummary.total_sales += netSaleAmount;
+      sellerSummary.total_cost += netDistributorCost;
       sellerSummary.total_profit += profit;
       sellerMap.set(sellerKey, sellerSummary);
 
@@ -6865,25 +7309,33 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
         product_name: productName,
         product_category: productCategory,
         total_orders: 0,
+        gross_sales: 0,
+        total_refunds: 0,
         total_sales: 0,
         total_cost: 0,
         total_profit: 0
       };
       productSummary.total_orders += 1;
-      productSummary.total_sales += saleAmount;
-      productSummary.total_cost += distributorCost;
+      productSummary.gross_sales += grossSaleAmount;
+      productSummary.total_refunds += refundAmount;
+      productSummary.total_sales += netSaleAmount;
+      productSummary.total_cost += netDistributorCost;
       productSummary.total_profit += profit;
       productMap.set(productKey, productSummary);
     }
 
     const roundSummary = (row) => ({
       ...row,
-      total_sales: Number(Number(row.total_sales || 0).toFixed(2)),
-      total_cost: Number(Number(row.total_cost || 0).toFixed(2)),
-      total_profit: Number(Number(row.total_profit || 0).toFixed(2))
+      gross_sales: roundMoney(row.gross_sales),
+      total_refunds: roundMoney(row.total_refunds),
+      total_sales: roundMoney(row.total_sales),
+      total_cost: roundMoney(row.total_cost),
+      total_profit: roundMoney(row.total_profit)
     });
 
-    const totalProfit = Number((totalSales - totalCost).toFixed(2));
+    totalSales = roundMoney(totalSales);
+    totalCost = roundMoney(totalCost);
+    totalProfit = roundMoney(totalProfit);
     const bySeller = Array.from(sellerMap.values())
       .map(roundSummary)
       .sort((a, b) => b.total_profit - a.total_profit || b.total_sales - a.total_sales);
@@ -6895,10 +7347,14 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
       start_date: startDate,
       end_date: endDate,
       timezone: 'America/Mexico_City',
+      wallet,
       summary: {
         total_orders: details.length,
-        total_sales: Number(totalSales.toFixed(2)),
-        total_cost: Number(totalCost.toFixed(2)),
+        refunded_orders: refundedOrders,
+        gross_sales: roundMoney(grossSales),
+        total_refunds: roundMoney(totalRefunds),
+        total_sales: totalSales,
+        total_cost: totalCost,
         total_profit: totalProfit,
         margin_percent: totalSales > 0 ? Number(((totalProfit / totalSales) * 100).toFixed(2)) : 0,
         estimated_cost_orders: estimatedCostOrders
@@ -6913,6 +7369,98 @@ app.get("/api/distributor/earnings", authMiddleware, distributorMiddleware, asyn
   }
 });
 
+// DISTRIBUIDOR: CUENTA DE GANANCIAS (independiente del saldo de compra)
+app.get("/api/distributor/earnings/wallet", authMiddleware, distributorMiddleware, async (req, res) => {
+  try {
+    const wallet = await getDistributorEarningsWallet(pool, req.user.id, 80);
+    res.json(wallet);
+  } catch (err) {
+    console.error('Error cargando cuenta de ganancias:', err.message);
+    res.status(500).json({ error: 'Error cargando cuenta de ganancias' });
+  }
+});
+
+// DISTRIBUIDOR: TRANSFERIR GANANCIAS A SU SALDO DE COMPRA
+app.post("/api/distributor/earnings/transfer", authMiddleware, distributorMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    const amount = roundMoney(req.body?.amount);
+    const note = String(req.body?.note || '').trim().slice(0, 300);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'Ingresa una cantidad mayor a 0' });
+    }
+
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const distributorResult = await client.query(
+      `SELECT id, balance, COALESCE(is_subadmin, false) AS is_subadmin
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [req.user.id]
+    );
+    const distributor = distributorResult.rows[0];
+
+    if (!distributor || distributor.is_subadmin !== true) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(403).json({ error: 'Distribuidor requerido' });
+    }
+
+    await ensureDistributorEarningsInitialized(client, req.user.id);
+
+    const availableResult = await client.query(
+      `SELECT COALESCE(SUM(amount), 0) AS available
+       FROM distributor_earnings_ledger
+       WHERE distributor_id = $1`,
+      [req.user.id]
+    );
+    const available = roundMoney(availableResult.rows[0]?.available || 0);
+
+    if (available <= 0 || amount > available) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(400).json({
+        error: `Ganancias disponibles insuficientes. Disponible: $${available.toFixed(2)}`,
+        earnings_available: available
+      });
+    }
+
+    await client.query(
+      `UPDATE users SET balance = COALESCE(balance, 0) + $1 WHERE id = $2`,
+      [amount, req.user.id]
+    );
+
+    await client.query(
+      `INSERT INTO distributor_earnings_ledger
+       (distributor_id, movement_type, amount, sale_amount, distributor_cost, refund_amount, note, created_at)
+       VALUES ($1, 'transferencia_saldo', $2, 0, 0, 0, $3, NOW())`,
+      [req.user.id, -amount, note || `Transferencia de ganancias a saldo por $${amount.toFixed(2)}`]
+    );
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
+    const wallet = await getDistributorEarningsWallet(pool, req.user.id, 80);
+    res.json({
+      message: `Se transfirieron $${amount.toFixed(2)} de Ganancias a tu Saldo de compra`,
+      transferred_amount: amount,
+      wallet
+    });
+  } catch (err) {
+    if (transactionStarted) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    console.error('Error transfiriendo ganancias a saldo:', err.message);
+    res.status(500).json({ error: 'Error transfiriendo ganancias a saldo' });
+  } finally {
+    client.release();
+  }
+});
 
 app.post("/api/distributor/add-balance", authMiddleware, distributorMiddleware, async (req, res) => {
   try {
