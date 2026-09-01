@@ -1,6 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
-console.log("SERVICIOS DIGITALES PETERS · VERSION MAESTRA V1.4 · OPERACION DEL DUENO");
+console.log("SERVICIOS DIGITALES PETERS · MASTER ESTABLE V1.8 · CONTROL Y PREPARACION DE CLON");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -11,9 +11,11 @@ const nodemailer = require("nodemailer");
 const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
+const { supplierScore, rowsToCsv } = require("./lib/master-utils");
 
 const app = express();
 const codigosRecuperacion = new Map();
+const loginAttempts = new Map();
 
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
@@ -64,7 +66,14 @@ async function getTenantPanelFromRequest(req, client = pool) {
 }
 
 app.use(bodyParser.json({ limit: "10mb" }));
-app.use(cors());
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || "").split(",").map(v=>v.trim()).filter(Boolean);
+app.use(cors(configuredCorsOrigins.length ? {
+  origin(origin, callback) {
+    if (!origin || configuredCorsOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Origen no permitido por CORS"));
+  },
+  credentials: true
+} : undefined));
 app.use(compression()); // <-- EXPRIME LA PÁGINA PARA QUE CARGUE RÁPIDO
 app.use(express.static("public"));
 
@@ -594,12 +603,13 @@ function normalizeFieldName(name) {
     .replace(/^_+|_+$/g, "");
 }
 
-function generateToken(user) {
+function generateToken(user, sessionId = null) {
   return jwt.sign(
     {
       id: user.id,
       role: user.role,
-      tv: Number(user.token_version || 0)
+      tv: Number(user.token_version || 0),
+      sid: sessionId || undefined
     },
     SECRET,
     {
@@ -647,6 +657,11 @@ async function authMiddleware(req, res, next) {
       .filter(Boolean).map(v => String(v).toLowerCase());
     if (panelStatuses.some(status => status !== "activo")) {
       return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    }
+    if (decoded.sid) {
+      const activeSession = await pool.query(`SELECT id, revoked_at FROM auth_sessions WHERE session_id=$1 AND user_id=$2 LIMIT 1`, [decoded.sid, decoded.id]);
+      if (!activeSession.rows[0] || activeSession.rows[0].revoked_at) return res.status(401).json({ error: "Esta sesión fue cerrada. Inicia sesión nuevamente." });
+      pool.query(`UPDATE auth_sessions SET last_seen_at=NOW() WHERE session_id=$1 AND (last_seen_at IS NULL OR last_seen_at < NOW() - INTERVAL '5 minutes')`, [decoded.sid]).catch(()=>{});
     }
     req.user = { ...decoded, role: sessionUser.role, email: sessionUser.email, owner_user_id: sessionUser.owner_user_id };
     next();
@@ -698,7 +713,8 @@ async function adminMiddleware(req, res, next) {
 }
 
 function mainAdminMiddleware(req, res, next) {
-  if (!req.isMainAdmin) {
+  const allowed = MAIN_ADMIN_EMAIL ? isMainAdminEmail(req.adminUser?.email || req.user?.email) : req.isMainAdmin;
+  if (!allowed) {
     return res.status(403).json({ error: "Admin principal requerido" });
   }
   next();
@@ -1631,6 +1647,92 @@ async function initDatabase() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_cash_owner_date ON admin_cash_movements(COALESCE(owner_admin_id,0), movement_date DESC, id DESC)`);
   await pool.query(`ALTER TABLE admin_cash_movements ADD COLUMN IF NOT EXISTS affects_profit BOOLEAN NOT NULL DEFAULT TRUE`);
+
+  // MASTER V1.7 / V1.8: control de proveedores, renovaciones, sesiones y preparación del clon.
+  // Las nuevas estructuras se registran también en schema_migrations para que las siguientes
+  // versiones puedan migrar de forma explícita y verificable.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version TEXT PRIMARY KEY,
+      description TEXT DEFAULT '',
+      applied_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_permissions JSONB DEFAULT '{}'::jsonb`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_service_cases (
+      id BIGSERIAL PRIMARY KEY,
+      owner_admin_id INTEGER,
+      supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+      supplier_name_snapshot TEXT DEFAULT '',
+      report_id INTEGER,
+      mother_account_id INTEGER,
+      issue TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pendiente',
+      contacted_at TIMESTAMP DEFAULT NOW(),
+      responded_at TIMESTAMP,
+      resolved_at TIMESTAMP,
+      attention_rating INTEGER,
+      notes TEXT DEFAULT '',
+      created_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_supplier_service_owner_supplier ON supplier_service_cases(COALESCE(owner_admin_id,0), supplier_id, created_at DESC)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mother_account_renewals (
+      id BIGSERIAL PRIMARY KEY,
+      owner_admin_id INTEGER,
+      mother_account_id INTEGER REFERENCES mother_accounts(id) ON DELETE CASCADE,
+      supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+      supplier_name_snapshot TEXT DEFAULT '',
+      previous_expiration DATE,
+      new_expiration DATE,
+      renewal_cost NUMERIC NOT NULL DEFAULT 0,
+      result TEXT NOT NULL DEFAULT 'renovada',
+      notes TEXT DEFAULT '',
+      created_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_renewals_account ON mother_account_renewals(mother_account_id, created_at DESC)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id BIGSERIAL PRIMARY KEY,
+      session_id TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      ip_address TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      last_seen_at TIMESTAMP DEFAULT NOW(),
+      revoked_at TIMESTAMP,
+      revoked_by INTEGER
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active ON auth_sessions(user_id, revoked_at, last_seen_at DESC)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS backup_checkpoints (
+      id BIGSERIAL PRIMARY KEY,
+      backup_date TIMESTAMP DEFAULT NOW(),
+      backup_type TEXT DEFAULT 'pg_dump',
+      location_label TEXT DEFAULT '',
+      size_label TEXT DEFAULT '',
+      verified BOOLEAN NOT NULL DEFAULT FALSE,
+      notes TEXT DEFAULT '',
+      created_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`INSERT INTO schema_migrations(version,description) VALUES
+    ('master-1.7','Control administrativo: proveedores, renovaciones, sesiones y exportaciones'),
+    ('master-1.8','Preparación para clonación: diagnósticos, permisos, respaldos y modularización inicial')
+    ON CONFLICT(version) DO NOTHING`);
 
   // Vincula inventario histórico sin cuenta madre respetando cada ciclo por fecha oficial.
   await pool.query(`
@@ -2701,11 +2803,18 @@ app.post("/api/panel-register/:token", async (req, res) => {
   finally{client.release();}
 });
 
+// Protección ligera contra fuerza bruta sin dependencia adicional.
+function loginAttemptKey(req,email){return `${String(req.headers['x-forwarded-for']||req.socket?.remoteAddress||'').split(',')[0].trim()}|${String(email||'').toLowerCase()}`;}
+function loginBlocked(req,email){const key=loginAttemptKey(req,email),r=loginAttempts.get(key);if(!r)return false;if(r.blockedUntil&&r.blockedUntil>Date.now())return true;if(r.firstAt<Date.now()-15*60*1000){loginAttempts.delete(key);return false;}return false;}
+function registerLoginFailure(req,email){const key=loginAttemptKey(req,email),now=Date.now(),old=loginAttempts.get(key);const r=!old||old.firstAt<now-15*60*1000?{count:0,firstAt:now,blockedUntil:0}:old;r.count+=1;if(r.count>=6)r.blockedUntil=now+15*60*1000;loginAttempts.set(key,r);}
+function clearLoginFailures(req,email){loginAttempts.delete(loginAttemptKey(req,email));}
+
 // LOGIN
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const cleanEmail=String(email||"").trim().toLowerCase();
+    if(loginBlocked(req,cleanEmail)) return res.status(429).json({error:"Demasiados intentos. Espera 15 minutos antes de volver a intentar."});
     const tenantPanel=await getTenantPanelFromRequest(req);
     if (isTenantHost(req) && !tenantPanel) return res.status(404).json({error:"Este subdominio no corresponde a un panel registrado."});
     let result;
@@ -2723,7 +2832,7 @@ app.post("/api/login", async (req, res) => {
       if(!panel) return res.status(404).json({error:"Usuario no encontrado"});
       if(String(panel.status||"activo").toLowerCase()!=="activo") return res.status(403).json({error:"Panel suspendido o inactivo"});
       const panelPass=await pool.query(`SELECT password FROM admin_panels WHERE id=$1`,[panel.id]);
-      if(!await bcrypt.compare(password||"",panelPass.rows[0]?.password||"")) return res.status(401).json({error:"Contraseña incorrecta"});
+      if(!await bcrypt.compare(password||"",panelPass.rows[0]?.password||"")){registerLoginFailure(req,cleanEmail);return res.status(401).json({error:"Contraseña incorrecta"});}
       const created=await pool.query(`INSERT INTO users (name,email,password,role,balance,is_subadmin) VALUES ($1,$2,$3,'admin',0,false) RETURNING *`,[panel.admin_name||panel.business_name||cleanEmail,cleanEmail,panelPass.rows[0].password]);
       user=created.rows[0];
       await pool.query(`UPDATE admin_panels SET owner_user_id=$1,updated_at=NOW() WHERE id=$2 AND owner_user_id IS NULL`,[user.id,panel.id]);
@@ -2733,8 +2842,13 @@ app.post("/api/login", async (req, res) => {
     const panel = await getAdminPanelForUserId(user.id);
     if(panel && String(panel.status||"activo").toLowerCase()!=="activo") return res.status(403).json({error:"Panel suspendido o inactivo"});
     if(user.is_enabled===false) return res.status(403).json({error:"Tu acceso está deshabilitado. Contacta al administrador de tu panel."});
-    if(!await bcrypt.compare(password||"",user.password)) return res.status(401).json({error:"Contraseña incorrecta"});
-    res.json({token:generateToken(user)});
+    if(!await bcrypt.compare(password||"",user.password)){registerLoginFailure(req,cleanEmail);return res.status(401).json({error:"Contraseña incorrecta"});}
+    clearLoginFailures(req,cleanEmail);
+    const sessionId = crypto.randomUUID();
+    await pool.query(`INSERT INTO auth_sessions(session_id,user_id,ip_address,user_agent,created_at,last_seen_at) VALUES($1,$2,$3,$4,NOW(),NOW())`, [
+      sessionId, user.id, String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0,120), String(req.headers['user-agent'] || '').slice(0,500)
+    ]);
+    res.json({token:generateToken(user,sessionId)});
   }catch(err){console.error(err.message);res.status(500).json({error:"Error iniciando sesión"});}
 });
 
@@ -10625,6 +10739,298 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     console.error('Error al liberar cuenta:', err.message);
     res.status(500).json({ error:'Error al archivar y liberar la cuenta.' });
   } finally { client.release(); }
+});
+
+
+
+// ============================================================
+// MASTER V1.7 / V1.8 · CONTROL ADMINISTRATIVO Y MASTER ESTABLE
+// ============================================================
+function masterDateRange(req, defaultDays = 30) {
+  const today = new Date();
+  const end = String(req.query.to || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(req.query.to) : today.toISOString().slice(0,10);
+  const startDate = new Date(`${end}T12:00:00Z`);
+  startDate.setUTCDate(startDate.getUTCDate() - Math.max(0, defaultDays - 1));
+  const start = String(req.query.from || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(req.query.from) : startDate.toISOString().slice(0,10);
+  return { start, end };
+}
+
+async function loadSupplierPerformance(start, end) {
+  const result = await pool.query(`
+    WITH supplier_names AS (
+      SELECT lower(trim(name)) AS skey, trim(name) AS name, id AS supplier_id
+        FROM suppliers WHERE COALESCE(owner_admin_id,0)=0 AND status='activo'
+      UNION
+      SELECT lower(trim(provider_name)) AS skey, trim(provider_name) AS name, NULL::int AS supplier_id
+        FROM mother_accounts WHERE COALESCE(owner_admin_id,0)=0 AND trim(COALESCE(provider_name,''))<>''
+    ), supplier_base AS (
+      SELECT skey, max(name) AS name, max(supplier_id) AS supplier_id FROM supplier_names GROUP BY skey
+    ), mother AS (
+      SELECT lower(trim(provider_name)) AS skey,
+             COUNT(*)::int AS mother_accounts,
+             COALESCE(SUM(purchase_cost_total),0)::numeric AS invested,
+             COUNT(*) FILTER (WHERE status='active')::int AS active_mothers,
+             COUNT(*) FILTER (WHERE expiration_date IS NOT NULL AND expiration_date < CURRENT_DATE AND status='active')::int AS expired_active
+        FROM mother_accounts
+       WHERE COALESCE(owner_admin_id,0)=0 AND trim(COALESCE(provider_name,''))<>''
+       GROUP BY 1
+    ), mapped_orders AS (
+      SELECT o.id,o.amount,o.quantity,o.product_id,o.product_cost_snapshot,o.created_at,
+             map.account_id
+        FROM orders o
+        LEFT JOIN LATERAL (
+          SELECT account_id FROM (
+            SELECT o.assigned_platform_account_id AS account_id,1 AS priority
+            UNION ALL
+            SELECT pa2.id,2 FROM platform_accounts pa2 WHERE pa2.assigned_order_id=o.id
+            UNION ALL
+            SELECT (SELECT arl.account_id FROM account_recovery_log arl WHERE arl.order_id=o.id ORDER BY arl.recovered_at DESC LIMIT 1),3
+          ) q WHERE account_id IS NOT NULL ORDER BY priority LIMIT 1
+        ) map ON TRUE
+       WHERE o.status='exito' AND COALESCE(o.owner_admin_id,0)=0
+         AND (o.created_at AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+    ), sales AS (
+      SELECT lower(trim(COALESCE(ma.provider_name,''))) AS skey,
+             COUNT(*)::int AS sales,
+             COALESCE(SUM(mo.amount),0)::numeric AS revenue,
+             COALESCE(SUM(COALESCE(NULLIF(mo.product_cost_snapshot,0),
+               CASE WHEN ma.sell_by_profile THEN COALESCE(NULLIF(ma.profile_cost_override,0), ma.purchase_cost_total / NULLIF(ma.configured_profile_count,0))
+                    ELSE NULLIF(ma.purchase_cost_total,0) END,
+               NULLIF(p.cost_price,0),0)),0)::numeric AS sold_cost
+        FROM mapped_orders mo
+        LEFT JOIN platform_accounts pa ON pa.id=mo.account_id
+        LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
+        LEFT JOIN products p ON p.id=mo.product_id
+       WHERE trim(COALESCE(ma.provider_name,''))<>''
+       GROUP BY 1
+    ), failures AS (
+      SELECT lower(trim(COALESCE(ma.provider_name,''))) AS skey,
+             COUNT(*)::int AS failures,
+             COUNT(*) FILTER (WHERE ar.resolution_type='reemplazo' OR ar.status='reemplazo')::int AS replacements,
+             COALESCE(SUM(CASE WHEN ar.replacement_account_id IS NOT NULL THEN COALESCE(NULLIF(rpa.purchase_price,0),
+               CASE WHEN rma.sell_by_profile THEN COALESCE(NULLIF(rma.profile_cost_override,0),rma.purchase_cost_total/NULLIF(rma.configured_profile_count,0)) ELSE NULLIF(rma.purchase_cost_total,0) END,
+               NULLIF(op.cost_price,0),0) ELSE 0 END),0)::numeric AS replacement_cost
+        FROM account_reports ar
+        JOIN platform_accounts pa ON pa.id=ar.reported_account_id
+        JOIN mother_accounts ma ON ma.id=pa.mother_account_id
+        LEFT JOIN platform_accounts rpa ON rpa.id=ar.replacement_account_id
+        LEFT JOIN mother_accounts rma ON rma.id=rpa.mother_account_id
+        LEFT JOIN orders oo ON oo.id=ar.order_id
+        LEFT JOIN products op ON op.id=oo.product_id
+       WHERE COALESCE(ar.owner_admin_id,0)=0
+         AND (ar.created_at AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+         AND trim(COALESCE(ma.provider_name,''))<>''
+       GROUP BY 1
+    ), service AS (
+      SELECT lower(trim(COALESCE(NULLIF(ssc.supplier_name_snapshot,''),s.name,''))) AS skey,
+             COUNT(*)::int AS service_cases,
+             COUNT(*) FILTER (WHERE ssc.status='resuelto')::int AS resolved_cases,
+             COALESCE(AVG(ssc.attention_rating) FILTER (WHERE ssc.attention_rating BETWEEN 1 AND 5),0)::numeric AS avg_attention_rating,
+             COALESCE(AVG(EXTRACT(EPOCH FROM (ssc.resolved_at-ssc.contacted_at))/3600.0) FILTER (WHERE ssc.resolved_at IS NOT NULL),0)::numeric AS avg_resolution_hours
+        FROM supplier_service_cases ssc LEFT JOIN suppliers s ON s.id=ssc.supplier_id
+       WHERE COALESCE(ssc.owner_admin_id,0)=0
+       GROUP BY 1
+    ), renew AS (
+      SELECT lower(trim(COALESCE(NULLIF(mar.supplier_name_snapshot,''),s.name,''))) AS skey,
+             COUNT(*)::int AS renewals,
+             COUNT(*) FILTER (WHERE mar.result='renovada')::int AS successful_renewals,
+             COALESCE(SUM(mar.renewal_cost),0)::numeric AS renewal_investment
+        FROM mother_account_renewals mar LEFT JOIN suppliers s ON s.id=mar.supplier_id
+       WHERE COALESCE(mar.owner_admin_id,0)=0 GROUP BY 1
+    )
+    SELECT sb.supplier_id,sb.name,
+           COALESCE(m.mother_accounts,0)::int AS mother_accounts,
+           COALESCE(m.active_mothers,0)::int AS active_mothers,
+           COALESCE(m.expired_active,0)::int AS expired_active,
+           COALESCE(m.invested,0)::numeric AS invested,
+           COALESCE(sa.sales,0)::int AS sales,
+           COALESCE(sa.revenue,0)::numeric AS revenue,
+           COALESCE(sa.sold_cost,0)::numeric AS sold_cost,
+           (COALESCE(sa.revenue,0)-COALESCE(sa.sold_cost,0)-COALESCE(f.replacement_cost,0))::numeric AS profit,
+           COALESCE(f.replacement_cost,0)::numeric AS replacement_cost,
+           COALESCE(f.failures,0)::int AS failures,
+           COALESCE(f.replacements,0)::int AS replacements,
+           COALESCE(se.service_cases,0)::int AS service_cases,
+           COALESCE(se.resolved_cases,0)::int AS resolved_cases,
+           COALESCE(se.avg_attention_rating,0)::numeric AS avg_attention_rating,
+           COALESCE(se.avg_resolution_hours,0)::numeric AS avg_resolution_hours,
+           COALESCE(r.renewals,0)::int AS renewals,
+           COALESCE(r.successful_renewals,0)::int AS successful_renewals,
+           COALESCE(r.renewal_investment,0)::numeric AS renewal_investment
+      FROM supplier_base sb
+      LEFT JOIN mother m ON m.skey=sb.skey
+      LEFT JOIN sales sa ON sa.skey=sb.skey
+      LEFT JOIN failures f ON f.skey=sb.skey
+      LEFT JOIN service se ON se.skey=sb.skey
+      LEFT JOIN renew r ON r.skey=sb.skey
+     ORDER BY profit DESC, sb.name ASC`, [start,end]);
+  return result.rows.map(row => ({...row, ...supplierScore(row)})).sort((a,b)=>Number(b.score)-Number(a.score));
+}
+
+app.get('/api/admin/master/provider-performance', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try { const {start,end}=masterDateRange(req,30); const providers=await loadSupplierPerformance(start,end); res.json({from:start,to:end,providers}); }
+  catch(err){ console.error('Provider performance:',err.message); res.status(500).json({error:'No se pudo calcular el rendimiento de proveedores'}); }
+});
+
+app.get('/api/admin/master/provider-service-cases', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try {
+    const rows=await pool.query(`SELECT ssc.*,COALESCE(s.name,ssc.supplier_name_snapshot) AS supplier_name,ma.product_name AS mother_product,ma.account_email AS mother_email
+      FROM supplier_service_cases ssc LEFT JOIN suppliers s ON s.id=ssc.supplier_id LEFT JOIN mother_accounts ma ON ma.id=ssc.mother_account_id
+      WHERE COALESCE(ssc.owner_admin_id,0)=0 ORDER BY ssc.id DESC LIMIT 200`);
+    res.json({rows:rows.rows});
+  } catch(err){res.status(500).json({error:'No se pudo cargar atención de proveedores'});}
+});
+
+app.post('/api/admin/master/provider-service-cases', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const supplierId=Number(req.body?.supplier_id||0)||null;
+    let supplierName=String(req.body?.supplier_name||'').trim().slice(0,160);
+    if(supplierId){const q=await client.query(`SELECT name FROM suppliers WHERE id=$1 AND COALESCE(owner_admin_id,0)=0`,[supplierId]);if(!q.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Proveedor no encontrado'});}supplierName=q.rows[0].name;}
+    if(!supplierName){await client.query('ROLLBACK');return res.status(400).json({error:'Selecciona un proveedor'});}
+    const status=['pendiente','respondio','resuelto','no_resuelto'].includes(String(req.body?.status||''))?String(req.body.status):'pendiente';
+    const rating=Math.max(0,Math.min(5,Number(req.body?.attention_rating||0)))||null;
+    const nowRespond=status==='respondio'||status==='resuelto'; const nowResolved=status==='resuelto'||status==='no_resuelto';
+    const q=await client.query(`INSERT INTO supplier_service_cases(owner_admin_id,supplier_id,supplier_name_snapshot,report_id,mother_account_id,issue,status,contacted_at,responded_at,resolved_at,attention_rating,notes,created_by,created_at,updated_at)
+      VALUES(NULL,$1,$2,$3,$4,$5,$6,COALESCE($7::timestamp,NOW()),CASE WHEN $8 THEN NOW() ELSE NULL END,CASE WHEN $9 THEN NOW() ELSE NULL END,$10,$11,$12,NOW(),NOW()) RETURNING *`,
+      [supplierId,supplierName,Number(req.body?.report_id||0)||null,Number(req.body?.mother_account_id||0)||null,String(req.body?.issue||'').trim().slice(0,500),status,req.body?.contacted_at||null,nowRespond,nowResolved,rating,String(req.body?.notes||'').trim().slice(0,1500),req.user.id]);
+    await recordAdminAudit(client,req,{action:'supplier_service_case_create',entityType:'supplier_service_case',entityId:q.rows[0].id,summary:`Atención proveedor ${supplierName}: ${status}`});
+    await client.query('COMMIT'); res.json({message:'Seguimiento guardado',row:q.rows[0]});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){} console.error(err);res.status(500).json({error:'No se pudo guardar seguimiento'});}finally{client.release();}
+});
+
+app.patch('/api/admin/master/provider-service-cases/:id', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const id=Number(req.params.id||0); const status=String(req.body?.status||'').trim(); const rating=Math.max(0,Math.min(5,Number(req.body?.attention_rating||0)))||null;
+    const q=await pool.query(`UPDATE supplier_service_cases SET status=CASE WHEN $2 IN ('pendiente','respondio','resuelto','no_resuelto') THEN $2 ELSE status END,
+      responded_at=CASE WHEN $2 IN ('respondio','resuelto') AND responded_at IS NULL THEN NOW() ELSE responded_at END,
+      resolved_at=CASE WHEN $2 IN ('resuelto','no_resuelto') AND resolved_at IS NULL THEN NOW() ELSE resolved_at END,
+      attention_rating=COALESCE($3,attention_rating),notes=CASE WHEN trim($4)<>'' THEN $4 ELSE notes END,updated_at=NOW()
+      WHERE id=$1 AND COALESCE(owner_admin_id,0)=0 RETURNING *`,[id,status,rating,String(req.body?.notes||'').trim().slice(0,1500)]);
+    if(!q.rows[0]) return res.status(404).json({error:'Seguimiento no encontrado'}); res.json({message:'Seguimiento actualizado',row:q.rows[0]});
+  }catch(err){res.status(500).json({error:'No se pudo actualizar seguimiento'});}
+});
+
+app.get('/api/admin/master/renewal-history', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const rows=await pool.query(`SELECT mar.*,ma.product_name,ma.account_email,COALESCE(s.name,mar.supplier_name_snapshot,ma.provider_name) AS supplier_name
+      FROM mother_account_renewals mar JOIN mother_accounts ma ON ma.id=mar.mother_account_id LEFT JOIN suppliers s ON s.id=mar.supplier_id
+      WHERE COALESCE(mar.owner_admin_id,0)=0 ORDER BY mar.id DESC LIMIT 300`);
+    const mothers=await pool.query(`SELECT id,product_name,account_email,provider_name,expiration_date,status FROM mother_accounts WHERE COALESCE(owner_admin_id,0)=0 AND status='active' ORDER BY expiration_date NULLS LAST,id DESC LIMIT 500`);
+    res.json({rows:rows.rows,mother_accounts:mothers.rows});
+  }catch(err){res.status(500).json({error:'No se pudo cargar renovaciones'});}
+});
+
+app.post('/api/admin/master/renewal-history', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN'); const motherId=Number(req.body?.mother_account_id||0); if(!motherId){await client.query('ROLLBACK');return res.status(400).json({error:'Selecciona cuenta madre'});}
+    const maQ=await client.query(`SELECT * FROM mother_accounts WHERE id=$1 AND COALESCE(owner_admin_id,0)=0 FOR UPDATE`,[motherId]); const ma=maQ.rows[0]; if(!ma){await client.query('ROLLBACK');return res.status(404).json({error:'Cuenta madre no encontrada'});}
+    const result=String(req.body?.result||'renovada'); const newExpiration=req.body?.new_expiration||null; const cost=Math.max(0,Number(req.body?.renewal_cost||0));
+    if(result==='renovada'&&!newExpiration){await client.query('ROLLBACK');return res.status(400).json({error:'Indica nueva fecha de vencimiento'});}
+    const sQ=ma.provider_name?await client.query(`SELECT id,name FROM suppliers WHERE COALESCE(owner_admin_id,0)=0 AND lower(name)=lower($1) LIMIT 1`,[ma.provider_name]):{rows:[]}; const supplier=sQ.rows[0]||null;
+    const ins=await client.query(`INSERT INTO mother_account_renewals(owner_admin_id,mother_account_id,supplier_id,supplier_name_snapshot,previous_expiration,new_expiration,renewal_cost,result,notes,created_by,created_at)
+      VALUES(NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *`,[motherId,supplier?.id||null,supplier?.name||ma.provider_name||'',ma.expiration_date,newExpiration,cost,result,String(req.body?.notes||'').trim().slice(0,1200),req.user.id]);
+    if(result==='renovada') await client.query(`UPDATE mother_accounts SET expiration_date=$2,status='active',updated_at=NOW() WHERE id=$1`,[motherId,newExpiration]);
+    if(cost>0) await client.query(`INSERT INTO inventory_purchases(owner_admin_id,supplier_id,supplier_name_snapshot,purchase_date,description,item_count,total_amount,notes,created_by,created_at)
+      VALUES(NULL,$1,$2,CURRENT_DATE,$3,1,$4,$5,$6,NOW())`,[supplier?.id||null,supplier?.name||ma.provider_name||'',`Renovación cuenta madre #${motherId} · ${ma.product_name||''}`,cost,`Registrada desde historial de renovaciones. ${String(req.body?.notes||'').trim()}`,req.user.id]);
+    await recordAdminAudit(client,req,{action:'mother_account_renewal',entityType:'mother_account',entityId:motherId,summary:`${result}: ${ma.product_name||''} · $${cost.toFixed(2)}`,metadata:{previous_expiration:ma.expiration_date,new_expiration:newExpiration}});
+    await client.query('COMMIT'); res.json({message:'Renovación registrada',row:ins.rows[0]});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){}console.error(err);res.status(500).json({error:'No se pudo registrar renovación'});}finally{client.release();}
+});
+
+app.get('/api/admin/master/advanced-alerts', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const {start,end}=masterDateRange(req,30); const providers=await loadSupplierPerformance(start,end);
+    const delayed=await pool.query(`SELECT ar.id,ar.created_at,ar.issue_type,u.name,u.email,EXTRACT(EPOCH FROM (NOW()-ar.created_at))/3600 AS age_hours
+      FROM account_reports ar LEFT JOIN users u ON u.id=ar.user_id WHERE COALESCE(ar.owner_admin_id,0)=0 AND ar.status='pendiente' AND ar.created_at < NOW()-INTERVAL '12 hours' ORDER BY ar.created_at ASC LIMIT 30`);
+    const balance=await pool.query(`WITH latest AS (SELECT DISTINCT ON(user_id) user_id,balance_after FROM balance_ledger WHERE COALESCE(owner_admin_id,0)=0 ORDER BY user_id,id DESC)
+      SELECT u.id,u.name,u.email,u.balance,l.balance_after,(u.balance-l.balance_after) AS difference FROM users u JOIN latest l ON l.user_id=u.id WHERE u.role<>'admin' AND ABS(u.balance-l.balance_after)>0.009 ORDER BY ABS(u.balance-l.balance_after) DESC LIMIT 30`);
+    const supplierAlerts=providers.filter(p=>Number(p.sales)>=3 && (Number(p.failure_rate)>=10 || Number(p.score)<55)).slice(0,20);
+    res.json({from:start,to:end,supplier_alerts:supplierAlerts,delayed_reports:delayed.rows,balance_anomalies:balance.rows});
+  }catch(err){res.status(500).json({error:'No se pudieron calcular alertas avanzadas'});}
+});
+
+app.get('/api/admin/master/sessions', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const rows=await pool.query(`SELECT s.id,s.session_id,s.user_id,s.ip_address,s.user_agent,s.created_at,s.last_seen_at,s.revoked_at,u.name,u.email,u.role
+      FROM auth_sessions s JOIN users u ON u.id=s.user_id ORDER BY (s.revoked_at IS NULL) DESC,s.last_seen_at DESC LIMIT 300`);
+    res.json({rows:rows.rows,current_session_id:req.user.sid||null});
+  }catch(err){res.status(500).json({error:'No se pudieron cargar sesiones'});}
+});
+
+app.post('/api/admin/master/sessions/:id/revoke', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{const id=Number(req.params.id||0);const q=await pool.query(`UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,NOW()),revoked_by=$2 WHERE id=$1 RETURNING user_id,session_id`,[id,req.user.id]);if(!q.rows[0])return res.status(404).json({error:'Sesión no encontrada'});await recordAdminAudit(pool,req,{action:'session_revoke',entityType:'auth_session',entityId:id,summary:`Sesión cerrada del usuario #${q.rows[0].user_id}`});res.json({message:'Sesión cerrada'});}catch(err){res.status(500).json({error:'No se pudo cerrar sesión'});}
+});
+
+app.post('/api/admin/master/users/:id/revoke-sessions', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  const client=await pool.connect();try{await client.query('BEGIN');const uid=Number(req.params.id||0);await client.query(`UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,NOW()),revoked_by=$2 WHERE user_id=$1 AND revoked_at IS NULL`,[uid,req.user.id]);await client.query(`UPDATE users SET token_version=COALESCE(token_version,0)+1 WHERE id=$1`,[uid]);await recordAdminAudit(client,req,{action:'user_sessions_revoke_all',entityType:'user',entityId:uid,summary:'Todas las sesiones del usuario fueron cerradas'});await client.query('COMMIT');res.json({message:'Todas las sesiones fueron cerradas'});}catch(err){try{await client.query('ROLLBACK')}catch(_){}res.status(500).json({error:'No se pudieron cerrar las sesiones'});}finally{client.release();}
+});
+
+app.get('/api/admin/master/admin-permissions', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{const rows=await pool.query(`SELECT id,name,email,role,COALESCE(is_subadmin,false) AS is_subadmin,COALESCE(admin_permissions,'{}'::jsonb) AS admin_permissions,is_enabled FROM users WHERE role='admin' ORDER BY id`);res.json({rows:rows.rows,available:['view_costs','view_profit','manage_balances','manage_suppliers','manage_inventory','manage_reports','manage_panels','export_data']});}catch(err){res.status(500).json({error:'No se pudieron cargar permisos'});}
+});
+app.put('/api/admin/master/admin-permissions/:id', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{const id=Number(req.params.id||0);if(id===Number(req.user.id))return res.status(400).json({error:'Los permisos del administrador principal no se restringen desde aquí'});const allowed=['view_costs','view_profit','manage_balances','manage_suppliers','manage_inventory','manage_reports','manage_panels','export_data'];const raw=req.body?.permissions&&typeof req.body.permissions==='object'?req.body.permissions:{};const clean={};allowed.forEach(k=>clean[k]=Boolean(raw[k]));const q=await pool.query(`UPDATE users SET admin_permissions=$2::jsonb WHERE id=$1 AND role='admin' RETURNING id,name,email,admin_permissions`,[id,JSON.stringify(clean)]);if(!q.rows[0])return res.status(404).json({error:'Administrador no encontrado'});await recordAdminAudit(pool,req,{action:'admin_permissions_update',entityType:'user',entityId:id,summary:`Permisos administrativos actualizados: ${q.rows[0].email}`});res.json({message:'Permisos guardados',row:q.rows[0]});}catch(err){res.status(500).json({error:'No se pudieron guardar permisos'});}
+});
+
+app.get('/api/admin/master/data-diagnostics', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const checks=await Promise.all([
+      pool.query(`SELECT COUNT(*)::int total,array_agg(id ORDER BY id DESC) FILTER(WHERE id IS NOT NULL) sample FROM orders WHERE status='exito' AND COALESCE(owner_admin_id,0)=0 AND product_id IS NULL AND trim(COALESCE(product_name_snapshot,''))=''`),
+      pool.query(`SELECT COUNT(*)::int total,array_agg(o.id ORDER BY o.id DESC) sample FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE o.status='exito' AND COALESCE(o.owner_admin_id,0)=0 AND COALESCE(NULLIF(o.product_cost_snapshot,0),NULLIF(p.cost_price,0),0)=0`),
+      pool.query(`SELECT COUNT(*)::int total,array_agg(id ORDER BY id DESC) sample FROM platform_accounts WHERE COALESCE(owner_admin_id,0)=0 AND mother_account_id IS NULL`),
+      pool.query(`SELECT COUNT(*)::int total FROM (SELECT lower(account_email),lower(COALESCE(profile_name,'')),lower(COALESCE(profile_pin,'')),COUNT(*) c FROM platform_accounts WHERE COALESCE(owner_admin_id,0)=0 AND status='available' GROUP BY 1,2,3 HAVING COUNT(*)>1) d`),
+      pool.query(`SELECT COUNT(*)::int total,array_agg(ar.id ORDER BY ar.id DESC) sample FROM account_reports ar LEFT JOIN orders o ON o.id=ar.order_id WHERE ar.order_id IS NOT NULL AND o.id IS NULL`),
+      pool.query(`SELECT COUNT(*)::int total FROM admin_panels WHERE owner_user_id IS NULL`)
+    ]);
+    const labels=['Pedidos exitosos sin producto identificable','Ventas exitosas sin costo conocido','Cuentas de inventario sin cuenta madre','Credenciales/perfiles disponibles potencialmente duplicados','Reportes con pedido inexistente','Paneles sin propietario enlazado'];
+    const severity=['high','medium','medium','high','high','high'];
+    const rows=checks.map((q,i)=>({key:`check_${i+1}`,label:labels[i],severity:severity[i],total:Number(q.rows[0]?.total||0),sample:(q.rows[0]?.sample||[]).slice?.(0,20)||[]}));
+    const penalty=rows.reduce((a,r)=>a+(r.total>0?(r.severity==='high'?12:r.severity==='medium'?6:3):0),0);res.json({health_score:Math.max(0,100-penalty),rows,generated_at:new Date().toISOString()});
+  }catch(err){console.error('Diagnostics',err);res.status(500).json({error:'No se pudo ejecutar diagnóstico'});}
+});
+
+app.get('/api/admin/master/isolation-audit', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const q=await pool.query(`WITH RECURSIVE ancestry AS (
+      SELECT u.id root_id,u.id current_id,u.owner_user_id,0 depth FROM users u
+      UNION ALL SELECT a.root_id,p.id,p.owner_user_id,a.depth+1 FROM ancestry a JOIN users p ON p.id=a.owner_user_id WHERE a.owner_user_id IS NOT NULL AND a.depth<8
+    ), panel_bound AS (SELECT DISTINCT a.root_id FROM ancestry a JOIN admin_panels ap ON ap.owner_user_id=a.current_id)
+    SELECT
+      (SELECT COUNT(*) FROM orders o JOIN panel_bound pb ON pb.root_id=o.user_id WHERE COALESCE(o.owner_admin_id,0)=0)::int AS panel_orders_in_global,
+      (SELECT COUNT(*) FROM account_reports ar JOIN panel_bound pb ON pb.root_id=ar.user_id WHERE COALESCE(ar.owner_admin_id,0)=0)::int AS panel_reports_in_global,
+      (SELECT COUNT(*) FROM balance_requests br JOIN panel_bound pb ON pb.root_id=br.user_id WHERE COALESCE(br.owner_admin_id,0)=0)::int AS panel_balance_in_global,
+      (SELECT COUNT(*) FROM products WHERE owner_admin_id IS NOT NULL AND owner_admin_id<>0)::int AS tenant_products,
+      (SELECT COUNT(*) FROM platform_accounts WHERE owner_admin_id IS NOT NULL AND owner_admin_id<>0)::int AS tenant_accounts`);
+    const r=q.rows[0]||{};const leaks=Number(r.panel_orders_in_global||0)+Number(r.panel_reports_in_global||0)+Number(r.panel_balance_in_global||0);res.json({status:leaks===0?'ok':'review',potential_scope_leaks:leaks,details:r,note:'Auditoría de datos. La revisión final de código/endpoint se conserva en el checklist V1.8.'});
+  }catch(err){res.status(500).json({error:'No se pudo ejecutar auditoría de aislamiento'});}
+});
+
+app.get('/api/admin/master/backup-checkpoints', authMiddleware, adminMiddleware, mainAdminMiddleware, async(req,res)=>{try{const rows=await pool.query(`SELECT * FROM backup_checkpoints ORDER BY backup_date DESC,id DESC LIMIT 100`);res.json({rows:rows.rows});}catch(err){res.status(500).json({error:'No se pudieron cargar respaldos registrados'});}});
+app.post('/api/admin/master/backup-checkpoints', authMiddleware, adminMiddleware, mainAdminMiddleware, async(req,res)=>{try{const q=await pool.query(`INSERT INTO backup_checkpoints(backup_date,backup_type,location_label,size_label,verified,notes,created_by,created_at) VALUES(COALESCE($1::timestamp,NOW()),$2,$3,$4,$5,$6,$7,NOW()) RETURNING *`,[req.body?.backup_date||null,String(req.body?.backup_type||'pg_dump').slice(0,80),String(req.body?.location_label||'').slice(0,300),String(req.body?.size_label||'').slice(0,80),Boolean(req.body?.verified),String(req.body?.notes||'').slice(0,1200),req.user.id]);await recordAdminAudit(pool,req,{action:'backup_checkpoint_create',entityType:'backup',entityId:q.rows[0].id,summary:`Respaldo registrado: ${q.rows[0].location_label||q.rows[0].backup_type}`});res.json({message:'Respaldo registrado',row:q.rows[0]});}catch(err){res.status(500).json({error:'No se pudo registrar respaldo'});}});
+
+app.get('/api/admin/master/migrations', authMiddleware, adminMiddleware, mainAdminMiddleware, async(req,res)=>{try{const rows=await pool.query(`SELECT * FROM schema_migrations ORDER BY applied_at DESC,version DESC`);res.json({rows:rows.rows});}catch(err){res.status(500).json({error:'No se pudo cargar estado de migraciones'});}});
+
+app.get('/api/admin/master/export/:kind', authMiddleware, adminMiddleware, mainAdminMiddleware, async(req,res)=>{
+  try{
+    const kind=String(req.params.kind||'').toLowerCase();const {start,end}=masterDateRange(req,30);let rows=[],columns=[],filename=`${kind}-${start}-${end}.csv`;
+    if(kind==='ventas'){
+      const q=await pool.query(`SELECT o.id AS pedido,(o.created_at AT TIME ZONE 'America/Mexico_City') AS fecha,u.name AS comprador,u.email,COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Producto') AS producto,o.amount AS venta,COALESCE(NULLIF(o.product_cost_snapshot,0),NULLIF(p.cost_price,0),0) AS costo,o.status,o.payment_source FROM orders o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN products p ON p.id=o.product_id WHERE COALESCE(o.owner_admin_id,0)=0 AND (o.created_at AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date ORDER BY o.id DESC`,[start,end]);rows=q.rows;columns=['pedido','fecha','comprador','email','producto','venta','costo','status','payment_source'];
+    }else if(kind==='inventario'){
+      const q=await pool.query(`SELECT pa.id,pa.platform,pa.product_name,pa.account_email,pa.profile_name,pa.status,pa.entry_source,pa.official_purchase_date,pa.expires_at,ma.provider_name,ma.purchase_cost_total,ma.expiration_date AS mother_expiration FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id WHERE COALESCE(pa.owner_admin_id,0)=0 ORDER BY pa.id DESC`);rows=q.rows;
+    }else if(kind==='proveedores'){
+      rows=await loadSupplierPerformance(start,end);columns=['name','score','classification','mother_accounts','invested','sales','revenue','sold_cost','profit','roi_pct','failures','failure_rate','replacements','replacement_rate','avg_attention_rating','avg_resolution_hours','renewals','successful_renewals','recommendation'];
+    }else if(kind==='saldos'){
+      const q=await pool.query(`SELECT bl.id,bl.created_at,u.name,u.email,bl.movement_type,bl.amount,bl.balance_before,bl.balance_after,bl.reference_type,bl.reference_id,bl.note FROM balance_ledger bl LEFT JOIN users u ON u.id=bl.user_id WHERE COALESCE(bl.owner_admin_id,0)=0 AND (bl.created_at AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date ORDER BY bl.id DESC`,[start,end]);rows=q.rows;
+    }else if(kind==='renovaciones'){
+      const q=await pool.query(`SELECT mar.id,mar.created_at,ma.product_name,ma.account_email,mar.supplier_name_snapshot,mar.previous_expiration,mar.new_expiration,mar.renewal_cost,mar.result,mar.notes FROM mother_account_renewals mar JOIN mother_accounts ma ON ma.id=mar.mother_account_id WHERE COALESCE(mar.owner_admin_id,0)=0 ORDER BY mar.id DESC`);rows=q.rows;
+    }else if(kind==='reembolsos'){
+      const q=await pool.query(`SELECT ar.id AS reporte,ar.order_id AS pedido,ar.reviewed_at AS fecha,u.name,u.email,ar.refund_amount,ar.resolution_type,ar.issue_type FROM account_reports ar LEFT JOIN users u ON u.id=ar.user_id WHERE COALESCE(ar.owner_admin_id,0)=0 AND COALESCE(ar.refund_amount,0)>0 AND (COALESCE(ar.reviewed_at,ar.created_at) AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date ORDER BY COALESCE(ar.reviewed_at,ar.created_at) DESC`,[start,end]);rows=q.rows;
+    }else return res.status(400).json({error:'Exportación no válida'});
+    const csv=rowsToCsv(rows,columns);res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);res.send(csv);
+  }catch(err){console.error('Export',err);res.status(500).json({error:'No se pudo generar exportación'});}
 });
 
 initDatabase()
