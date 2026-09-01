@@ -941,23 +941,23 @@ function normalizeProductType(value) {
 }
 
 function getPlatformAccountPurchaseCost(account, fallbackCost = 0) {
+  // Un 0 heredado de inventario significa normalmente "costo no capturado".
+  // Priorizamos costos positivos reales y, si faltan, usamos el costo configurado
+  // en Productos. Solo conservamos 0 cuando tampoco existe un fallback positivo.
   const rawEffectivePrice = account?.effective_purchase_price;
-  if (rawEffectivePrice !== null && rawEffectivePrice !== undefined && String(rawEffectivePrice).trim() !== "") {
-    const effectivePrice = Number(rawEffectivePrice);
-    if (Number.isFinite(effectivePrice)) return Math.max(0, effectivePrice);
-  }
+  const effectivePrice = rawEffectivePrice !== null && rawEffectivePrice !== undefined && String(rawEffectivePrice).trim() !== ""
+    ? Number(rawEffectivePrice) : null;
+  if (Number.isFinite(effectivePrice) && effectivePrice > 0) return effectivePrice;
 
   const rawPurchasePrice = account?.purchase_price;
-  if (
-    rawPurchasePrice !== null &&
-    rawPurchasePrice !== undefined &&
-    String(rawPurchasePrice).trim() !== ""
-  ) {
-    const purchasePrice = Number(rawPurchasePrice);
-    if (Number.isFinite(purchasePrice)) return Math.max(0, purchasePrice);
-  }
+  const purchasePrice = rawPurchasePrice !== null && rawPurchasePrice !== undefined && String(rawPurchasePrice).trim() !== ""
+    ? Number(rawPurchasePrice) : null;
+  if (Number.isFinite(purchasePrice) && purchasePrice > 0) return purchasePrice;
 
   const fallback = Number(fallbackCost);
+  if (Number.isFinite(fallback) && fallback > 0) return fallback;
+  if (Number.isFinite(effectivePrice)) return Math.max(0, effectivePrice);
+  if (Number.isFinite(purchasePrice)) return Math.max(0, purchasePrice);
   return Number.isFinite(fallback) ? Math.max(0, fallback) : 0;
 }
 
@@ -6407,26 +6407,34 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
     const ownScope = `(owner_admin_id IS NULL OR owner_admin_id = 0)`;
     const [sales, pendingOrders, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance] = await Promise.all([
       pool.query(`WITH todays AS (
-                    SELECT o.*
+                    SELECT o.*, COALESCE(p.cost_price, 0) AS current_product_cost
                     FROM orders o
+                    LEFT JOIN products p ON p.id = o.product_id
                     WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id = 0)
                       AND o.status='exito'
-                      AND (o.created_at AT TIME ZONE 'America/Mexico_City')::date = (NOW() AT TIME ZONE 'America/Mexico_City')::date
+                      -- created_at es TIMESTAMP sin zona y se guarda en UTC en Railway.
+                      -- Primero lo interpretamos como UTC y luego lo convertimos a Ciudad de México.
+                      AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date
+                          = (NOW() AT TIME ZONE 'America/Mexico_City')::date
                   ), costs AS (
                     SELECT o.id,
-                           CASE WHEN COALESCE(o.product_cost_snapshot,0) > 0 THEN o.product_cost_snapshot
-                                ELSE COALESCE((
-                                  SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
-                                  FROM platform_accounts pa
-                                  LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
-                                  WHERE pa.assigned_order_id = o.id
-                                    AND COALESCE(pa.owner_admin_id,0)=0
-                                ),0) END AS effective_cost
+                           COALESCE(
+                             NULLIF(o.product_cost_snapshot, 0),
+                             NULLIF((
+                               SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
+                               FROM platform_accounts pa
+                               LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+                               WHERE pa.assigned_order_id = o.id
+                                 AND COALESCE(pa.owner_admin_id,0)=0
+                             ), 0),
+                             NULLIF(o.current_product_cost, 0),
+                             0
+                           ) AS effective_cost
                     FROM todays o
                   )
                   SELECT COUNT(*)::int AS orders,
                          COALESCE(SUM(o.amount),0)::numeric AS revenue,
-                         COALESCE(SUM(GREATEST(o.amount - COALESCE(c.effective_cost,0),0)),0)::numeric AS gross_profit
+                         COALESCE(SUM(o.amount - COALESCE(c.effective_cost,0)),0)::numeric AS gross_profit
                   FROM todays o
                   LEFT JOIN costs c ON c.id=o.id`),
       pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso')`),
@@ -6434,7 +6442,7 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(amount),0)::numeric AS amount FROM balance_requests WHERE ${ownScope} AND status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS available FROM platform_accounts WHERE ${ownScope} AND status IN ('available','disponible')`),
       pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE ${ownScope} AND status='recovery_pending'`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM mother_accounts WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL AND expiration_date <= CURRENT_DATE + INTERVAL '7 days'`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM mother_accounts WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL AND expiration_date <= ((NOW() AT TIME ZONE 'America/Mexico_City')::date + 7)`),
       pool.query(`SELECT o.id, o.created_at, o.status, o.amount, COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Pedido') AS title, u.name AS user_name, u.email AS user_email
                   FROM orders o LEFT JOIN products p ON p.id=o.product_id LEFT JOIN users u ON u.id=o.user_id
                   WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso')
@@ -8072,6 +8080,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
          u.name AS seller_name, u.email AS seller_email, u.owner_user_id AS distributor_id,
          distributor.name AS distributor_name,
          p.name AS current_product_name,
+         COALESCE(p.cost_price, 0) AS current_product_cost,
          COALESCE(refunds.refund_amount, 0) AS refund_amount,
          COALESCE(earnings.final_earning, 0) AS distributor_final_earning,
          COALESCE(earnings.movement_count, 0)::int AS distributor_earning_movements
@@ -8166,6 +8175,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     const sellerSales = new Map();
     const productSales = new Map();
     let grossSales = 0, refunds = 0, distributorEarnings = 0, adminRevenue = 0, saleCost = 0;
+    let productCostFallbackOrders = 0, inventoryDerivedCostOrders = 0, snapshotCostOrders = 0;
 
     for (const row of salesResult.rows) {
       const gross = Math.max(0, money(row.amount));
@@ -8179,8 +8189,9 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       }
       const revenue = money(gross - refund - distEarn);
       const snapshotCost = Math.max(0, money(row.product_cost_snapshot));
+      const currentProductCost = Math.max(0, money(row.current_product_cost));
       const productName = String(row.product_name_snapshot || row.current_product_name || 'Sin producto').trim();
-      const item = { ...row, gross, refund, distributor_earning: distEarn, admin_revenue: revenue, sale_cost_snapshot: snapshotCost, sale_cost: snapshotCost, product_name: productName };
+      const item = { ...row, gross, refund, distributor_earning: distEarn, admin_revenue: revenue, sale_cost_snapshot: snapshotCost, current_product_cost: currentProductCost, sale_cost: snapshotCost, cost_source: snapshotCost > 0 ? 'snapshot' : 'pending', product_name: productName };
       orderMap.set(Number(row.id), item);
       grossSales += gross; refunds += refund; distributorEarnings += distEarn; adminRevenue += revenue;
       const sellerKey = String(Number(row.user_id || 0));
@@ -8238,7 +8249,21 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         const stat = motherStats.get(Number(link.mother_account_id));
         return sum + Math.max(0, Number(stat?.effective_unit_cost || 0));
       }, 0);
-      order.sale_cost = money(Number(order.sale_cost_snapshot || 0) > 0 ? order.sale_cost_snapshot : derivedCost);
+      const snapshotCost = Math.max(0, Number(order.sale_cost_snapshot || 0));
+      const productFallbackCost = Math.max(0, Number(order.current_product_cost || 0));
+      if (snapshotCost > 0) {
+        order.sale_cost = money(snapshotCost);
+        order.cost_source = 'snapshot';
+        snapshotCostOrders += 1;
+      } else if (derivedCost > 0) {
+        order.sale_cost = money(derivedCost);
+        order.cost_source = 'inventario';
+        inventoryDerivedCostOrders += 1;
+      } else {
+        order.sale_cost = money(productFallbackCost);
+        order.cost_source = productFallbackCost > 0 ? 'producto_actual' : 'sin_costo';
+        if (productFallbackCost > 0) productCostFallbackOrders += 1;
+      }
       saleCost += order.sale_cost;
 
       if (!links.length) {
@@ -8251,8 +8276,8 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         if (!stat) continue;
         stat.orders.add(orderId);
         stat.admin_revenue += order.admin_revenue * share;
-        if (Number(order.sale_cost_snapshot || 0) > 0) stat.sale_cost += order.sale_cost * share;
-        else stat.sale_cost += Math.max(0, Number(stat.effective_unit_cost || 0));
+        if (order.cost_source === 'inventario') stat.sale_cost += Math.max(0, Number(stat.effective_unit_cost || 0));
+        else stat.sale_cost += order.sale_cost * share;
       }
     }
 
@@ -8351,6 +8376,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       summary: {
         orders: salesResult.rows.length, gross_sales: money(grossSales), refunds: money(refunds), distributor_earnings: money(distributorEarnings),
         admin_revenue: money(adminRevenue), sale_cost: money(saleCost), replacement_cost: money(replacementCost), replacement_cost_missing: replacementCostMissing,
+        cost_sources: { snapshot_orders: snapshotCostOrders, inventory_orders: inventoryDerivedCostOrders, product_current_orders: productCostFallbackOrders },
         profit: adjustedProfit, margin_percent: adminRevenue > 0 ? Number(((adjustedProfit / adminRevenue) * 100).toFixed(2)) : 0,
         failures: reportsResult.rows.length, replacements: replacementCount, refund_reports: refundReportCount
       },
@@ -8418,7 +8444,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
-    const costExpr = `COALESCE(orders.product_cost_snapshot, products.cost_price, 0)`;
+    const costExpr = `COALESCE(NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)`;
     const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
@@ -8725,8 +8751,8 @@ app.get("/api/admin/monthly-report", authMiddleware, adminMiddleware, async (req
          COALESCE(NULLIF(orders.product_name_snapshot, ''), products.name) AS product_name,
          COALESCE(NULLIF(orders.product_category_snapshot, ''), products.category, 'Otros') AS product_category,
          orders.amount,
-         COALESCE(orders.product_cost_snapshot, products.cost_price, 0) AS cost_price,
-         (orders.amount - COALESCE(orders.product_cost_snapshot, products.cost_price, 0)) AS profit,
+         COALESCE(NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0) AS cost_price,
+         (orders.amount - COALESCE(NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)) AS profit,
          orders.status,
          to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'YYYY-MM-DD HH24:MI:SS') AS fecha_mexico
        FROM orders

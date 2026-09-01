@@ -91,6 +91,16 @@
     set('pqFailures',String(summary.failures || 0));
     set('pqReplacements',String(summary.replacements || 0));
 
+    const saleCostCard=document.getElementById('pqSaleCost')?.closest('.dash-card');
+    if(saleCostCard){
+      let note=saleCostCard.querySelector('.pq-cost-source-note');
+      const fallback=Number(summary.cost_sources?.product_current_orders || 0);
+      if(fallback>0){
+        if(!note){note=document.createElement('div');note.className='small-text pq-cost-source-note';saleCostCard.querySelector('.dash-value')?.parentElement?.appendChild(note);}
+        note.textContent=`${fallback} venta(s) usan el costo actual configurado en Productos`;
+      }else if(note){note.remove();}
+    }
+
     const target=document.getElementById('pqReplacementCost')?.closest('.dash-card');
     if(target){
       let note=target.querySelector('.pq-cost-warning');

@@ -184,7 +184,7 @@
       const d=await api('/api/admin/master/operations');
       if(kpis) kpis.innerHTML=`
         <button class="master-kpi master-kpi-money" onclick="openSalesReport()"><span class="master-kpi-top"><i>💵</i> Ventas hoy</span><b>$${money(d.sales_today?.revenue)}</b><small>${Number(d.sales_today?.orders||0)} pedidos completados</small></button>
-        <button class="master-kpi master-kpi-profit" onclick="showSection('profit-quality')"><span class="master-kpi-top"><i>📈</i> Utilidad bruta</span><b>$${money(d.sales_today?.gross_profit)}</b><small>Venta menos costo real de inventario</small></button>
+        <button class="master-kpi master-kpi-profit" onclick="showSection('profit-quality')"><span class="master-kpi-top"><i>📈</i> Utilidad bruta</span><b>$${money(d.sales_today?.gross_profit)}</b><small>Venta menos costo registrado / producto</small></button>
         <button class="master-kpi ${Number(d.pending_orders)>0?'master-kpi-warn':''}" onclick="openOrdersFromDashboard()"><span class="master-kpi-top"><i>▤</i> Pedidos pendientes</span><b>${Number(d.pending_orders||0)}</b><small>Por atender o en proceso</small></button>
         <button class="master-kpi ${Number(d.pending_reports)>0?'master-kpi-danger':''}" onclick="openAccountReportsFromDashboard()"><span class="master-kpi-top"><i>⚠️</i> Fallas pendientes</span><b>${Number(d.pending_reports||0)}</b><small>Requieren respuesta</small></button>
         <button class="master-kpi ${Number(d.pending_balance_requests)>0?'master-kpi-warn':''}" onclick="openBalanceRequests()"><span class="master-kpi-top"><i>💳</i> Saldo por validar</span><b>${Number(d.pending_balance_requests||0)}</b><small>$${money(d.pending_balance_amount)} solicitado</small></button>
