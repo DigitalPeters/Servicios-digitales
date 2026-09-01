@@ -1,7 +1,7 @@
 {
   "name": "servicios-digitales",
-  "version": "1.6.1",
-  "description": "Servicios Digitales Peters - Version Maestra V1.6.1 Reembolsos y navegacion",
+  "version": "1.6.2",
+  "description": "Servicios Digitales Peters - Version Maestra V1.6.2 Reembolsos unificados",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

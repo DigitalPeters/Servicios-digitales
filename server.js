@@ -7186,106 +7186,46 @@ app.delete('/api/admin/master/cash-movements/:id', authMiddleware, adminMiddlewa
   }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error eliminando movimiento caja:',err.message);res.status(500).json({error:'No se pudo eliminar el movimiento'});}finally{client.release();}
 });
 
-app.get('/api/admin/master/finance-summary', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
-  try{
-    const {startDate,endDate}=normalizeAnalyticsDateRange(req.query.start_date,req.query.end_date);
-    const [sales,replacements,cash,purchases,categories]=await Promise.all([
-      pool.query(`WITH base AS (
-        SELECT o.id,o.amount,GREATEST(COALESCE(o.quantity,1),1)::int AS qty,o.product_cost_snapshot,COALESCE(p.cost_price,0) AS product_cost,
-               CASE WHEN COALESCE(refs.refund_amount,0)>0 THEN LEAST(o.amount,refs.refund_amount) WHEN COALESCE(o.refunded,0)=1 THEN o.amount ELSE 0 END AS refund_amount,
-               GREATEST(0,COALESCE(earn.final_earning,0)) AS distributor_earning,
-               COALESCE((SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')}) FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
-                 WHERE COALESCE(pa.owner_admin_id,0)=0 AND (pa.assigned_order_id=o.id OR pa.id=o.assigned_platform_account_id OR EXISTS(SELECT 1 FROM account_recovery_log arl WHERE arl.order_id=o.id AND arl.account_id=pa.id))),0) AS inventory_cost
-        FROM orders o LEFT JOIN products p ON p.id=o.product_id
-        LEFT JOIN LATERAL (SELECT COALESCE(SUM(ar.refund_amount),0) refund_amount FROM account_reports ar WHERE ar.order_id=o.id AND COALESCE(ar.refund_amount,0)>0) refs ON TRUE
-        LEFT JOIN LATERAL (SELECT COALESCE(SUM(del.amount),0) final_earning FROM distributor_earnings_ledger del WHERE del.order_id=o.id AND del.movement_type IN ('venta','ajuste_reembolso')) earn ON TRUE
-        WHERE o.status='exito' AND COALESCE(o.owner_admin_id,0)=0
-          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
-      ), calc AS (
-        SELECT *,COALESCE(NULLIF(product_cost_snapshot,0),NULLIF(inventory_cost,0),NULLIF(product_cost,0)*qty,0) AS effective_cost FROM base
-      )
-      SELECT COUNT(*)::int orders,
-             COUNT(*) FILTER (WHERE refund_amount > 0)::int refund_orders,
-             COALESCE(SUM(amount),0)::numeric gross_sales,COALESCE(SUM(refund_amount),0)::numeric refunds,
-             COALESCE(SUM(distributor_earning),0)::numeric distributor_earnings,
-             COALESCE(SUM(amount-refund_amount-distributor_earning),0)::numeric admin_revenue,
-             COALESCE(SUM(effective_cost),0)::numeric sale_cost
-      FROM calc`,[startDate,endDate]),
-      pool.query(`SELECT COALESCE(SUM(${effectivePlatformAccountCostSql('pa','ma')}),0)::numeric replacement_cost,COUNT(*)::int replacements
-        FROM account_reports ar JOIN platform_accounts pa ON pa.id=ar.replacement_account_id LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
-        WHERE COALESCE(ar.owner_admin_id,0)=0 AND ar.replacement_account_id IS NOT NULL
-          AND ((ar.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
-      pool.query(`SELECT COALESCE(SUM(amount) FILTER(WHERE movement_type='ingreso'),0)::numeric manual_income,
-                         COALESCE(SUM(amount) FILTER(WHERE movement_type='gasto'),0)::numeric manual_expenses,
-                         COALESCE(SUM(amount) FILTER(WHERE movement_type='ingreso' AND affects_profit),0)::numeric profit_income,
-                         COALESCE(SUM(amount) FILTER(WHERE movement_type='gasto' AND affects_profit),0)::numeric profit_expenses
-                  FROM admin_cash_movements WHERE COALESCE(owner_admin_id,0)=0 AND movement_date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
-      pool.query(`SELECT COALESCE(SUM(total_amount),0)::numeric invested,COALESCE(SUM(item_count),0)::int units,COUNT(*)::int purchases
-                  FROM inventory_purchases WHERE COALESCE(owner_admin_id,0)=0 AND purchase_date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
-      pool.query(`SELECT movement_type,category,COALESCE(SUM(amount),0)::numeric total,COUNT(*)::int movements
-                  FROM admin_cash_movements WHERE COALESCE(owner_admin_id,0)=0 AND movement_date BETWEEN $1::date AND $2::date
-                  GROUP BY movement_type,category ORDER BY movement_type,ABS(SUM(amount)) DESC`,[startDate,endDate])
-    ]);
-    const s=sales.rows[0]||{},r=replacements.rows[0]||{},c=cash.rows[0]||{},p=purchases.rows[0]||{};
-    const adminRevenue=Number(s.admin_revenue||0),saleCost=Number(s.sale_cost||0),replacementCost=Number(r.replacement_cost||0);
-    const operatingExpenses=Number(c.profit_expenses||0),otherIncome=Number(c.profit_income||0);
-    const operatingProfit=adminRevenue-saleCost-replacementCost;
-    const netProfit=operatingProfit-operatingExpenses+otherIncome;
-    res.json({start_date:startDate,end_date:endDate,timezone:'America/Mexico_City',summary:{
-      orders:Number(s.orders||0),refund_orders:Number(s.refund_orders||0),gross_sales:Number(s.gross_sales||0),refunds:Number(s.refunds||0),distributor_earnings:Number(s.distributor_earnings||0),
-      admin_revenue:adminRevenue,sale_cost:saleCost,replacement_cost:replacementCost,replacements:Number(r.replacements||0),operating_profit:operatingProfit,
-      other_income:otherIncome,operating_expenses:operatingExpenses,net_profit:netProfit,
-      inventory_investment:Number(p.invested||0),inventory_purchase_units:Number(p.units||0),inventory_purchases:Number(p.purchases||0),
-      manual_cash_income:Number(c.manual_income||0),manual_cash_expenses:Number(c.manual_expenses||0),manual_cash_balance:Number(c.manual_income||0)-Number(c.manual_expenses||0),
-      margin_percent:adminRevenue>0?Number(((netProfit/adminRevenue)*100).toFixed(2)):0
-    },categories:categories.rows.map(x=>({movement_type:x.movement_type,category:x.category,total:Number(x.total||0),movements:Number(x.movements||0)}))});
-  }catch(err){console.error('Error resumen financiero:',err.message);res.status(500).json({error:err.message||'No se pudo calcular el resumen financiero'});}
-});
-
-
-// MASTER V1.6.1: historial visible de reembolsos del negocio principal.
-app.get('/api/admin/master/refunds', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
-  try{
-    const {startDate,endDate}=normalizeAnalyticsDateRange(req.query.start_date,req.query.end_date);
-    const limit=Math.min(300,Math.max(1,Number(req.query.limit||150)));
-    const result=await pool.query(`
-      WITH report_refunds AS (
-        SELECT ar.order_id,
-               COALESCE(SUM(ar.refund_amount),0)::numeric AS refund_amount,
-               MAX(COALESCE(ar.reviewed_at,ar.created_at)) AS refund_at,
-               STRING_AGG(ar.id::text, ',' ORDER BY ar.id) AS report_ids,
-               STRING_AGG(DISTINCT COALESCE(NULLIF(ar.resolution_type,''),'reembolso'), ', ') AS resolution_types
-        FROM account_reports ar
-        WHERE COALESCE(ar.owner_admin_id,0)=0
-          AND COALESCE(ar.refund_amount,0)>0
-        GROUP BY ar.order_id
-      ), order_ledger AS (
-        SELECT CASE WHEN bl.reference_id ~ '^[0-9]+$' THEN bl.reference_id::int END AS order_id,
-               MAX(bl.created_at) AS refund_at,
-               STRING_AGG(DISTINCT bl.movement_type, ', ') AS movement_types
-        FROM balance_ledger bl
-        WHERE COALESCE(bl.owner_admin_id,0)=0
-          AND bl.reference_type='order'
-          AND bl.reference_id ~ '^[0-9]+$'
-          AND bl.movement_type LIKE 'reembolso%'
-        GROUP BY CASE WHEN bl.reference_id ~ '^[0-9]+$' THEN bl.reference_id::int END
-      ), base AS (
-        SELECT o.id AS order_id,o.amount,o.refunded,o.status,o.created_at,o.admin_quick_sale,o.payment_source,
-               u.id AS user_id,u.name AS customer_name,u.email AS customer_email,COALESCE(u.is_subadmin,false) AS customer_is_distributor,
-               du.id AS distributor_id,du.name AS distributor_name,du.email AS distributor_email,
-               p.id AS product_id,p.name AS product_name,p.category AS product_category,
-               COALESCE(rr.refund_amount,CASE WHEN COALESCE(o.refunded,0)=1 THEN o.amount ELSE 0 END)::numeric AS refund_amount,
-               COALESCE(rr.refund_at,ol.refund_at,o.created_at) AS refund_at,
-               rr.report_ids,rr.resolution_types,ol.movement_types
-        FROM orders o
-        JOIN users u ON u.id=o.user_id
-        LEFT JOIN users du ON du.id=u.owner_user_id AND COALESCE(du.is_subadmin,false)=true
-        LEFT JOIN products p ON p.id=o.product_id
-        LEFT JOIN report_refunds rr ON rr.order_id=o.id
-        LEFT JOIN order_ledger ol ON ol.order_id=o.id
-        WHERE COALESCE(o.owner_admin_id,0)=0
-          AND (COALESCE(rr.refund_amount,0)>0 OR COALESCE(o.refunded,0)=1)
-      )
+async function getMasterRefundActivity(startDate, endDate, limit = 150) {
+  const safeLimit = Math.min(300, Math.max(1, Number(limit || 150)));
+  const result = await pool.query(`
+    WITH report_refunds AS (
+      SELECT ar.order_id,
+             COALESCE(SUM(ar.refund_amount),0)::numeric AS refund_amount,
+             MAX(COALESCE(ar.reviewed_at,ar.created_at)) AS refund_at,
+             STRING_AGG(ar.id::text, ',' ORDER BY ar.id) AS report_ids,
+             STRING_AGG(DISTINCT COALESCE(NULLIF(ar.resolution_type,''),'reembolso'), ', ') AS resolution_types
+      FROM account_reports ar
+      WHERE COALESCE(ar.owner_admin_id,0)=0
+        AND COALESCE(ar.refund_amount,0)>0
+      GROUP BY ar.order_id
+    ), order_ledger AS (
+      SELECT CASE WHEN bl.reference_id ~ '^[0-9]+$' THEN bl.reference_id::int END AS order_id,
+             MAX(bl.created_at) AS refund_at,
+             STRING_AGG(DISTINCT bl.movement_type, ', ') AS movement_types
+      FROM balance_ledger bl
+      WHERE COALESCE(bl.owner_admin_id,0)=0
+        AND bl.reference_type='order'
+        AND bl.reference_id ~ '^[0-9]+$'
+        AND bl.movement_type LIKE 'reembolso%'
+      GROUP BY CASE WHEN bl.reference_id ~ '^[0-9]+$' THEN bl.reference_id::int END
+    ), base AS (
+      SELECT o.id AS order_id,o.amount,o.refunded,o.status,o.created_at,o.admin_quick_sale,o.payment_source,
+             u.id AS user_id,u.name AS customer_name,u.email AS customer_email,COALESCE(u.is_subadmin,false) AS customer_is_distributor,
+             du.id AS distributor_id,du.name AS distributor_name,du.email AS distributor_email,
+             p.id AS product_id,p.name AS product_name,p.category AS product_category,
+             COALESCE(rr.refund_amount,CASE WHEN COALESCE(o.refunded,0)=1 THEN o.amount ELSE 0 END)::numeric AS refund_amount,
+             COALESCE(rr.refund_at,ol.refund_at,o.created_at) AS refund_at,
+             rr.report_ids,rr.resolution_types,ol.movement_types
+      FROM orders o
+      JOIN users u ON u.id=o.user_id
+      LEFT JOIN users du ON du.id=u.owner_user_id AND COALESCE(du.is_subadmin,false)=true
+      LEFT JOIN products p ON p.id=o.product_id
+      LEFT JOIN report_refunds rr ON rr.order_id=o.id
+      LEFT JOIN order_ledger ol ON ol.order_id=o.id
+      WHERE COALESCE(o.owner_admin_id,0)=0
+        AND (COALESCE(rr.refund_amount,0)>0 OR COALESCE(o.refunded,0)=1)
+    ), filtered AS (
       SELECT *,
              CASE
                WHEN refund_amount >= amount - 0.009 THEN 'Completo'
@@ -7301,22 +7241,86 @@ app.get('/api/admin/master/refunds', authMiddleware, adminMiddleware, mainAdminM
              (((refund_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')) AS refund_at_mx
       FROM base
       WHERE (((refund_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date)
-      ORDER BY refund_at DESC,order_id DESC
-      LIMIT $3
-    `,[startDate,endDate,limit]);
-    const rows=result.rows.map(r=>({
-      ...r,
-      order_id:Number(r.order_id||0),user_id:Number(r.user_id||0),product_id:Number(r.product_id||0),
-      distributor_id:r.distributor_id?Number(r.distributor_id):null,
-      amount:Number(r.amount||0),refund_amount:Number(r.refund_amount||0),
-      report_ids:String(r.report_ids||'').split(',').map(x=>Number(x)).filter(Boolean)
-    }));
-    const total=rows.reduce((sum,r)=>sum+Number(r.refund_amount||0),0);
-    res.json({start_date:startDate,end_date:endDate,timezone:'America/Mexico_City',summary:{refunds:rows.length,amount:Number(total.toFixed(2))},rows});
-  }catch(err){
-    console.error('Error cargando reembolsos Master:',err.message);
-    res.status(500).json({error:'No se pudieron cargar los reembolsos'});
-  }
+    )
+    SELECT *, COUNT(*) OVER()::int AS total_refunds,
+           COALESCE(SUM(refund_amount) OVER(),0)::numeric AS total_refund_amount
+    FROM filtered
+    ORDER BY refund_at DESC,order_id DESC
+    LIMIT $3
+  `,[startDate,endDate,safeLimit]);
+  const rows=result.rows.map(r=>({
+    ...r,
+    order_id:Number(r.order_id||0),user_id:Number(r.user_id||0),product_id:Number(r.product_id||0),
+    distributor_id:r.distributor_id?Number(r.distributor_id):null,
+    amount:Number(r.amount||0),refund_amount:Number(r.refund_amount||0),
+    report_ids:String(r.report_ids||'').split(',').map(x=>Number(x)).filter(Boolean)
+  }));
+  const first=result.rows[0]||{};
+  return {rows,summary:{refunds:Number(first.total_refunds||0),amount:Number(first.total_refund_amount||0)}};
+}
+
+app.get('/api/admin/master/finance-summary', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const {startDate,endDate}=normalizeAnalyticsDateRange(req.query.start_date,req.query.end_date);
+    const [sales,replacements,cash,purchases,categories,refundActivity,distributorMovements]=await Promise.all([
+      pool.query(`WITH base AS (
+        SELECT o.id,o.amount,GREATEST(COALESCE(o.quantity,1),1)::int AS qty,o.product_cost_snapshot,COALESCE(p.cost_price,0) AS product_cost,
+               COALESCE((SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')}) FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
+                 WHERE COALESCE(pa.owner_admin_id,0)=0 AND (pa.assigned_order_id=o.id OR pa.id=o.assigned_platform_account_id OR EXISTS(SELECT 1 FROM account_recovery_log arl WHERE arl.order_id=o.id AND arl.account_id=pa.id))),0) AS inventory_cost
+        FROM orders o LEFT JOIN products p ON p.id=o.product_id
+        WHERE o.status='exito' AND COALESCE(o.owner_admin_id,0)=0
+          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+      ), calc AS (
+        SELECT *,COALESCE(NULLIF(product_cost_snapshot,0),NULLIF(inventory_cost,0),NULLIF(product_cost,0)*qty,0) AS effective_cost FROM base
+      )
+      SELECT COUNT(*)::int orders,COALESCE(SUM(amount),0)::numeric gross_sales,COALESCE(SUM(effective_cost),0)::numeric sale_cost FROM calc`,[startDate,endDate]),
+      pool.query(`SELECT COALESCE(SUM(${effectivePlatformAccountCostSql('pa','ma')}),0)::numeric replacement_cost,COUNT(*)::int replacements
+        FROM account_reports ar JOIN platform_accounts pa ON pa.id=ar.replacement_account_id LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
+        WHERE COALESCE(ar.owner_admin_id,0)=0 AND ar.replacement_account_id IS NOT NULL
+          AND ((ar.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
+      pool.query(`SELECT COALESCE(SUM(amount) FILTER(WHERE movement_type='ingreso'),0)::numeric manual_income,
+                         COALESCE(SUM(amount) FILTER(WHERE movement_type='gasto'),0)::numeric manual_expenses,
+                         COALESCE(SUM(amount) FILTER(WHERE movement_type='ingreso' AND affects_profit),0)::numeric profit_income,
+                         COALESCE(SUM(amount) FILTER(WHERE movement_type='gasto' AND affects_profit),0)::numeric profit_expenses
+                  FROM admin_cash_movements WHERE COALESCE(owner_admin_id,0)=0 AND movement_date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
+      pool.query(`SELECT COALESCE(SUM(total_amount),0)::numeric invested,COALESCE(SUM(item_count),0)::int units,COUNT(*)::int purchases
+                  FROM inventory_purchases WHERE COALESCE(owner_admin_id,0)=0 AND purchase_date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
+      pool.query(`SELECT movement_type,category,COALESCE(SUM(amount),0)::numeric total,COUNT(*)::int movements
+                  FROM admin_cash_movements WHERE COALESCE(owner_admin_id,0)=0 AND movement_date BETWEEN $1::date AND $2::date
+                  GROUP BY movement_type,category ORDER BY movement_type,ABS(SUM(amount)) DESC`,[startDate,endDate]),
+      getMasterRefundActivity(startDate,endDate,1),
+      pool.query(`SELECT COALESCE(SUM(del.amount),0)::numeric distributor_earnings
+                  FROM distributor_earnings_ledger del JOIN orders o ON o.id=del.order_id
+                  WHERE COALESCE(o.owner_admin_id,0)=0 AND del.movement_type IN ('venta','ajuste_reembolso')
+                    AND (((del.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date)`,[startDate,endDate])
+    ]);
+    const s=sales.rows[0]||{},r=replacements.rows[0]||{},c=cash.rows[0]||{},p=purchases.rows[0]||{};
+    const refundAmount=Number(refundActivity?.summary?.amount||0),refundOrders=Number(refundActivity?.summary?.refunds||0);
+    const distributorEarnings=Number(distributorMovements.rows[0]?.distributor_earnings||0),grossSales=Number(s.gross_sales||0);
+    const adminRevenue=grossSales-refundAmount-distributorEarnings;
+    const saleCost=Number(s.sale_cost||0),replacementCost=Number(r.replacement_cost||0);
+    const operatingExpenses=Number(c.profit_expenses||0),otherIncome=Number(c.profit_income||0);
+    const operatingProfit=adminRevenue-saleCost-replacementCost,netProfit=operatingProfit-operatingExpenses+otherIncome;
+    res.json({start_date:startDate,end_date:endDate,timezone:'America/Mexico_City',summary:{
+      orders:Number(s.orders||0),refund_orders:refundOrders,gross_sales:grossSales,refunds:refundAmount,distributor_earnings:distributorEarnings,
+      admin_revenue:adminRevenue,sale_cost:saleCost,replacement_cost:replacementCost,replacements:Number(r.replacements||0),operating_profit:operatingProfit,
+      other_income:otherIncome,operating_expenses:operatingExpenses,net_profit:netProfit,
+      inventory_investment:Number(p.invested||0),inventory_purchase_units:Number(p.units||0),inventory_purchases:Number(p.purchases||0),
+      manual_cash_income:Number(c.manual_income||0),manual_cash_expenses:Number(c.manual_expenses||0),manual_cash_balance:Number(c.manual_income||0)-Number(c.manual_expenses||0),
+      margin_percent:adminRevenue!==0?Number(((netProfit/Math.abs(adminRevenue))*100).toFixed(2)):0
+    },categories:categories.rows.map(x=>({movement_type:x.movement_type,category:x.category,total:Number(x.total||0),movements:Number(x.movements||0)}))});
+  }catch(err){console.error('Error resumen financiero:',err.message);res.status(500).json({error:err.message||'No se pudo calcular el resumen financiero'});}
+});
+
+
+// MASTER V1.6.1: historial visible de reembolsos del negocio principal.
+app.get('/api/admin/master/refunds', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const {startDate,endDate}=normalizeAnalyticsDateRange(req.query.start_date,req.query.end_date);
+    const limit=Math.min(300,Math.max(1,Number(req.query.limit||150)));
+    const data=await getMasterRefundActivity(startDate,endDate,limit);
+    res.json({start_date:startDate,end_date:endDate,timezone:'America/Mexico_City',summary:data.summary,rows:data.rows});
+  }catch(err){console.error('Error historial de reembolsos:',err.message);res.status(500).json({error:err.message||'No se pudo cargar reembolsos'});}
 });
 
 // ============================================================

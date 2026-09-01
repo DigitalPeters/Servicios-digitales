@@ -22,13 +22,7 @@
       btn.onclick=openMasterIntelligence;
       modules.appendChild(btn);
     }
-    if(modules&&!document.getElementById('masterRefundsModule')){
-      const btn=document.createElement('button');
-      btn.id='masterRefundsModule';btn.className='master-module master-module-refunds';
-      btn.innerHTML='<span class="master-module-icon">↩️</span><span><b>Reembolsos</b><small>Pedidos, montos y origen</small></span><em id="masterRefundsBadge">0</em>';
-      btn.onclick=openMasterRefunds;
-      modules.appendChild(btn);
-    }
+    document.getElementById('masterRefundsModule')?.remove();
 
     const admin=document.getElementById('section-admin');
     if(admin&&!document.getElementById('masterIntelligencePanel')){
@@ -111,6 +105,10 @@
 
   async function openMasterRefunds(){
     ensureV16UI();
+    const financeStart=document.getElementById('masterFinanceStart')?.value||monthStart();
+    const financeEnd=document.getElementById('masterFinanceEnd')?.value||mxToday();
+    const refundStart=document.getElementById('masterRefundStart'),refundEnd=document.getElementById('masterRefundEnd');
+    if(refundStart)refundStart.value=financeStart;if(refundEnd)refundEnd.value=financeEnd;
     if(typeof showSection==='function')showSection('admin');
     setTimeout(()=>document.getElementById('masterRefundsPanel')?.scrollIntoView({behavior:'auto',block:'start'}),90);
     await loadMasterRefunds(false);
@@ -126,7 +124,6 @@
     try{
       const data=await api(`/api/admin/master/refunds?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&limit=200`);
       const rows=data?.rows||[],sum=data?.summary||{};
-      const badge=document.getElementById('masterRefundsBadge');if(badge)badge.textContent=Number(sum.refunds||0);
       if(summary)summary.innerHTML=`<span><b>${Number(sum.refunds||0)}</b><small>pedido(s) con reembolso</small></span><span><b>-$${money(sum.amount)}</b><small>total devuelto</small></span><span><b>${esc(start.split('-').reverse().join('/'))}</b><small>desde</small></span><span><b>${esc(end.split('-').reverse().join('/'))}</b><small>hasta</small></span>`;
       if(box)box.innerHTML=rows.length?`<div class="master-refund-list">${rows.map(r=>`<article class="master-refund-item"><div class="master-refund-order"><span>Pedido</span><b>#${Number(r.order_id||0)}</b><small>${esc(r.refund_type||'Reembolso')}</small></div><div><span>Comprador</span><b>${esc(r.customer_name||'Usuario')}</b><small>${esc(r.customer_type||'')} · ${esc(r.customer_email||'')}</small>${r.distributor_name?`<small>Distribuidor: ${esc(r.distributor_name)}</small>`:''}</div><div><span>Producto</span><b>${esc(r.product_name||'Producto')}</b><small>${esc(r.product_category||'')}</small></div><div><span>Monto</span><b class="master-negative">-$${money(r.refund_amount)}</b><small>Venta original $${money(r.amount)}</small></div><div><span>Origen</span><b>${Array.isArray(r.report_ids)&&r.report_ids.length?`Reporte #${r.report_ids.join(', #')}`:'Pedido'}</b><small>${esc(r.resolution_types||r.movement_types||'Reembolso administrativo')}</small></div><div><span>Fecha</span><b>${esc(new Date(r.refund_at_mx||r.refund_at).toLocaleString('es-MX',{timeZone:'America/Mexico_City'}))}</b></div><div class="master-refund-actions"><button class="outline-btn" onclick="openOrdersFromDashboard()">Ver pedidos</button>${Array.isArray(r.report_ids)&&r.report_ids.length?'<button class="outline-btn" onclick="openAccountReportsFromDashboard()">Ver fallas</button>':''}</div></article>`).join('')}</div>`:'<div class="master-v14-empty">No hay reembolsos en el periodo seleccionado.</div>';
       if(feedback&&typeof showMessage==='function')showMessage('Reembolsos actualizados');
@@ -223,7 +220,6 @@
     ensureV16UI();
     if(isMain()){
       api('/api/admin/master/inventory-intelligence').then(d=>{const b=document.getElementById('masterIntelligenceRisk');if(b)b.textContent=Number(d.risk_count||0);}).catch(()=>{});
-      api(`/api/admin/master/refunds?start_date=${encodeURIComponent(monthStart())}&end_date=${encodeURIComponent(mxToday())}&limit=1`).then(d=>{const b=document.getElementById('masterRefundsBadge');if(b)b.textContent=Number(d?.summary?.refunds||0);}).catch(()=>{});
     }
   }
   if(typeof registerLoadAppHook==='function')registerLoadAppHook(async()=>init(),{name:'master-intelligence-v1-6',order:995});
