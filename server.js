@@ -1521,6 +1521,8 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS sell_by_profile BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS configured_profile_count INTEGER`);
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS profile_cost_override NUMERIC`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS sale_price_full NUMERIC`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS sale_price_profile NUMERIC`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_provider ON mother_accounts (lower(provider_name))`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_group ON mother_accounts (lower(product_name), lower(account_email), COALESCE(owner_admin_id, 0), status)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_replaces ON mother_accounts (replaces_mother_account_id)`);
@@ -7974,6 +7976,10 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
     const configuredProfileCount = rawProfileCount === null || rawProfileCount === undefined || String(rawProfileCount).trim() === '' ? null : Number(rawProfileCount);
     const rawProfileCost = req.body?.profile_cost_override;
     const profileCostOverride = rawProfileCost === null || rawProfileCost === undefined || String(rawProfileCost).trim() === '' ? null : Number(rawProfileCost);
+    const rawSalePriceFull = req.body?.sale_price_full;
+    const salePriceFull = rawSalePriceFull === null || rawSalePriceFull === undefined || String(rawSalePriceFull).trim() === '' ? null : Number(rawSalePriceFull);
+    const rawSalePriceProfile = req.body?.sale_price_profile;
+    const salePriceProfile = rawSalePriceProfile === null || rawSalePriceProfile === undefined || String(rawSalePriceProfile).trim() === '' ? null : Number(rawSalePriceProfile);
 
     if (purchaseCost !== null && (!Number.isFinite(purchaseCost) || purchaseCost < 0)) {
       return res.status(400).json({ error: 'El costo total debe ser mayor o igual a 0' });
@@ -7984,13 +7990,19 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
     if (profileCostOverride !== null && (!Number.isFinite(profileCostOverride) || profileCostOverride < 0)) {
       return res.status(400).json({ error: 'El costo manual por perfil debe ser mayor o igual a 0' });
     }
+    if (salePriceFull !== null && (!Number.isFinite(salePriceFull) || salePriceFull < 0)) {
+      return res.status(400).json({ error: 'El precio de venta de cuenta completa debe ser mayor o igual a 0' });
+    }
+    if (salePriceProfile !== null && (!Number.isFinite(salePriceProfile) || salePriceProfile < 0)) {
+      return res.status(400).json({ error: 'El precio de venta por perfil debe ser mayor o igual a 0' });
+    }
     if (sellByProfile && profileCostOverride === null && purchaseCost !== null && !configuredProfileCount) {
       return res.status(400).json({ error: 'Si vendes por perfil, indica cuántos perfiles tiene la cuenta o captura un costo manual por perfil' });
     }
 
     await client.query('BEGIN');
     const beforeResult = await client.query(
-      `SELECT id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override
+      `SELECT id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override, sale_price_full, sale_price_profile
        FROM mother_accounts
        WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0
        FOR UPDATE`,
@@ -8009,10 +8021,12 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
            sell_by_profile = $4,
            configured_profile_count = $5,
            profile_cost_override = $6,
+           sale_price_full = $7,
+           sale_price_profile = $8,
            updated_at = NOW()
        WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0
-       RETURNING id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override`,
-      [id, providerName, purchaseCost, sellByProfile, sellByProfile ? configuredProfileCount : null, sellByProfile ? profileCostOverride : null]
+       RETURNING id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override, sale_price_full, sale_price_profile`,
+      [id, providerName, purchaseCost, sellByProfile, sellByProfile ? configuredProfileCount : null, sellByProfile ? profileCostOverride : null, salePriceFull, sellByProfile ? salePriceProfile : null]
     );
 
     const actualProfilesResult = await client.query(
@@ -8074,13 +8088,15 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
         sell_by_profile: sellByProfile,
         configured_profile_count: sellByProfile ? configuredProfileCount : null,
         profile_cost_override: sellByProfile ? profileCostOverride : null,
+        sale_price_full: salePriceFull,
+        sale_price_profile: sellByProfile ? salePriceProfile : null,
         effective_unit_cost: effectiveUnitCost
       }
     });
 
     await client.query('COMMIT');
     res.json({
-      message: 'Costo de cuenta madre actualizado',
+      message: 'Configuración financiera de cuenta madre actualizada',
       mother_account: { ...result.rows[0], actual_profile_count: actualProfiles, effective_unit_cost: effectiveUnitCost }
     });
   } catch (err) {
@@ -8129,7 +8145,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     );
 
     const linksResult = await pool.query(
-      `SELECT DISTINCT o.id AS order_id, pa.mother_account_id,
+      `SELECT DISTINCT o.id AS order_id, pa.id AS account_id, pa.mother_account_id,
               COALESCE(NULLIF(TRIM(ma.provider_name), ''), 'Sin proveedor') AS provider_name,
               COALESCE(NULLIF(TRIM(pa.platform), ''), NULLIF(TRIM(pa.product_name), ''), ma.product_name, 'Sin plataforma') AS platform_name,
               COALESCE(NULLIF(TRIM(pa.product_name), ''), ma.product_name, 'Sin producto') AS account_product_name,
@@ -8185,7 +8201,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
 
     const mothersResult = await pool.query(
       `SELECT ma.id, ma.product_name, ma.account_email, ma.provider_name, ma.purchase_cost_total,
-              ma.sell_by_profile, ma.configured_profile_count, ma.profile_cost_override,
+              ma.sell_by_profile, ma.configured_profile_count, ma.profile_cost_override, ma.sale_price_full, ma.sale_price_profile,
               ma.original_purchase_date, ma.expiration_date, ma.status,
               COUNT(pa.id)::int AS profile_count,
               COUNT(pa.id) FILTER (WHERE pa.status = 'available')::int AS available_profiles,
@@ -8196,6 +8212,71 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        WHERE COALESCE(ma.owner_admin_id, 0) = 0
        GROUP BY ma.id
        ORDER BY ma.id DESC`,
+      []
+    );
+
+    // Referencias actuales de Productos para mostrar/configurar cuentas históricas.
+    const productRefsResult = await pool.query(
+      `SELECT name, COALESCE(price, 0) AS sale_price, COALESCE(cost_price, 0) AS cost_price
+       FROM products
+       WHERE COALESCE(owner_admin_id, 0) = 0`,
+      []
+    );
+
+    // Vínculos históricos de TODA la vida de cada cuenta madre. No dependen del rango
+    // seleccionado arriba; sirven para que una venta de ayer/mes pasado siga visible
+    // en la ficha financiera de la cuenta.
+    const lifetimeLinksResult = await pool.query(
+      `WITH links AS (
+         SELECT DISTINCT pa.id AS account_id, pa.mother_account_id, o.id AS order_id
+         FROM orders o
+         JOIN platform_accounts pa ON (
+           pa.assigned_order_id = o.id
+           OR pa.id = o.assigned_platform_account_id
+           OR EXISTS (
+             SELECT 1 FROM account_recovery_log arl
+             WHERE arl.order_id = o.id AND arl.account_id = pa.id
+           )
+         )
+         WHERE o.status = 'exito'
+           AND COALESCE(o.owner_admin_id, 0) = 0
+           AND COALESCE(pa.owner_admin_id, 0) = 0
+           AND pa.mother_account_id IS NOT NULL
+       )
+       SELECT l.account_id, l.mother_account_id, l.order_id,
+              o.user_id, o.product_id, o.amount, o.product_cost_snapshot, o.distributor_cost_snapshot,
+              u.owner_user_id AS distributor_id,
+              COALESCE(p.cost_price, 0) AS current_product_cost,
+              COALESCE(refunds.refund_amount, 0) AS refund_amount,
+              COALESCE(earnings.final_earning, 0) AS distributor_final_earning,
+              COALESCE(earnings.movement_count, 0)::int AS distributor_earning_movements
+       FROM links l
+       JOIN orders o ON o.id = l.order_id
+       JOIN users u ON u.id = o.user_id
+       LEFT JOIN products p ON p.id = o.product_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(ar.refund_amount), 0) AS refund_amount
+         FROM account_reports ar
+         WHERE ar.order_id = o.id AND COALESCE(ar.refund_amount, 0) > 0
+       ) refunds ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(del.amount), 0) AS final_earning, COUNT(*)::int AS movement_count
+         FROM distributor_earnings_ledger del
+         WHERE del.order_id = o.id AND del.movement_type IN ('venta', 'ajuste_reembolso')
+       ) earnings ON TRUE
+       ORDER BY l.order_id, l.account_id`,
+      []
+    );
+
+    const recoveryCountsResult = await pool.query(
+      `SELECT pa.mother_account_id, COUNT(*)::int AS recovered_sales
+       FROM account_recovery_log arl
+       JOIN platform_accounts pa ON pa.id = arl.account_id
+       JOIN orders o ON o.id = arl.order_id AND o.status = 'exito'
+       WHERE COALESCE(pa.owner_admin_id, 0) = 0
+         AND COALESCE(o.owner_admin_id, 0) = 0
+         AND pa.mother_account_id IS NOT NULL
+       GROUP BY pa.mother_account_id`,
       []
     );
 
@@ -8239,7 +8320,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     for (const link of linksResult.rows) {
       const oid = Number(link.order_id || 0);
       if (!orderLinks.has(oid)) orderLinks.set(oid, new Map());
-      orderLinks.get(oid).set(Number(link.mother_account_id), link);
+      orderLinks.get(oid).set(Number(link.account_id || link.mother_account_id), link);
       const providerKey = String(link.provider_name || 'Sin proveedor').trim().toLowerCase();
       if (!providerSales.has(providerKey)) providerSales.set(providerKey, new Set());
       providerSales.get(providerKey).add(oid);
@@ -8251,6 +8332,12 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       accountProductSales.get(accountProductKey).add(oid);
     }
 
+    const productRefMap = new Map(productRefsResult.rows.map(row => [
+      String(row.name || '').trim().toLowerCase(),
+      { sale_price: money(row.sale_price), cost_price: money(row.cost_price) }
+    ]));
+    const recoveredSalesMap = new Map(recoveryCountsResult.rows.map(row => [Number(row.mother_account_id), Number(row.recovered_sales || 0)]));
+
     const motherStats = new Map(mothersResult.rows.map(row => {
       const actualProfileCount = Number(row.profile_count || 0);
       const effectiveUnitCost = deriveMotherUnitCost(row, actualProfileCount);
@@ -8260,16 +8347,22 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         sell_by_profile: row.sell_by_profile === true,
         configured_profile_count: row.configured_profile_count === null ? null : Number(row.configured_profile_count),
         profile_cost_override: row.profile_cost_override === null ? null : money(row.profile_cost_override),
+        sale_price_full: row.sale_price_full === null ? null : money(row.sale_price_full),
+        sale_price_profile: row.sale_price_profile === null ? null : money(row.sale_price_profile),
+        product_sale_price: productRefMap.get(String(row.product_name || '').trim().toLowerCase())?.sale_price || 0,
+        product_cost_price: productRefMap.get(String(row.product_name || '').trim().toLowerCase())?.cost_price || 0,
         effective_unit_cost: effectiveUnitCost,
         cost_profile_count: Number(row.configured_profile_count || 0) || actualProfileCount,
         original_purchase_date: row.original_purchase_date, expiration_date: row.expiration_date, status: row.status || '',
         profile_count: actualProfileCount, available_profiles: Number(row.available_profiles || 0),
         delivered_profiles: Number(row.delivered_profiles || 0), failed_profiles: Number(row.failed_profiles || 0),
-        orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0
+        orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0,
+        recovered_sales: recoveredSalesMap.get(Number(row.id)) || 0,
+        lifetime_orders: new Set(), lifetime_linked_units: 0, lifetime_admin_revenue_actual: 0, lifetime_sale_cost_actual: 0
       }];
     }));
     const unassignedMother = { id: 0, product_name: 'Sin cuenta madre', account_email: '', provider_name: '', purchase_cost_total: null,
-      sell_by_profile:false, configured_profile_count:null, profile_cost_override:null, effective_unit_cost:null, cost_profile_count:0,
+      sell_by_profile:false, configured_profile_count:null, profile_cost_override:null, sale_price_full:null, sale_price_profile:null, product_sale_price:0, product_cost_price:0, effective_unit_cost:null, cost_profile_count:0,
       original_purchase_date: null, expiration_date: null, status: '', profile_count: 0, available_profiles: 0, delivered_profiles: 0, failed_profiles: 0,
       orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0 };
 
@@ -8310,6 +8403,45 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         if (order.cost_source === 'inventario') stat.sale_cost += Math.max(0, Number(stat.effective_unit_cost || 0));
         else stat.sale_cost += order.sale_cost * share;
       }
+    }
+
+    // Histórico acumulado por cuenta madre (independiente del rango seleccionado).
+    // Se reparte el ingreso real entre las unidades/cuentas ligadas a cada pedido.
+    const lifetimeByOrder = new Map();
+    for (const link of lifetimeLinksResult.rows) {
+      const oid = Number(link.order_id || 0);
+      if (!lifetimeByOrder.has(oid)) lifetimeByOrder.set(oid, []);
+      lifetimeByOrder.get(oid).push(link);
+    }
+    for (const [orderId, links] of lifetimeByOrder.entries()) {
+      if (!links.length) continue;
+      const base = links[0];
+      const gross = Math.max(0, money(base.amount));
+      const refund = Math.max(0, Math.min(gross, money(base.refund_amount)));
+      let distEarn = money(base.distributor_final_earning);
+      if (Number(base.distributor_id || 0) > 0 && Number(base.distributor_earning_movements || 0) === 0 && base.distributor_cost_snapshot !== null && base.distributor_cost_snapshot !== undefined) {
+        const distributorCost = Math.max(0, money(base.distributor_cost_snapshot));
+        const originalMargin = money(gross - distributorCost);
+        const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
+        distEarn = money(originalMargin * (1 - refundRatio));
+      }
+      const adminRev = money(gross - refund - distEarn);
+      const snapshotCost = Math.max(0, money(base.product_cost_snapshot));
+      const currentProductCost = Math.max(0, money(base.current_product_cost));
+      const unitCosts = links.map(link => Math.max(0, Number(motherStats.get(Number(link.mother_account_id))?.effective_unit_cost || 0)));
+      const derivedTotal = unitCosts.reduce((a,b)=>a+b,0);
+      const fallbackPerLink = links.length ? currentProductCost / links.length : 0;
+      const revenuePerLink = links.length ? adminRev / links.length : 0;
+      links.forEach((link, idx) => {
+        const stat = motherStats.get(Number(link.mother_account_id));
+        if (!stat) return;
+        stat.lifetime_orders.add(orderId);
+        stat.lifetime_linked_units += 1;
+        stat.lifetime_admin_revenue_actual += revenuePerLink;
+        if (snapshotCost > 0) stat.lifetime_sale_cost_actual += snapshotCost / links.length;
+        else if (derivedTotal > 0) stat.lifetime_sale_cost_actual += unitCosts[idx] || 0;
+        else stat.lifetime_sale_cost_actual += fallbackPerLink;
+      });
     }
 
     const qualityMaps = { platform: new Map(), provider: new Map(), seller: new Map(), product: new Map() };
@@ -8371,11 +8503,39 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     const finalizedMothers = motherRows.map(row => {
       const profit = money(row.admin_revenue - row.sale_cost - row.replacement_cost);
       const revenue = money(row.admin_revenue);
+      const linkedUnits = Math.max(0, Number(row.lifetime_linked_units || 0));
+      const explicitInventoryCycles = row.id ? Math.max(0, Number(row.delivered_profiles || 0) + Number(row.recovered_sales || 0)) : 0;
+      const configuredDepletion = row.id && row.sell_by_profile && Number(row.configured_profile_count || 0) > 0
+        ? Math.max(0, Number(row.configured_profile_count || 0) - Number(row.available_profiles || 0) - Number(row.failed_profiles || 0))
+        : 0;
+      const inventorySaleCycles = Math.max(explicitInventoryCycles, configuredDepletion);
+      let inferredUnits = 0;
+      if (row.id && row.sell_by_profile) inferredUnits = Math.max(0, inventorySaleCycles - linkedUnits);
+      else if (row.id && !row.sell_by_profile && linkedUnits === 0 && Number(row.profile_count || 0) > 0 && Number(row.available_profiles || 0) === 0) inferredUnits = 1;
+      const referenceSalePrice = row.sell_by_profile
+        ? (row.sale_price_profile !== null ? Number(row.sale_price_profile) : Number(row.product_sale_price || 0))
+        : (row.sale_price_full !== null ? Number(row.sale_price_full) : Number(row.product_sale_price || 0));
+      const inferredRevenue = referenceSalePrice > 0 ? money(inferredUnits * referenceSalePrice) : 0;
+      const inferredCost = Number(row.effective_unit_cost || 0) > 0 ? money(inferredUnits * Number(row.effective_unit_cost || 0)) : 0;
+      const lifetimeRevenue = money(Number(row.lifetime_admin_revenue_actual || 0) + inferredRevenue);
+      const lifetimeCost = money(Number(row.lifetime_sale_cost_actual || 0) + inferredCost);
+      const lifetimeProfit = money(lifetimeRevenue - lifetimeCost);
       return {
         ...row, orders: row.orders.size, admin_revenue: revenue, sale_cost: money(row.sale_cost), replacement_cost: money(row.replacement_cost),
         refund_amount: money(row.refund_amount), profit,
         margin_percent: revenue > 0 ? Number(((profit / revenue) * 100).toFixed(2)) : 0,
-        profitability_status: profit < 0 ? 'perdida' : (revenue > 0 && profit / revenue < 0.15 ? 'margen_bajo' : 'rentable')
+        profitability_status: profit < 0 ? 'perdida' : (revenue > 0 && profit / revenue < 0.15 ? 'margen_bajo' : 'rentable'),
+        lifetime_orders: row.lifetime_orders?.size || 0,
+        lifetime_linked_units: linkedUnits,
+        inventory_sale_cycles: inventorySaleCycles,
+        inferred_unlinked_units: inferredUnits,
+        reference_sale_price: referenceSalePrice > 0 ? money(referenceSalePrice) : null,
+        lifetime_admin_revenue_actual: money(row.lifetime_admin_revenue_actual || 0),
+        lifetime_inferred_revenue: inferredRevenue,
+        lifetime_revenue: lifetimeRevenue,
+        lifetime_sale_cost: lifetimeCost,
+        lifetime_profit: lifetimeProfit,
+        lifetime_margin_percent: lifetimeRevenue > 0 ? Number(((lifetimeProfit / lifetimeRevenue) * 100).toFixed(2)) : 0
       };
     }).sort((a, b) => a.profit - b.profit || b.failures - a.failures);
 
@@ -8383,15 +8543,22 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     for (const row of finalizedMothers) {
       const label = String(row.provider_name || 'Sin proveedor').trim() || 'Sin proveedor';
       const key = label.toLowerCase();
-      const p = providerMap.get(key) || { provider_name: label, mother_accounts: 0, orders: 0, admin_revenue: 0, sale_cost: 0, replacement_cost: 0, profit: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0, registered_mother_cost: 0, mother_cost_missing: 0 };
+      const p = providerMap.get(key) || { provider_name: label, mother_accounts: 0, orders: 0, admin_revenue: 0, sale_cost: 0, replacement_cost: 0, profit: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0, registered_mother_cost: 0, mother_cost_missing: 0, lifetime_units: 0, lifetime_revenue: 0, lifetime_sale_cost: 0, lifetime_profit: 0, inferred_units: 0 };
       if (row.id) p.mother_accounts += 1;
       p.orders += row.orders; p.admin_revenue += row.admin_revenue; p.sale_cost += row.sale_cost; p.replacement_cost += row.replacement_cost; p.profit += row.profit;
+      p.lifetime_units += Number(row.inventory_sale_cycles || row.lifetime_linked_units || 0);
+      p.lifetime_revenue += Number(row.lifetime_revenue || 0);
+      p.lifetime_sale_cost += Number(row.lifetime_sale_cost || 0);
+      p.lifetime_profit += Number(row.lifetime_profit || 0);
+      p.inferred_units += Number(row.inferred_unlinked_units || 0);
       p.failures += row.failures; p.replacements += row.replacements; p.refunds += row.refunds; p.refund_amount += row.refund_amount;
       if (row.purchase_cost_total === null) p.mother_cost_missing += row.id ? 1 : 0; else p.registered_mother_cost += Number(row.purchase_cost_total || 0);
       providerMap.set(key, p);
     }
     const providers = Array.from(providerMap.values()).map(p => ({
       ...p, admin_revenue: money(p.admin_revenue), sale_cost: money(p.sale_cost), replacement_cost: money(p.replacement_cost), profit: money(p.profit), refund_amount: money(p.refund_amount), registered_mother_cost: money(p.registered_mother_cost),
+      lifetime_revenue: money(p.lifetime_revenue), lifetime_sale_cost: money(p.lifetime_sale_cost), lifetime_profit: money(p.lifetime_profit),
+      lifetime_margin_percent: p.lifetime_revenue > 0 ? Number(((p.lifetime_profit / p.lifetime_revenue) * 100).toFixed(2)) : 0,
       margin_percent: p.admin_revenue > 0 ? Number(((p.profit / p.admin_revenue) * 100).toFixed(2)) : 0,
       failure_rate: (() => {
         const key = String(p.provider_name).toLowerCase();

@@ -55,14 +55,23 @@
     return loadProfitQuality();
   };
 
+  window.setProfitQualityAllHistory=function(){
+    const end=new Date();
+    const a=document.getElementById('profitQualityStart');
+    const b=document.getElementById('profitQualityEnd');
+    if(a) a.value='2000-01-01';
+    if(b) b.value=isoLocal(end);
+    return loadProfitQuality();
+  };
+
   function ensureDates(){
     const start=document.getElementById('profitQualityStart');
     const end=document.getElementById('profitQualityEnd');
     if(!start || !end) return;
     if(!end.value) end.value=isoLocal(new Date());
     if(!start.value){
-      const now=new Date();
-      start.value=isoLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+      const d=new Date(); d.setDate(d.getDate()-29);
+      start.value=isoLocal(d);
     }
   }
 
@@ -122,14 +131,34 @@
   function renderProviders(rows){
     const box=document.getElementById('pqProviders'); if(!box) return;
     if(!rows?.length){box.innerHTML='<p class="small-text">Sin proveedores con actividad en este periodo.</p>';return;}
-    box.innerHTML=`<div class="table-wrap pq-table-scroll"><table class="mini-table pq-provider-table"><thead><tr><th>Proveedor</th><th>Cuentas madre</th><th>Inversión registrada</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Reemplazos</th><th>Utilidad</th><th>Margen</th><th>Fallas</th><th>Tasa falla</th></tr></thead><tbody>${rows.map(r=>`<tr>
-      <td><b>${esc(r.provider_name||'Sin proveedor')}</b>${r.mother_cost_missing?`<br><span class="small-text error">${r.mother_cost_missing} cuenta(s) sin costo configurado</span>`:''}</td>
-      <td>${num(r.mother_accounts)}</td><td><b>${money(r.registered_mother_cost)}</b></td><td>${num(r.orders)}</td><td>${money(r.admin_revenue)}</td><td>${money(r.sale_cost)}</td><td>${money(r.replacement_cost)}</td>
-      <td class="${num(r.profit)<0?'error':'success'}"><b>${money(r.profit)}</b></td><td>${pct(r.margin_percent)}</td><td>${num(r.failures)} (${num(r.replacements)} repl.)</td><td><b>${pct(r.failure_rate)}</b></td>
-    </tr>`).join('')}</tbody></table></div>`;
+    box.innerHTML=`<div class="pq-provider-grid">${rows.map(r=>`<article class="pq-provider-card">
+      <div class="pq-provider-head"><div><span class="pq-mini-label">PROVEEDOR</span><h3>${esc(r.provider_name||'Sin proveedor')}</h3></div><span class="pq-provider-count">${num(r.mother_accounts)} cuenta(s)</span></div>
+      ${r.mother_cost_missing?`<div class="pq-inline-warning">⚠ ${num(r.mother_cost_missing)} cuenta(s) sin costo configurado</div>`:''}
+      <div class="pq-provider-section-title">Periodo seleccionado</div>
+      <div class="pq-provider-metrics">
+        <div><span>Ventas</span><b>${num(r.orders)}</b></div>
+        <div><span>Ingreso admin</span><b>${money(r.admin_revenue)}</b></div>
+        <div><span>Costo vendido</span><b>${money(r.sale_cost)}</b></div>
+        <div><span>Reemplazos</span><b>${money(r.replacement_cost)}</b></div>
+        <div><span>Utilidad</span><b class="${num(r.profit)<0?'error':'success'}">${money(r.profit)}</b></div>
+        <div><span>Margen</span><b>${pct(r.margin_percent)}</b></div>
+      </div>
+      <div class="pq-provider-section-title historical">Histórico acumulado</div>
+      <div class="pq-provider-metrics pq-provider-history">
+        <div><span>Inversión</span><b>${money(r.registered_mother_cost)}</b></div>
+        <div><span>Unidades detectadas</span><b>${num(r.lifetime_units)}</b></div>
+        <div><span>Ingreso</span><b>${money(r.lifetime_revenue)}</b></div>
+        <div><span>Costo consumido</span><b>${money(r.lifetime_sale_cost)}</b></div>
+        <div><span>Utilidad histórica</span><b class="${num(r.lifetime_profit)<0?'error':'success'}">${money(r.lifetime_profit)}</b></div>
+        <div><span>Margen histórico</span><b>${pct(r.lifetime_margin_percent)}</b></div>
+      </div>
+      ${num(r.inferred_units)>0?`<div class="pq-estimate-note">${num(r.inferred_units)} unidad(es) históricas estimadas por movimiento de inventario sin pedido enlazado.</div>`:''}
+      <div class="pq-provider-foot"><span>Fallas periodo <b>${num(r.failures)}</b></span><span>Tasa <b>${pct(r.failure_rate)}</b></span></div>
+    </article>`).join('')}</div>`;
   }
 
   window.updateMotherCostPreview=function(id){
+    const editor=document.getElementById(`pq-editor-${id}`);
     const totalRaw=(document.getElementById(`pq-cost-${id}`)?.value||'').trim();
     const total=totalRaw===''?null:Number(totalRaw);
     const byProfile=!!document.getElementById(`pq-by-profile-${id}`)?.checked;
@@ -137,6 +166,11 @@
     const count=countRaw===''?0:Number(countRaw);
     const overrideRaw=(document.getElementById(`pq-profile-cost-${id}`)?.value||'').trim();
     const override=overrideRaw===''?null:Number(overrideRaw);
+    const fullSaleRaw=(document.getElementById(`pq-sale-full-${id}`)?.value||'').trim();
+    const profileSaleRaw=(document.getElementById(`pq-sale-profile-${id}`)?.value||'').trim();
+    const fullSale=fullSaleRaw===''?null:Number(fullSaleRaw);
+    const profileSale=profileSaleRaw===''?null:Number(profileSaleRaw);
+    const productSale=Number(editor?.dataset.productSale||0);
     const group=document.getElementById(`pq-profile-settings-${id}`);
     if(group) group.classList.toggle('hidden',!byProfile);
     let effective=null, label='Sin costo configurado';
@@ -144,35 +178,92 @@
       if(override!==null && Number.isFinite(override) && override>=0){effective=override;label='Costo manual por perfil';}
       else if(total!==null && Number.isFinite(total) && count>0){effective=total/count;label='Costo calculado por perfil';}
     }else if(total!==null && Number.isFinite(total) && total>=0){effective=total;label='Costo por cuenta completa';}
+    let referenceSale=byProfile?profileSale:fullSale;
+    let saleSource='precio capturado';
+    if(referenceSale===null || !Number.isFinite(referenceSale)){referenceSale=productSale>0?productSale:null;saleSource='precio actual de Productos';}
+    const unitProfit=effective!==null && referenceSale!==null ? referenceSale-effective : null;
+    const margin=referenceSale>0 && unitProfit!==null ? (unitProfit/referenceSale)*100 : null;
     const preview=document.getElementById(`pq-cost-preview-${id}`);
-    if(preview) preview.innerHTML=effective===null
-      ? `<span class="error">${esc(label)}</span>`
-      : `<span>${esc(label)}</span><b>${money(effective)}</b>`;
+    if(preview) preview.innerHTML=`
+      <div><span>${esc(label)}</span><b>${effective===null?'—':money(effective)}</b></div>
+      <div><span>Venta referencia · ${esc(saleSource)}</span><b>${referenceSale===null?'—':money(referenceSale)}</b></div>
+      <div><span>Utilidad por unidad</span><b class="${unitProfit!==null&&unitProfit<0?'error':'success'}">${unitProfit===null?'—':money(unitProfit)}</b>${margin===null?'':`<small>${margin.toFixed(1)}% margen</small>`}</div>`;
   };
 
   function renderMothers(rows){
     const box=document.getElementById('pqMotherAccounts'); if(!box) return;
-    const active=(rows||[]).filter(r=>num(r.orders)>0 || num(r.failures)>0 || r.id);
+    const active=(rows||[]).filter(r=>r.id);
     if(!active.length){box.innerHTML='<p class="small-text">Sin cuentas madre.</p>';return;}
-    box.innerHTML=`<div class="table-wrap pq-table-scroll"><table class="mini-table pq-mother-table"><thead><tr><th>Cuenta madre</th><th>Configuración de costo</th><th>Perfiles / costo unitario</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Costo reemplazos</th><th>Utilidad</th><th>Fallas</th></tr></thead><tbody>${active.map(r=>`<tr>
-      <td><b>${r.id?`#${num(r.id)} · `:''}${esc(r.product_name||'Sin producto')}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br>${statusChip(r)}</td>
-      <td>${r.id?`<div class="pq-cost-editor">
-          <label>Proveedor</label><input id="pq-provider-${r.id}" value="${esc(r.provider_name||'')}" placeholder="Ej. Digitalvnhe"/>
-          <label>Costo cuenta completa</label><input id="pq-cost-${r.id}" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Ej. 250.00" oninput="updateMotherCostPreview(${r.id})"/>
-          <label class="pq-check"><input id="pq-by-profile-${r.id}" type="checkbox" ${r.sell_by_profile?'checked':''} onchange="updateMotherCostPreview(${r.id})"/> <span>Esta cuenta se vende por perfiles</span></label>
-          <div id="pq-profile-settings-${r.id}" class="pq-profile-settings ${r.sell_by_profile?'':'hidden'}">
-            <label>Perfiles de la cuenta</label><input id="pq-profile-count-${r.id}" type="number" min="1" max="500" step="1" value="${r.configured_profile_count===null?'':num(r.configured_profile_count)}" placeholder="Ej. 5" oninput="updateMotherCostPreview(${r.id})"/>
-            <label>Costo manual por perfil <small>(opcional)</small></label><input id="pq-profile-cost-${r.id}" type="number" min="0" step="0.01" value="${r.profile_cost_override===null?'':num(r.profile_cost_override)}" placeholder="Vacío = calcular automático" oninput="updateMotherCostPreview(${r.id})"/>
-          </div>
-          <div id="pq-cost-preview-${r.id}" class="pq-cost-preview"></div>
-          <button class="primary-btn pq-save-cost" onclick="saveMotherAnalyticsMeta(${r.id})">Guardar costo</button>
-        </div>`:`${esc(r.provider_name||'Sin proveedor')}`}</td>
-      <td><b>${num(r.profile_count)} perfil(es) cargados</b><br><span class="small-text">${num(r.available_profiles)} disp. · ${num(r.failed_profiles)} fallidos</span><div class="pq-effective-cost"><span>Costo usado por venta</span><b>${r.effective_unit_cost===null?'—':money(r.effective_unit_cost)}</b><small>${r.sell_by_profile?`${num(r.cost_profile_count)} perfil(es) para reparto`:'Cuenta completa'}</small></div></td>
-      <td>${num(r.orders)}</td><td>${money(r.admin_revenue)}</td><td>${money(r.sale_cost)}</td><td>${money(r.replacement_cost)}</td>
-      <td class="${num(r.profit)<0?'error':'success'}"><b>${money(r.profit)}</b><br><span class="small-text">${pct(r.margin_percent)}</span></td>
-      <td>${num(r.failures)}<br><span class="small-text">${num(r.replacements)} repl. · ${num(r.refunds)} reemb.</span></td>
-    </tr>`).join('')}</tbody></table></div>`;
-    active.filter(r=>r.id).forEach(r=>updateMotherCostPreview(r.id));
+    box.innerHTML=`<div class="pq-mother-list">${active.map(r=>{
+      const inferred=num(r.inferred_unlinked_units);
+      const soldDetected=num(r.inventory_sale_cycles);
+      const linked=num(r.lifetime_linked_units);
+      const reference=r.reference_sale_price===null?'—':money(r.reference_sale_price);
+      return `<article class="pq-mother-card">
+        <header class="pq-mother-head">
+          <div><span class="pq-mini-label">CUENTA MADRE #${num(r.id)}</span><h3>${esc(r.product_name||'Sin producto')}</h3><p>${esc(r.account_email||'')}</p></div>
+          <div class="pq-head-badges">${statusChip(r)}<span class="pq-provider-pill">${esc(r.provider_name||'Sin proveedor')}</span></div>
+        </header>
+        <div class="pq-mother-body">
+          <section id="pq-editor-${r.id}" class="pq-finance-editor" data-product-sale="${num(r.product_sale_price)}">
+            <div class="pq-subhead"><div><span class="pq-mini-label">CONFIGURACIÓN FINANCIERA</span><h4>Compra y precio de venta</h4></div></div>
+            <div class="pq-form-grid">
+              <label>Proveedor<input id="pq-provider-${r.id}" value="${esc(r.provider_name||'')}" placeholder="Ej. Digitalvnhe"/></label>
+              <label>Costo de compra · cuenta completa<input id="pq-cost-${r.id}" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Ej. 200.00" oninput="updateMotherCostPreview(${r.id})"/></label>
+              <label>Precio de venta al vendedor · cuenta completa<input id="pq-sale-full-${r.id}" type="number" min="0" step="0.01" value="${r.sale_price_full===null?'':num(r.sale_price_full)}" placeholder="Ej. 300.00" oninput="updateMotherCostPreview(${r.id})"/></label>
+            </div>
+            <label class="pq-check pq-wide-check"><input id="pq-by-profile-${r.id}" type="checkbox" ${r.sell_by_profile?'checked':''} onchange="updateMotherCostPreview(${r.id})"/> <span>Esta cuenta también se controla y vende por perfiles</span></label>
+            <div id="pq-profile-settings-${r.id}" class="pq-profile-settings pq-profile-settings-v13 ${r.sell_by_profile?'':'hidden'}">
+              <label>Perfiles totales<input id="pq-profile-count-${r.id}" type="number" min="1" max="500" step="1" value="${r.configured_profile_count===null?'':num(r.configured_profile_count)}" placeholder="Ej. 7" oninput="updateMotherCostPreview(${r.id})"/></label>
+              <label>Costo manual por perfil <small>(opcional)</small><input id="pq-profile-cost-${r.id}" type="number" min="0" step="0.01" value="${r.profile_cost_override===null?'':num(r.profile_cost_override)}" placeholder="Vacío = costo ÷ perfiles" oninput="updateMotherCostPreview(${r.id})"/></label>
+              <label>Precio de venta al vendedor · perfil<input id="pq-sale-profile-${r.id}" type="number" min="0" step="0.01" value="${r.sale_price_profile===null?'':num(r.sale_price_profile)}" placeholder="Ej. 60.00" oninput="updateMotherCostPreview(${r.id})"/></label>
+            </div>
+            <div id="pq-cost-preview-${r.id}" class="pq-cost-preview pq-cost-preview-v13"></div>
+            <div class="pq-product-reference">Productos actualmente: venta <b>${money(r.product_sale_price)}</b> · costo <b>${money(r.product_cost_price)}</b>. Sólo se usa como respaldo cuando esta cuenta no tiene precio/costo propio.</div>
+            <button class="primary-btn pq-save-cost" onclick="saveMotherAnalyticsMeta(${r.id})">Guardar configuración financiera</button>
+          </section>
+
+          <section class="pq-account-stats">
+            <div class="pq-subhead"><div><span class="pq-mini-label">INVENTARIO</span><h4>Movimiento de perfiles</h4></div></div>
+            <div class="pq-stat-grid">
+              <div><span>Perfiles cargados</span><b>${num(r.profile_count)}</b></div>
+              <div><span>Disponibles ahora</span><b>${num(r.available_profiles)}</b></div>
+              <div><span>Entregados ahora</span><b>${num(r.delivered_profiles)}</b></div>
+              <div><span>Ventas detectadas históricas</span><b>${soldDetected}</b></div>
+            </div>
+            <div class="pq-cost-line"><span>Costo usado por unidad</span><b>${r.effective_unit_cost===null?'—':money(r.effective_unit_cost)}</b></div>
+            <div class="pq-cost-line"><span>Precio de venta referencia</span><b>${reference}</b></div>
+            ${inferred>0?`<div class="pq-inline-warning">⚠ ${inferred} unidad(es) salieron del inventario sin un pedido histórico enlazado. El histórico inferior las estima con el precio de venta configurado.</div>`:''}
+          </section>
+
+          <section class="pq-period-card">
+            <span class="pq-mini-label">PERIODO SELECCIONADO</span><h4>Rentabilidad real del rango</h4>
+            <div class="pq-stat-grid compact">
+              <div><span>Pedidos</span><b>${num(r.orders)}</b></div>
+              <div><span>Ingreso admin</span><b>${money(r.admin_revenue)}</b></div>
+              <div><span>Costo vendido</span><b>${money(r.sale_cost)}</b></div>
+              <div><span>Reemplazos</span><b>${money(r.replacement_cost)}</b></div>
+              <div><span>Utilidad</span><b class="${num(r.profit)<0?'error':'success'}">${money(r.profit)}</b></div>
+              <div><span>Margen</span><b>${pct(r.margin_percent)}</b></div>
+            </div>
+          </section>
+
+          <section class="pq-lifetime-card">
+            <span class="pq-mini-label">HISTÓRICO DE LA CUENTA</span><h4>Lo que ya ha producido esta cuenta</h4>
+            <div class="pq-stat-grid compact">
+              <div><span>Unidades ligadas a pedidos</span><b>${linked}</b></div>
+              <div><span>Pedidos históricos</span><b>${num(r.lifetime_orders)}</b></div>
+              <div><span>Ingreso histórico</span><b>${money(r.lifetime_revenue)}</b></div>
+              <div><span>Costo consumido</span><b>${money(r.lifetime_sale_cost)}</b></div>
+              <div><span>Utilidad bruta histórica</span><b class="${num(r.lifetime_profit)<0?'error':'success'}">${money(r.lifetime_profit)}</b></div>
+              <div><span>Margen histórico</span><b>${pct(r.lifetime_margin_percent)}</b></div>
+            </div>
+            ${num(r.lifetime_inferred_revenue)>0?`<p class="pq-estimate-note">Incluye <b>${money(r.lifetime_inferred_revenue)}</b> estimados por ${inferred} unidad(es) sin pedido enlazado. Las ventas con pedido siempre usan su importe real.</p>`:''}
+          </section>
+        </div>
+      </article>`;
+    }).join('')}</div>`;
+    active.forEach(r=>updateMotherCostPreview(r.id));
   }
 
   function renderQuality(id,rows){
@@ -238,18 +329,22 @@
       const sellByProfile=!!document.getElementById(`pq-by-profile-${id}`)?.checked;
       const countRaw=(document.getElementById(`pq-profile-count-${id}`)?.value||'').trim();
       const profileCostRaw=(document.getElementById(`pq-profile-cost-${id}`)?.value||'').trim();
+      const fullSaleRaw=(document.getElementById(`pq-sale-full-${id}`)?.value||'').trim();
+      const profileSaleRaw=(document.getElementById(`pq-sale-profile-${id}`)?.value||'').trim();
       const body={
         provider_name:provider,
         purchase_cost_total:raw===''?null:raw,
         sell_by_profile:sellByProfile,
         configured_profile_count:sellByProfile && countRaw!==''?countRaw:null,
-        profile_cost_override:sellByProfile && profileCostRaw!==''?profileCostRaw:null
+        profile_cost_override:sellByProfile && profileCostRaw!==''?profileCostRaw:null,
+        sale_price_full:fullSaleRaw===''?null:fullSaleRaw,
+        sale_price_profile:sellByProfile && profileSaleRaw!==''?profileSaleRaw:null
       };
       const result=await api(`/api/admin/mother-accounts/${id}/analytics-meta`,{method:'PATCH',body:JSON.stringify(body)});
-      if(typeof showMessage==='function') showMessage(result.message||'Costo actualizado');
+      if(typeof showMessage==='function') showMessage(result.message||'Configuración financiera actualizada');
       await loadProfitQuality();
       if(typeof loadMasterOperations==='function') loadMasterOperations(false);
-    }catch(e){if(typeof showMessage==='function')showMessage(e.message||'Error guardando proveedor/costo','error');}
+    }catch(e){if(typeof showMessage==='function')showMessage(e.message||'Error guardando configuración financiera','error');}
   };
 
   if(typeof registerSectionHook==='function'){

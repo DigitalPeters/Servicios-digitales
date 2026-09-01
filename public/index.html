@@ -647,6 +647,7 @@
             <div><label class="field-label">Hasta</label><input id="profitQualityEnd" type="date" /></div>
             <button class="outline-btn" style="width:auto" onclick="setProfitQualityCurrentMonth()">Mes actual</button>
             <button class="outline-btn" style="width:auto" onclick="setProfitQualityLast30Days()">Últimos 30 días</button>
+            <button class="outline-btn" style="width:auto" onclick="setProfitQualityAllHistory()">Todo el historial</button>
           </div>
         </div>
 
@@ -670,7 +671,7 @@
             <div id="pqProviders">Sin datos.</div>
           </div>
           <div class="panel">
-            <div class="panel-head"><div><h2>Rentabilidad por cuenta madre</h2><p class="small-text">Configura el costo real que pagas por cada cuenta. Si la cuenta se vende por perfiles, indica cuántos incluye: el sistema calcula el costo individual automáticamente, o puedes capturarlo manualmente. Ese costo alimenta las ventas futuras, la rentabilidad y el Centro de control.</p></div></div>
+            <div class="panel-head"><div><h2>Rentabilidad por cuenta madre</h2><p class="small-text">Cada cuenta funciona como una unidad financiera: proveedor, costo de compra, perfiles, costo unitario y precio de venta al vendedor. El bloque <b>Periodo seleccionado</b> respeta las fechas superiores; el bloque <b>Histórico de la cuenta</b> permanece acumulado para que una venta anterior no desaparezca del análisis.</p></div></div>
             <div id="pqMotherAccounts">Sin datos.</div>
           </div>
         </div>
@@ -904,7 +905,7 @@
 <script src="dashboard-stock-alerts.js?v=4"></script>
 <script src="app.js?v=22"></script>
 <script src="admin-users-distributor.js?v=11"></script>
-<script src="admin-profit-quality.js?v=2"></script>
+<script src="admin-profit-quality.js?v=3"></script>
 <script src="master-admin.js?v=1.1"></script>
 
   <div id="modalStatusCSV" class="modal-status-csv hidden" aria-hidden="true">

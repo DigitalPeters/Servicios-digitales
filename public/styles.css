@@ -2748,3 +2748,77 @@ body.modal-open{
 #section-profit-quality .pq-mother-table td:nth-child(3){min-width:210px}
 #section-profit-quality .pq-mother-table th:nth-child(n+4),
 #section-profit-quality .pq-mother-table td:nth-child(n+4){min-width:120px}
+
+/* ============================================================
+   MASTER V1.3 - RENTABILIDAD REAL / CUENTAS MADRE RESPONSIVAS
+   ============================================================ */
+#section-profit-quality{overflow-x:hidden}
+#section-profit-quality .panel{min-width:0}
+
+.pq-provider-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(310px,1fr));
+  gap:14px;
+}
+.pq-provider-card{
+  border:1px solid #e4e9f1;
+  border-radius:18px;
+  padding:18px;
+  background:#fff;
+  min-width:0;
+  box-shadow:0 8px 22px rgba(15,23,42,.04);
+}
+.pq-provider-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
+.pq-provider-head h3{margin:2px 0 0;font-size:1.12rem;overflow-wrap:anywhere}
+.pq-provider-count,.pq-provider-pill{display:inline-flex;align-items:center;border-radius:999px;padding:6px 10px;background:#f1f5f9;color:#475569;font-size:.76rem;font-weight:800;white-space:nowrap}
+.pq-mini-label{display:block;font-size:.68rem;letter-spacing:.12em;font-weight:900;color:#2563eb;margin-bottom:3px}
+.pq-provider-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.pq-provider-metrics>div,.pq-stat-grid>div{padding:10px;border-radius:12px;background:#f8fafc;border:1px solid #edf1f6;min-width:0}
+.pq-provider-metrics span,.pq-stat-grid span{display:block;font-size:.72rem;color:#64748b;margin-bottom:3px}
+.pq-provider-metrics b,.pq-stat-grid b{font-size:.96rem;color:#0f172a;overflow-wrap:anywhere}
+.pq-provider-foot{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px;padding-top:10px;border-top:1px solid #edf1f6;color:#64748b;font-size:.78rem}
+.pq-provider-foot b{color:#0f172a}
+
+.pq-mother-list{display:grid;gap:18px;width:100%;min-width:0}
+.pq-mother-card{border:1px solid #dfe6ef;border-radius:20px;background:#fff;overflow:hidden;min-width:0;box-shadow:0 10px 28px rgba(15,23,42,.045)}
+.pq-mother-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 20px;border-bottom:1px solid #e8edf4;background:linear-gradient(180deg,#fbfdff,#f8fafc)}
+.pq-mother-head h3{margin:2px 0 3px;font-size:1.16rem;color:#0f172a}
+.pq-mother-head p{margin:0;color:#64748b;font-size:.86rem;overflow-wrap:anywhere}
+.pq-head-badges{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}
+.pq-mother-body{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(260px,.7fr);gap:14px;padding:16px;min-width:0}
+.pq-finance-editor,.pq-account-stats,.pq-period-card,.pq-lifetime-card{border:1px solid #e5eaf1;border-radius:16px;padding:15px;background:#fff;min-width:0}
+.pq-finance-editor{grid-row:span 2;background:#fbfdff}
+.pq-subhead{display:flex;justify-content:space-between;gap:10px;margin-bottom:12px}.pq-subhead h4,.pq-period-card h4,.pq-lifetime-card h4{margin:1px 0 0;font-size:1rem;color:#111827}
+.pq-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.pq-form-grid label,.pq-profile-settings-v13 label{display:grid;gap:5px;color:#334155;font-size:.76rem;font-weight:800;min-width:0}
+.pq-form-grid label:first-child{grid-column:1/-1}
+.pq-form-grid input,.pq-profile-settings-v13 input{width:100%;min-width:0;box-sizing:border-box;border:1px solid #cfd9e7;border-radius:11px;padding:10px 11px;background:#fff;color:#172033;font-size:.9rem}
+.pq-wide-check{margin:10px 0!important}
+.pq-profile-settings-v13{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px;border:1px solid #e1e8f1;border-radius:14px;background:#f7faff}
+.pq-profile-settings-v13.hidden{display:none!important}
+.pq-cost-preview-v13{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;background:transparent!important;padding:0!important}
+.pq-cost-preview-v13>div{display:grid;gap:2px;padding:10px;border-radius:12px;background:#eef6ff;border:1px solid #dbeafe;min-width:0}
+.pq-cost-preview-v13 span{font-size:.68rem;color:#64748b}.pq-cost-preview-v13 b{font-size:.95rem!important}.pq-cost-preview-v13 small{font-size:.68rem;color:#64748b}
+.pq-product-reference{margin-top:9px;padding:9px 10px;border-radius:11px;background:#f8fafc;color:#64748b;font-size:.73rem;line-height:1.35}
+.pq-save-cost{margin-top:10px!important}
+.pq-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.pq-stat-grid.compact{margin-top:10px}
+.pq-cost-line{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;padding:9px 10px;border-radius:11px;background:#f8fafc;color:#64748b;font-size:.76rem}.pq-cost-line b{color:#0f172a;font-size:.94rem}
+.pq-inline-warning{margin:10px 0 0;padding:9px 10px;border-radius:11px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:.75rem;line-height:1.35}
+.pq-estimate-note{margin:10px 0 0;padding:9px 10px;border-radius:11px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:.75rem;line-height:1.35}
+.pq-period-card{background:#fcfcfd}.pq-lifetime-card{background:#f8fffb;border-color:#d8eee2}
+
+.master-actions-owner-only button small{display:block;font-size:.68rem;font-weight:600;color:#667085;margin-top:1px}
+
+@media(max-width:1050px){
+  .pq-mother-body{grid-template-columns:1fr}
+  .pq-finance-editor{grid-row:auto}
+}
+@media(max-width:760px){
+  .pq-provider-grid{grid-template-columns:1fr}
+  .pq-provider-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pq-mother-head{flex-direction:column}
+  .pq-head-badges{justify-content:flex-start}
+  .pq-form-grid,.pq-profile-settings-v13,.pq-cost-preview-v13,.pq-stat-grid{grid-template-columns:1fr}
+  .pq-form-grid label:first-child{grid-column:auto}
+}
+.pq-provider-section-title{margin:10px 0 7px;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;font-weight:900;color:#64748b}.pq-provider-section-title.historical{margin-top:14px;color:#047857}.pq-provider-history>div{background:#f5fbf7;border-color:#e0f2e7}

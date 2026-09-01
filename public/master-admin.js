@@ -122,11 +122,9 @@
             <div class="master-section-heading">
               <div><span class="master-eyebrow">ACCESOS</span><h2>Acciones del dueño</h2></div>
             </div>
-            <div class="master-actions">
-              <button onclick="openMasterLedger()"><span>💰</span><b>Libro de saldo</b></button>
-              <button onclick="openMasterAudit()"><span>🛡️</span><b>Bitácora admin</b></button>
-              <button onclick="openBalanceRequests()"><span>💳</span><b>Validar saldo</b></button>
-              <button onclick="openAccountReportsFromDashboard()"><span>⚠️</span><b>Atender fallas</b></button>
+            <div class="master-actions master-actions-owner-only">
+              <button onclick="openMasterLedger()"><span>💰</span><b>Libro de saldo</b><small>Movimientos y trazabilidad</small></button>
+              <button onclick="openMasterAudit()"><span>🛡️</span><b>Bitácora admin</b><small>Seguridad y acciones</small></button>
             </div>
             <div id="masterOpsUpdated" class="master-updated"></div>
           </section>
