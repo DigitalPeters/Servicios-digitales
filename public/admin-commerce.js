@@ -439,7 +439,9 @@ async function updateOrderStatus(id){
       loadMyOrders(),
       loadUsers(),
       loadPlatformInventory(),
-      loadSalesReport()
+      loadSalesReport(),
+      typeof loadMasterOperations==='function' ? loadMasterOperations(false) : Promise.resolve(),
+      typeof loadMasterManualDeliveries==='function' ? loadMasterManualDeliveries() : Promise.resolve()
     ]);
   }catch(e){showMessage(e.message||'Error actualizando pedido','error')}
 }

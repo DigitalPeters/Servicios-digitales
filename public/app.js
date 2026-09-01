@@ -295,6 +295,7 @@ function updateInventoryPagerInfo(page,totalPages){
 window.loadPlatformInventory = async function(page = currentInventoryPage) {
   if(currentUser?.role !== 'admin') return;
   try {
+    loadInventorySupplierSuggestions().catch(()=>{});
     if(!__productsLoadedOnce && typeof loadProducts === 'function') await loadProducts();
     populatePlatformProductSelect();
     
@@ -394,6 +395,20 @@ async function markPlatformAccountSoldOutside(id){
 }
 
 
+let inventorySupplierSuggestionsLoaded = false;
+async function loadInventorySupplierSuggestions(force=false){
+  const list=document.getElementById('inventorySupplierSuggestions');
+  if(!list || (inventorySupplierSuggestionsLoaded && !force)) return;
+  try{
+    const data=await api('/api/admin/master/suppliers');
+    const names=[...new Set((data?.suppliers||[]).map(s=>String(s?.name||'').trim()).filter(Boolean))];
+    list.innerHTML=names.map(name=>`<option value="${safeText(name)}"></option>`).join('');
+    inventorySupplierSuggestionsLoaded=true;
+  }catch(_){
+    // El inventario sigue funcionando aunque el módulo de proveedores no esté disponible.
+  }
+}
+
 async function createPlatformAccount(){
   try{
     const productId=document.getElementById('platformProductSelect')?.value;
@@ -455,6 +470,8 @@ async function createPlatformAccount(){
     if(document.getElementById('platformPurchasePrice')) document.getElementById('platformPurchasePrice').value='';
     if(document.getElementById('platformReusable')) document.getElementById('platformReusable').checked=false;
     
+    inventorySupplierSuggestionsLoaded=false;
+    loadInventorySupplierSuggestions(true).catch(()=>{});
     await loadPlatformInventory();
   }catch(e){
     showMessage(e.message||'Error guardando cuenta','error')
@@ -1036,8 +1053,6 @@ function renderInventoryHistorySummary(events) {
 
 function renderInventoryHistoryEventCard(evento) {
   const fechaIngreso = evento.fecha_ingreso ? new Date(evento.fecha_ingreso) : null;
-  const fechaEntrega = evento.fecha_entrega ? new Date(evento.fecha_entrega) : null;
-  const ordenCreada = evento.orden_creada ? new Date(evento.orden_creada) : null;
   let fechaVencimiento = parseInventoryHistoryDate(getInventoryHistoryExpirationDate(evento));
   if (!fechaVencimiento) {
     const fechaOficial = parseInventoryHistoryDate(getInventoryHistoryOfficialDate(evento));
@@ -1047,27 +1062,58 @@ function renderInventoryHistoryEventCard(evento) {
     }
   }
   const diasRestantes = fechaVencimiento ? Math.max(0, Math.ceil((fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24))) : '-';
-  const eventoTipo = evento.status === 'failed' || evento.orden_status === 'failed' ? 'Reemplazo por falla' : evento.orden_id ? 'Venta normal a vendedor' : 'Ingreso al inventario';
-  const vendedor = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : 'Sin vendedor asignado';
-  const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Sin perfil';
-  const pedido = evento.orden_id ? `Pedido #${safeText(evento.orden_id)} (${safeText(evento.orden_status || 'sin estado')})` : 'No vendido aún';
+  const perfil = evento.profile_name ? `${safeText(evento.profile_name)}${evento.profile_pin ? ` | PIN: ${safeText(evento.profile_pin)}` : ''}` : 'Cuenta completa / sin perfil';
+  const parseRows = value => {
+    if (Array.isArray(value)) return value;
+    try { const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value; return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; }
+  };
+  const ventas = parseRows(evento.ventas_historial);
+  const reportes = parseRows(evento.reportes_historial);
+  const recuperaciones = parseRows(evento.recuperaciones_historial);
+  const trazas = parseRows(evento.eventos_trazabilidad);
+  const currentBuyer = evento.comprador_nombre ? `${safeText(evento.comprador_nombre)} (${safeText(evento.comprador_email || 'sin email')})` : '';
+  const origin = safeText(evento.ingreso_origen || 'Histórico / origen no registrado');
+  const replacementInfo = evento.reemplaza_cuenta_madre_id
+    ? `Reemplaza cuenta madre #${safeText(evento.reemplaza_cuenta_madre_id)}`
+    : evento.reemplazada_por_cuenta_madre_id
+      ? `Fue reemplazada por cuenta madre #${safeText(evento.reemplazada_por_cuenta_madre_id)}`
+      : 'Sin reemplazo de cuenta madre';
+
+  const salesHtml = ventas.length ? ventas.map(v => `
+    <div class="trace-sub-event trace-sale-event">
+      <b>Venta / pedido #${safeText(v.orden_id || '-')}</b>
+      <span>${safeText(v.producto || evento.product_name || '')} · ${safeText(v.modalidad || evento.modalidad_venta || 'venta')}</span>
+      <span><strong>Compró:</strong> ${safeText(v.comprador_nombre || v.comprador_email || 'Usuario')}</span>
+      <span><strong>Tipo:</strong> ${safeText(v.comprador_tipo || 'vendedor')}${v.distribuidor_nombre ? ` · <strong>Distribuidor:</strong> ${safeText(v.distribuidor_nombre)}` : ''}</span>
+      <span><strong>Monto:</strong> $${formatMoney(v.orden_amount || 0)} · <strong>Estado:</strong> ${safeText(v.orden_status || '')}</span>
+      <span><strong>Fecha:</strong> ${v.orden_creada ? new Date(v.orden_creada).toLocaleString('es-MX') : '-'}</span>
+      ${v.venta_recuperada ? '<span class="small-text">Esta asignación ya fue recuperada/liberada, pero se conserva en el historial.</span>' : ''}
+    </div>`).join('') : `<div class="trace-sub-event"><span>No hay venta histórica enlazada a este perfil.</span>${currentBuyer ? `<span>Asignación actual: ${currentBuyer}</span>` : ''}</div>`;
+
+  const reportsHtml = reportes.length ? reportes.map(r => `
+    <div class="trace-sub-event trace-report-event">
+      <b>Reporte #${safeText(r.id || '-')} · ${safeText(r.issue_type || 'falla')}</b>
+      <span>${r.papel === 'usada_como_reemplazo' ? 'Esta cuenta se utilizó para reemplazar otra.' : 'Esta cuenta fue reportada con falla.'}</span>
+      <span><strong>Pedido:</strong> #${safeText(r.order_id || '-')} · <strong>Estado:</strong> ${safeText(r.status || '')} · <strong>Resolución:</strong> ${safeText(r.resolution_type || '-')}</span>
+      <span><strong>Fecha:</strong> ${r.created_at ? new Date(r.created_at).toLocaleString('es-MX') : '-'}</span>
+    </div>`).join('') : '<div class="trace-sub-event"><span>Sin reportes de falla/reemplazo ligados.</span></div>';
 
   return `
-    <div class="timeline-event">
-      <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleDateString('es-MX')} ${fechaIngreso.toLocaleTimeString('es-MX')}` : 'Fecha no disponible'}</div>
-      <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')}</div>
-      <div class="timeline-details">
-        <p><strong>Tipo de evento:</strong> ${safeText(eventoTipo)}</p>
-        <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')}</p>
-        <p><strong>Perfil vendido:</strong> ${perfil}</p>
-        <p><strong>Vendedor:</strong> ${vendedor}</p>
-        <p><strong>${pedido}</strong></p>
-        ${ordenCreada ? `<p><strong>Fecha de venta:</strong> ${ordenCreada.toLocaleDateString('es-MX')}</p>` : ''}
-        ${fechaEntrega ? `<p><strong>Entrega registrada:</strong> ${fechaEntrega.toLocaleDateString('es-MX')}</p>` : ''}
+    <div class="timeline-event trace-v15-event">
+      <div class="timeline-date">${fechaIngreso ? `Ingreso: ${fechaIngreso.toLocaleString('es-MX')}` : 'Fecha de ingreso no disponible'}</div>
+      <div class="timeline-title">${safeText(evento.platform || evento.product_name || 'Cuenta madre')} · Perfil #${safeText(evento.perfil_id || '-')}</div>
+      <div class="timeline-details trace-v15-main">
+        <p><strong>Origen de ingreso:</strong> ${origin}${evento.entry_batch_id ? ` · Lote ${safeText(evento.entry_batch_id)}` : ''}</p>
+        <p><strong>Cuenta madre:</strong> ${safeText(evento.cuenta_madre || 'Sin correo')} · ID #${safeText(evento.cuenta_madre_id || '-')}</p>
+        <p><strong>Perfil / acceso:</strong> ${perfil}</p>
+        <p><strong>Modalidad configurada:</strong> ${safeText(evento.modalidad_venta || (evento.vende_por_perfiles ? 'perfil' : 'cuenta completa'))}</p>
+        <p><strong>Garantía:</strong> vence ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No registrada'} · ${safeText(String(diasRestantes))} día(s) restante(s)</p>
         <p><strong>Estado actual:</strong> ${safeText(evento.status || evento.orden_status || 'Disponible')}</p>
-        <p><strong>Vence:</strong> ${fechaVencimiento ? fechaVencimiento.toLocaleDateString('es-MX') : 'No aplica'}</p>
-        <p><strong>Días restantes:</strong> ${safeText(String(diasRestantes))}</p>
+        <p><strong>Reemplazos:</strong> ${replacementInfo}</p>
+        <p><strong>Recuperaciones registradas:</strong> ${recuperaciones.length} · <strong>Eventos de trazabilidad:</strong> ${trazas.length}</p>
       </div>
+      <div class="trace-v15-block"><h4>Ventas / quién la compró</h4>${salesHtml}</div>
+      <div class="trace-v15-block"><h4>Fallas y reemplazos</h4>${reportsHtml}</div>
     </div>
   `;
 }
@@ -1158,6 +1204,8 @@ function renderInventoryHistoryModal(eventos) {
     <div class="trace-item"><strong class="trace-label">Fecha oficial de compra</strong><div class="trace-value">${formatInventoryHistoryDate(fechaOficial)}</div></div>
     <div class="trace-item"><strong class="trace-label">Vencimiento a 30 días</strong><div class="trace-value">${formatInventoryHistoryDate(fechaVencimiento)}</div></div>
     <div class="trace-item"><strong class="trace-label">Total de perfiles</strong><div class="trace-value">${totalProfiles}</div></div>
+    <div class="trace-item"><strong class="trace-label">Origen de ingreso</strong><div class="trace-value">${safeText(findCurrentValue('ingreso_origen') || 'Histórico / origen no registrado')}</div></div>
+    <div class="trace-item"><strong class="trace-label">Modalidad de venta</strong><div class="trace-value">${safeText(findCurrentValue('modalidad_venta') || '-')}</div></div>
     <div class="trace-item"><strong class="trace-label">Estado</strong><div class="trace-value">${safeText(estado)}</div></div>
   `;
 
@@ -4966,11 +5014,13 @@ function setupInventoryCsvUploadFlow(){
       try{ rows=parseInventoryCsvText(text); }catch{ rows=[]; }
       const result=await api('/api/admin/inventario/bulk-upload', {
         method:'POST',
-        body:JSON.stringify({ rows, csvText:text })
+        body:JSON.stringify({ rows, csvText:text, default_provider_name:(document.getElementById('csvDefaultProvider')?.value||'').trim() })
       });
 
       setCsvModalResultState(result.successCount, result.errorCount, result.errors);
       if(typeof loadPlatformInventory==='function') await loadPlatformInventory();
+      inventorySupplierSuggestionsLoaded=false;
+      loadInventorySupplierSuggestions(true).catch(()=>{});
       if(typeof loadExpiringCount==='function') await loadExpiringCount();
     }catch(e){
       setCsvModalResultState(0, 1, [e.message || 'Error procesando el archivo CSV']);

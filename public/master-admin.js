@@ -183,7 +183,7 @@
       if(kpis) kpis.innerHTML=`
         <button class="master-kpi master-kpi-money" onclick="openSalesReport()"><span class="master-kpi-top"><i>💵</i> Ventas hoy</span><b>$${money(d.sales_today?.revenue)}</b><small>${Number(d.sales_today?.orders||0)} pedidos completados</small></button>
         <button class="master-kpi master-kpi-profit" onclick="showSection('profit-quality')"><span class="master-kpi-top"><i>📈</i> Utilidad bruta</span><b>$${money(d.sales_today?.gross_profit)}</b><small>Venta menos costo registrado / producto</small></button>
-        <button class="master-kpi ${Number(d.pending_orders)>0?'master-kpi-warn':''}" onclick="openOrdersFromDashboard()"><span class="master-kpi-top"><i>▤</i> Pedidos pendientes</span><b>${Number(d.pending_orders||0)}</b><small>Por atender o en proceso</small></button>
+        <button class="master-kpi ${Number(d.pending_orders)>0?'master-kpi-warn':''}" onclick="typeof openMasterManualDeliveries==='function'?openMasterManualDeliveries():openOrdersFromDashboard()"><span class="master-kpi-top"><i>📥</i> Pedidos por atender</span><b>${Number(d.pending_orders||0)}</b><small>${Number(d.manual_delivery_pending||0)} de entrega manual</small></button>
         <button class="master-kpi ${Number(d.pending_reports)>0?'master-kpi-danger':''}" onclick="openAccountReportsFromDashboard()"><span class="master-kpi-top"><i>⚠️</i> Fallas pendientes</span><b>${Number(d.pending_reports||0)}</b><small>Requieren respuesta</small></button>
         <button class="master-kpi ${Number(d.pending_balance_requests)>0?'master-kpi-warn':''}" onclick="openBalanceRequests()"><span class="master-kpi-top"><i>💳</i> Saldo por validar</span><b>${Number(d.pending_balance_requests||0)}</b><small>$${money(d.pending_balance_amount)} solicitado</small></button>
         <button class="master-kpi" onclick="openInventoryFromDashboard()"><span class="master-kpi-top"><i>🔐</i> Stock disponible</span><b>${Number(d.inventory_available||0)}</b><small>Cuentas listas para vender</small></button>
@@ -193,7 +193,7 @@
       if(urgent){
         const rows=Array.isArray(d.urgent)?d.urgent:[];
         urgent.innerHTML=rows.length ? rows.map(item=>{
-          const action=item.type==='pedido' ? `openOrdersFromDashboard()` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : item.type==='stock' ? `openInventoryFromDashboard()` : `openBalanceRequests()`;
+          const action=item.type==='pedido' ? `(typeof openMasterManualDeliveries==='function'?openMasterManualDeliveries():openOrdersFromDashboard())` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : item.type==='stock' ? `openInventoryFromDashboard()` : `openBalanceRequests()`;
           const icon=item.type==='pedido'?'▤':item.type==='reporte'?'⚠️':item.type==='stock'?'📦':'💳';
           const age=item.type==='stock' ? 'reponer' : formatAge(item.age_minutes);
           return `<button class="master-urgent-item" onclick="${action}"><span class="master-urgent-icon">${icon}</span><span class="master-urgent-copy"><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></span><em>${age}</em><i>→</i></button>`;
@@ -201,6 +201,8 @@
       }
       const updated=document.getElementById('masterOpsUpdated');
       if(updated) updated.textContent=`Última actualización: ${new Date(d.generated_at || Date.now()).toLocaleString('es-MX')}`;
+      const deliveryCount=document.getElementById('masterManualDeliveryCount');
+      if(deliveryCount) deliveryCount.textContent=Number(d.manual_delivery_pending||0);
       bindMasterStats();
       if(showFeedback && typeof showMessage==='function') showMessage('Centro de control actualizado');
     }catch(e){

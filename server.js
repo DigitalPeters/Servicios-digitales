@@ -1476,6 +1476,9 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
   await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS manual_replacement_source TEXT DEFAULT ''`);
+  // MASTER V1.5: origen real de ingreso al inventario para trazabilidad.
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS entry_source TEXT DEFAULT 'legacy'`);
+  await pool.query(`ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS entry_batch_id TEXT DEFAULT ''`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_mother_account ON platform_accounts (mother_account_id)`);
 
@@ -1493,6 +1496,45 @@ async function initDatabase() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_recovery_order ON account_recovery_log(order_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_recovery_account ON account_recovery_log(account_id)`);
+
+  // La tabla ya existía en instalaciones anteriores; se asegura para que la
+  // búsqueda global pueda usarla también en instalaciones nuevas.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS account_traceability (
+      id BIGSERIAL PRIMARY KEY,
+      platform_account_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL DEFAULT '',
+      user_id INTEGER,
+      order_id INTEGER,
+      report_id INTEGER,
+      description TEXT DEFAULT '',
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS platform_account_id INTEGER`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS event_type TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS user_id INTEGER`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS order_id INTEGER`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS report_id INTEGER`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb`);
+  await pool.query(`ALTER TABLE account_traceability ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_traceability_account ON account_traceability(platform_account_id, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_traceability_order ON account_traceability(order_id)`);
+
+  // Para inventario histórico anterior a V1.5, una traza ACCOUNT_CREATED sólo
+  // era generada por la carga masiva. Se marca como inferida sin inventar
+  // origen para los demás registros antiguos.
+  await pool.query(`
+    UPDATE platform_accounts pa
+       SET entry_source = 'bulk_inferred'
+     WHERE COALESCE(NULLIF(pa.entry_source,''),'legacy') = 'legacy'
+       AND EXISTS (
+         SELECT 1 FROM account_traceability tr
+         WHERE tr.platform_account_id = pa.id AND tr.event_type = 'ACCOUNT_CREATED'
+       )
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS mother_accounts (
@@ -3728,8 +3770,8 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       `INSERT INTO platform_accounts
        (platform, product_name, account_email, account_password, profile_name, profile_pin,
         extra_data, terms_conditions, access_url, status, owner_admin_id, reusable,
-        official_purchase_date, purchase_price, mother_account_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13,$14)
+        official_purchase_date, purchase_price, mother_account_id, entry_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13,$14,'manual')
        RETURNING *`,
       [
         platform,
@@ -3749,6 +3791,13 @@ app.post("/api/admin/platform-accounts", authMiddleware, adminMiddleware, async 
       ]
     );
 
+    await addTraceEvent(client, {
+      accountId: result.rows[0].id,
+      eventType: 'ACCOUNT_CREATED',
+      userId: req.user.id,
+      description: 'Cuenta agregada manualmente al inventario',
+      metadata: { source:'manual', product:product_name, email:account_email || '', profile:profile_name || '', mother_account_id:motherAccount.id, provider_name: provider_name || motherAccount.provider_name || '' }
+    });
     await client.query("COMMIT");
     res.json(result.rows[0]);
   } catch (err) {
@@ -3993,6 +4042,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
   }
 
   const ownerId = req.isPanelAdmin ? req.user.id : null;
+  const defaultProviderName = String(req.body?.default_provider_name || '').trim().slice(0, 160);
   const productScopeClause = req.isPanelAdmin
     ? "owner_admin_id = $1"
     : "(owner_admin_id IS NULL OR owner_admin_id = 0)";
@@ -4027,7 +4077,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       const precioCompra = row.precio_compra;
       const explicitMotherId = normalizeOptionalPositiveId(row.cuenta_madre_id);
       const replacementMotherId = normalizeOptionalPositiveId(row.reemplaza_cuenta_madre_id);
-      const proveedor = String(row.proveedor || '').trim().slice(0, 160);
+      const proveedor = String(row.proveedor || defaultProviderName || '').trim().slice(0, 160);
       const costoCuentaMadre = normalizePurchasePrice(row.costo_cuenta_madre);
 
       if (!producto) {
@@ -4120,6 +4170,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     }
 
     let successCount = 0;
+    const bulkBatchId = `bulk-${Number(req.user?.id||0)}-${Date.now()}`;
     const newMotherCyclesInThisUpload = new Map();
 
     for (const item of preparedRows) {
@@ -4201,8 +4252,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
           `INSERT INTO platform_accounts
            (platform, product_name, account_email, account_password, profile_name, profile_pin,
             extra_data, terms_conditions, access_url, status, owner_admin_id, reusable,
-            official_purchase_date, purchase_price, mother_account_id, expires_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13,$14,$15)
+            official_purchase_date, purchase_price, mother_account_id, expires_at, entry_source, entry_batch_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'available',$10,$11,$12,$13,$14,$15,'bulk_csv',$16)
            RETURNING id`,
           [
             item.platform,
@@ -4219,7 +4270,8 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
             effectivePurchaseDate,
             item.purchase_price,
             motherAccount.id,
-            effectiveExpirationDate
+            effectiveExpirationDate,
+            bulkBatchId
           ]
         );
 
@@ -4237,7 +4289,10 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
             purchase_date: effectivePurchaseDate,
             purchase_price: item.purchase_price,
             mother_account_id: motherAccount.id,
-            replaces_mother_account_id: motherAccount.replaces_mother_account_id || null
+            replaces_mother_account_id: motherAccount.replaces_mother_account_id || null,
+            source: 'bulk_csv',
+            batch_id: bulkBatchId,
+            provider_name: item.provider_name || motherAccount.provider_name || ''
           }
         });
 
@@ -5947,8 +6002,8 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       const insertAccountResult = await client.query(
         `INSERT INTO platform_accounts
          (platform, product_name, account_email, account_password, profile_name, profile_pin,
-          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at, official_purchase_date)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12,$13)
+          extra_data, access_url, status, assigned_order_id, assigned_user_id, delivered_at, owner_admin_id, expires_at, official_purchase_date, entry_source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'delivered',$9,$10,NOW(),$11,$12,$13,'manual_replacement')
          RETURNING *`,
         [
           replacementPlatform,
@@ -6423,6 +6478,47 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
   }
 });
 
+
+// MASTER V1.5: cola dedicada de pedidos que requieren intervención/entrega del administrador.
+app.get('/api/admin/master/manual-deliveries', authMiddleware, adminMiddleware, async (req,res)=>{
+  try{
+    const ownerId=req.isPanelAdmin ? Number(req.user.id) : null;
+    const orderId=Number(req.query.order_id||0)||0;
+    const includeClosed=String(req.query.include_closed||'')==='1';
+    const limit=Math.min(200,Math.max(1,Number(req.query.limit||100)));
+    const result=await pool.query(`
+      SELECT o.id,o.user_id,o.product_id,o.amount,o.order_data,o.status,o.admin_response,o.delivered_account_data,
+             o.charged,o.refunded,o.created_at,o.payment_source,o.admin_quick_sale,
+             u.name AS customer_name,u.email AS customer_email,COALESCE(u.is_subadmin,false) AS customer_is_distributor,
+             du.name AS distributor_name,du.email AS distributor_email,
+             p.name AS product_name,p.category AS product_category,p.charge_mode,p.product_type,
+             CASE
+               WHEN lower(COALESCE(p.product_type,'')) LIKE '%manual%' THEN 'entrega_manual'
+               WHEN lower(COALESCE(p.product_type,'')) LIKE '%combo%' THEN 'combo_pendiente'
+               ELSE 'revisar_entrega_automatica'
+             END AS queue_reason
+      FROM orders o
+      JOIN users u ON u.id=o.user_id
+      LEFT JOIN users du ON du.id=u.owner_user_id AND COALESCE(du.is_subadmin,false)=true
+      JOIN products p ON p.id=o.product_id
+      WHERE (($1::int IS NULL AND (o.owner_admin_id IS NULL OR o.owner_admin_id=0)) OR o.owner_admin_id=$1)
+        AND ($3::boolean=true OR o.status IN ('accion_en_espera','en_proceso','pendiente'))
+        AND ($2::int=0 OR o.id=$2)
+      ORDER BY
+        CASE WHEN lower(COALESCE(p.product_type,'')) LIKE '%manual%' THEN 0 ELSE 1 END,
+        o.created_at ASC,o.id ASC
+      LIMIT $4`,[ownerId,orderId,includeClosed,limit]);
+    const rows=result.rows.map(r=>({
+      ...r,
+      buyer_type:r.customer_is_distributor ? 'distribuidor' : (r.distributor_name ? 'vendedor_de_distribuidor' : 'vendedor')
+    }));
+    res.json({rows,total:rows.length});
+  }catch(err){
+    console.error('Error cola de entregas:',err.message);
+    res.status(500).json({error:'No se pudo cargar la cola de pedidos por entregar'});
+  }
+});
+
 app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const ownerId = req.isPanelAdmin ? req.user.id : null;
@@ -6831,7 +6927,7 @@ app.post('/api/admin/master/inventory-purchases', authMiddleware, adminMiddlewar
 app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const ownScope = `(owner_admin_id IS NULL OR owner_admin_id = 0)`;
-    const [sales, pendingOrders, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance, lowStock] = await Promise.all([
+    const [sales, pendingOrders, manualDeliveries, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance, lowStock] = await Promise.all([
       pool.query(`WITH todays AS (
                     SELECT o.*, COALESCE(p.cost_price, 0) AS current_product_cost
                     FROM orders o
@@ -6870,7 +6966,8 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                          COALESCE(SUM(o.amount - COALESCE(c.effective_cost,0)),0)::numeric AS gross_profit
                   FROM todays o
                   LEFT JOIN costs c ON c.id=o.id`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso')`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso','pendiente')`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM orders o JOIN products p ON p.id=o.product_id WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso','pendiente') AND lower(COALESCE(p.product_type,'')) LIKE '%manual%'`),
       pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE ${ownScope} AND status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(amount),0)::numeric AS amount FROM balance_requests WHERE ${ownScope} AND status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS available FROM platform_accounts WHERE ${ownScope} AND status IN ('available','disponible')`),
@@ -6878,7 +6975,7 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       pool.query(`SELECT COUNT(*)::int AS total FROM mother_accounts WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL AND expiration_date <= ((NOW() AT TIME ZONE 'America/Mexico_City')::date + 7)`),
       pool.query(`SELECT o.id, o.created_at, o.status, o.amount, COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Pedido') AS title, u.name AS user_name, u.email AS user_email
                   FROM orders o LEFT JOIN products p ON p.id=o.product_id LEFT JOIN users u ON u.id=o.user_id
-                  WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso')
+                  WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso','pendiente')
                   ORDER BY o.created_at ASC LIMIT 5`),
       pool.query(`SELECT ar.id, ar.created_at, ar.issue_type, ar.email, u.name AS user_name, u.email AS user_email
                   FROM account_reports ar LEFT JOIN users u ON u.id=ar.user_id
@@ -6914,6 +7011,7 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       generated_at: new Date().toISOString(),
       sales_today: { orders:Number(sales.rows[0]?.orders||0), revenue:Number(sales.rows[0]?.revenue||0), gross_profit:Number(sales.rows[0]?.gross_profit||0) },
       pending_orders: Number(pendingOrders.rows[0]?.total||0),
+      manual_delivery_pending: Number(manualDeliveries.rows[0]?.total||0),
       pending_reports: Number(pendingReports.rows[0]?.total||0),
       pending_balance_requests: Number(pendingBalance.rows[0]?.total||0),
       pending_balance_amount: Number(pendingBalance.rows[0]?.amount||0),
@@ -7373,8 +7471,8 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
       } else {
         const insertedAccountResult = await client.query(
           `INSERT INTO platform_accounts
-           (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, assigned_order_id, assigned_user_id, delivered_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, 'delivered', $9, $10, NOW())
+           (platform, product_name, account_email, account_password, profile_name, profile_pin, extra_data, terms_conditions, access_url, status, assigned_order_id, assigned_user_id, delivered_at, entry_source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, 'delivered', $9, $10, NOW(), 'manual_delivery')
            RETURNING id`,
           [
             platformProduct.name,
@@ -9194,6 +9292,7 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
       END
     )`;
 
+    const includeBuyer = String(req.query.include_buyer || '') === '1';
     const selectSql = `
       SELECT
         pa.id AS perfil_id,
@@ -9215,11 +9314,32 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
         pa.assigned_order_id,
         pa.assigned_user_id,
         pa.mother_account_id AS cuenta_madre_id,
+        COALESCE(NULLIF(pa.entry_source,''), 'legacy') AS entry_source,
+        COALESCE(pa.entry_batch_id,'') AS entry_batch_id,
+        CASE
+          WHEN COALESCE(NULLIF(pa.entry_source,''),'legacy') = 'manual' THEN 'Ingreso manual'
+          WHEN COALESCE(NULLIF(pa.entry_source,''),'legacy') = 'bulk_csv' THEN 'Carga masiva CSV'
+          WHEN COALESCE(NULLIF(pa.entry_source,''),'legacy') = 'manual_delivery' THEN 'Entrega manual desde pedido'
+          WHEN COALESCE(NULLIF(pa.entry_source,''),'legacy') = 'manual_replacement' THEN 'Reemplazo manual'
+          WHEN COALESCE(NULLIF(pa.entry_source,''),'legacy') = 'bulk_inferred' THEN 'Carga masiva (histórico inferido)'
+          ELSE 'Histórico / origen no registrado'
+        END AS ingreso_origen,
         ma.original_purchase_date AS fecha_original_cuenta_madre,
         ${expirationDateExpression} AS vencimiento_cuenta_madre,
         ma.status AS mother_account_status,
         ma.replaces_mother_account_id AS reemplaza_cuenta_madre_id,
         ma.replaced_by_mother_account_id AS reemplazada_por_cuenta_madre_id,
+        COALESCE(ma.sell_by_profile,false) AS vende_por_perfiles,
+        ma.configured_profile_count AS perfiles_configurados,
+        ma.purchase_cost_total AS costo_compra_cuenta_madre,
+        COALESCE(ma.provider_name, '') AS proveedor,
+        ma.sale_price_full AS precio_venta_cuenta_completa,
+        ma.sale_price_profile AS precio_venta_perfil,
+        CASE
+          WHEN COALESCE(ma.sell_by_profile,false) THEN 'perfil'
+          WHEN lower(COALESCE(NULLIF(o.product_name_snapshot,''), pa.product_name, '')) LIKE '%perfil%' THEN 'perfil'
+          ELSE 'cuenta_completa'
+        END AS modalidad_venta,
         CASE
           WHEN pa.mother_account_id IS NOT NULL THEN (
             SELECT COUNT(*)::int
@@ -9239,19 +9359,103 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
         COALESCE(u.name, '') AS comprador_nombre,
         COALESCE(u.email, '') AS comprador_email,
         COALESCE(u.role, '') AS comprador_rol,
+        COALESCE(u.is_subadmin,false) AS comprador_es_distribuidor,
+        COALESCE(distributor_u.name, '') AS distribuidor_nombre,
+        COALESCE(distributor_u.email, '') AS distribuidor_email,
+        CASE
+          WHEN COALESCE(u.is_subadmin,false) THEN 'distribuidor'
+          WHEN u.id IS NOT NULL AND distributor_u.id IS NOT NULL THEN 'vendedor_de_distribuidor'
+          WHEN u.id IS NOT NULL THEN 'vendedor'
+          ELSE ''
+        END AS comprador_tipo,
         o.id AS orden_id,
         o.status AS orden_status,
         o.created_at AS orden_creada,
-        o.amount AS orden_amount
+        o.amount AS orden_amount,
+        COALESCE((
+          SELECT json_agg(sale_row ORDER BY sale_row.orden_creada DESC, sale_row.orden_id DESC)
+          FROM (
+            SELECT DISTINCT
+              oh.id AS orden_id,
+              oh.status AS orden_status,
+              oh.created_at AS orden_creada,
+              oh.amount AS orden_amount,
+              COALESCE(NULLIF(oh.product_name_snapshot,''), ph.name, pa.product_name, 'Producto') AS producto,
+              CASE
+                WHEN COALESCE(ma.sell_by_profile,false) THEN 'perfil'
+                WHEN lower(COALESCE(NULLIF(oh.product_name_snapshot,''),ph.name,'')) LIKE '%perfil%' THEN 'perfil'
+                ELSE 'cuenta_completa'
+              END AS modalidad,
+              bu.id AS comprador_id,
+              COALESCE(bu.name,'') AS comprador_nombre,
+              COALESCE(bu.email,'') AS comprador_email,
+              CASE
+                WHEN COALESCE(bu.is_subadmin,false) THEN 'distribuidor'
+                WHEN du.id IS NOT NULL THEN 'vendedor_de_distribuidor'
+                ELSE 'vendedor'
+              END AS comprador_tipo,
+              COALESCE(du.name,'') AS distribuidor_nombre,
+              COALESCE(du.email,'') AS distribuidor_email,
+              EXISTS(SELECT 1 FROM account_recovery_log arlx WHERE arlx.account_id=pa.id AND arlx.order_id=oh.id) AS venta_recuperada
+            FROM orders oh
+            LEFT JOIN products ph ON ph.id=oh.product_id
+            LEFT JOIN users bu ON bu.id=oh.user_id
+            LEFT JOIN users du ON du.id=bu.owner_user_id AND COALESCE(du.is_subadmin,false)=true
+            WHERE oh.id=pa.assigned_order_id
+               OR EXISTS(SELECT 1 FROM account_recovery_log arl WHERE arl.account_id=pa.id AND arl.order_id=oh.id)
+          ) sale_row
+        ), '[]'::json) AS ventas_historial,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'id', ar.id,
+            'issue_type', ar.issue_type,
+            'status', ar.status,
+            'created_at', ar.created_at,
+            'reviewed_at', ar.reviewed_at,
+            'resolution_type', ar.resolution_type,
+            'order_id', ar.order_id,
+            'reported_account_id', ar.reported_account_id,
+            'replacement_account_id', ar.replacement_account_id,
+            'papel', CASE WHEN ar.reported_account_id=pa.id THEN 'reportada' WHEN ar.replacement_account_id=pa.id THEN 'usada_como_reemplazo' ELSE 'relacionada' END
+          ) ORDER BY ar.created_at DESC)
+          FROM account_reports ar
+          WHERE COALESCE(ar.owner_admin_id,0)=COALESCE(pa.owner_admin_id,0)
+            AND (
+              ar.reported_account_id=pa.id
+              OR ar.replacement_account_id=pa.id
+              OR (ar.reported_account_id IS NULL AND ar.replacement_account_id IS NULL AND lower(trim(COALESCE(ar.email,'')))=lower(trim(COALESCE(pa.account_email,''))))
+            )
+        ), '[]'::json) AS reportes_historial,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'order_id', arl.order_id,
+            'user_id', arl.user_id,
+            'delivered_at', arl.delivered_at,
+            'recovered_at', arl.recovered_at
+          ) ORDER BY arl.recovered_at DESC)
+          FROM account_recovery_log arl WHERE arl.account_id=pa.id
+        ), '[]'::json) AS recuperaciones_historial,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'event_type', tr.event_type,
+            'description', tr.description,
+            'order_id', tr.order_id,
+            'report_id', tr.report_id,
+            'created_at', tr.created_at,
+            'metadata', tr.metadata
+          ) ORDER BY tr.created_at DESC)
+          FROM account_traceability tr WHERE tr.platform_account_id=pa.id
+        ), '[]'::json) AS eventos_trazabilidad
       FROM platform_accounts pa
       LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
       LEFT JOIN orders o ON pa.assigned_order_id = o.id
       LEFT JOIN users u ON pa.assigned_user_id = u.id
+      LEFT JOIN users distributor_u ON distributor_u.id = u.owner_user_id AND COALESCE(distributor_u.is_subadmin,false)=true
     `;
 
     let result;
 
-    if (isEmailSearch) {
+    if (isEmailSearch && !includeBuyer) {
       // Un correo se interpreta exclusivamente como correo de CUENTA MADRE.
       // Primero localizamos sus mother_account_id exactos y después seguimos
       // únicamente la cadena de reemplazos relacionada con esos IDs.
@@ -9311,6 +9515,7 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
           AND (
             pa.assigned_order_id = $1::int
             OR o.id = $1::int
+            OR EXISTS (SELECT 1 FROM account_recovery_log arl_search WHERE arl_search.account_id=pa.id AND arl_search.order_id=$1::int)
             OR pa.id = $1::int
             OR regexp_replace(lower(COALESCE(pa.profile_pin, '')), '\\s+', '', 'g') = $3
           )
@@ -9336,19 +9541,38 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
             OR regexp_replace(lower(COALESCE(pa.profile_pin, '')), '\\s+', '', 'g') LIKE $2
             OR lower(COALESCE(pa.product_name, '')) LIKE $1
             OR lower(COALESCE(pa.platform, '')) LIKE $1
+            OR (${includeBuyer ? 'true' : 'false'} AND (
+              lower(COALESCE(u.name,'')) LIKE $1
+              OR lower(COALESCE(u.email,'')) LIKE $1
+              OR lower(COALESCE(distributor_u.name,'')) LIKE $1
+              OR lower(COALESCE(distributor_u.email,'')) LIKE $1
+              OR EXISTS (
+                SELECT 1
+                FROM account_recovery_log arlb
+                JOIN orders ob ON ob.id=arlb.order_id
+                JOIN users ub ON ub.id=ob.user_id
+                LEFT JOIN users dub ON dub.id=ub.owner_user_id AND COALESCE(dub.is_subadmin,false)=true
+                WHERE arlb.account_id=pa.id AND (
+                  lower(COALESCE(ub.name,'')) LIKE $1 OR lower(COALESCE(ub.email,'')) LIKE $1
+                  OR lower(COALESCE(dub.name,'')) LIKE $1 OR lower(COALESCE(dub.email,'')) LIKE $1
+                )
+              )
+            ))
           )
         ORDER BY
           ${officialDateExpression} DESC NULLS LAST,
           pa.created_at DESC NULLS LAST,
           pa.delivered_at DESC NULLS LAST,
-          pa.id DESC;
+          pa.id DESC
+        ${includeBuyer ? 'LIMIT 80' : ''};
       `;
       result = await pool.query(textQuery, [likeSearch, likeNormalizedSearch, scopeOwnerId]);
     }
 
     res.json({
       events: result.rows || [],
-      search_mode: isEmailSearch ? 'mother_email' : (isNumericSearch ? 'exact_number' : 'account_fields'),
+      search_mode: (isEmailSearch && !includeBuyer) ? 'mother_email' : (isNumericSearch ? 'exact_number' : (includeBuyer ? 'global_trace' : 'account_fields')),
+      include_buyer: includeBuyer,
       query: search
     });
   } catch (error) {

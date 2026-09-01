@@ -26,7 +26,7 @@
     const controls=document.querySelector('#masterOperationsPanel .master-command-controls');
     if(controls && !document.getElementById('masterGlobalSearchBtn')){
       const search=document.createElement('button');
-      search.id='masterGlobalSearchBtn';search.className='master-tool-btn';search.innerHTML='⌕ <span>Buscar</span>';
+      search.id='masterGlobalSearchBtn';search.className='master-tool-btn';search.innerHTML='🧬 <span>Trazabilidad</span>';
       search.onclick=openMasterGlobalSearch;
       controls.insertBefore(search,controls.firstChild);
       const sale=document.createElement('button');
@@ -45,6 +45,10 @@
       quick.id='masterQuickSaleModule';quick.className='master-module master-module-accent';quick.innerHTML='<span class="master-module-icon">⚡</span><span><b>Venta rápida</b><small>WhatsApp / mostrador</small></span><i>→</i>';
       quick.onclick=openMasterQuickSale;
       modules.prepend(quick);
+      const deliveries=document.createElement('button');
+      deliveries.id='masterManualDeliveriesModule';deliveries.className='master-module master-module-pending';deliveries.innerHTML='<span class="master-module-icon">📥</span><span><b>Pedidos por entregar</b><small>Vendedores y distribuidores</small></span><em id="masterManualDeliveryCount">0</em>';
+      deliveries.onclick=openMasterManualDeliveries;
+      modules.prepend(deliveries);
     }
 
     const admin=document.getElementById('section-admin');
@@ -85,6 +89,7 @@
     ensureQuickSaleModal();
     ensureSearchModal();
     ensureUser360Modal();
+    ensureManualDeliveriesModal();
   }
 
   function ensureQuickSaleModal(){
@@ -157,8 +162,9 @@
   }
 
   function ensureSearchModal(){
-    const modal=addModal('masterGlobalSearchModal','Buscador global',`
-      <div class="master-search-box"><span>⌕</span><input id="masterGlobalSearchInput" placeholder="Nombre, correo, pedido, cuenta, producto, proveedor…" autocomplete="off"/></div>
+    const modal=addModal('masterGlobalSearchModal','Trazabilidad y búsqueda global',`
+      <div class="master-v15-trace-help"><b>🧬 Busca una cuenta, perfil, PIN, pedido, vendedor o distribuidor.</b><span>Verás ingreso al inventario, garantía de 30 días, ventas, pedidos, fallas, reemplazos y recuperaciones cuando exista historial.</span></div>
+      <div class="master-search-box"><span>⌕</span><input id="masterGlobalSearchInput" placeholder="Cuenta madre, perfil, PIN, pedido, vendedor, distribuidor…" autocomplete="off"/></div>
       <div id="masterGlobalSearchResults" class="master-search-results"><div class="master-v14-empty">Escribe al menos 2 caracteres.</div></div>`);
     const input=modal.querySelector('#masterGlobalSearchInput');
     if(input&&!input.dataset.bound){input.dataset.bound='1';input.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(runMasterGlobalSearch,250);});}
@@ -167,24 +173,117 @@
   window.openMasterGlobalSearch=openMasterGlobalSearch;
   window.closeMasterGlobalSearch=()=>closeModal('masterGlobalSearchModal');
 
+  function listFromJson(value){
+    if(Array.isArray(value)) return value;
+    if(!value) return [];
+    try{const parsed=typeof value==='string'?JSON.parse(value):value;return Array.isArray(parsed)?parsed:[];}catch(_){return [];}
+  }
+  function fmtDate(value){if(!value)return '-';const d=new Date(value);return Number.isNaN(d.getTime())?String(value).slice(0,10):d.toLocaleString('es-MX');}
+  function uniqueById(rows,key='orden_id'){const seen=new Set();return rows.filter(x=>{const v=String(x?.[key]??'');if(!v||seen.has(v))return false;seen.add(v);return true;});}
+  function buildTracePreview(trace){
+    const events=Array.isArray(trace?.events)?trace.events:[];
+    if(!events.length)return '';
+    const first=events[0]||{};
+    const sales=uniqueById(events.flatMap(e=>listFromJson(e.ventas_historial)),'orden_id');
+    const reports=uniqueById(events.flatMap(e=>listFromJson(e.reportes_historial)),'id');
+    const recoveries=events.flatMap(e=>listFromJson(e.recuperaciones_historial));
+    const sources=[...new Set(events.map(e=>e.ingreso_origen).filter(Boolean))];
+    const replacementUse=reports.filter(r=>r.papel==='usada_como_reemplazo');
+    const reported=reports.filter(r=>r.papel==='reportada'||r.papel==='relacionada');
+    const latestSale=sales[0];
+    window.masterLastTraceEvents=events;
+    return `<section class="master-trace-preview">
+      <div class="master-trace-preview-head"><div><span class="master-eyebrow">TRAZABILIDAD</span><h3>${esc(first.product_name||first.platform||'Cuenta')} · ${esc(first.cuenta_madre||'')}</h3></div><button class="primary-btn" type="button" onclick="openMasterTraceTimeline()">Ver línea del tiempo</button></div>
+      <div class="master-trace-facts">
+        <span><small>Ingreso</small><b>${esc(sources.join(' / ')||'Histórico')}</b><em>${esc(fmtDate(first.fecha_ingreso))}${first.entry_batch_id?` · lote ${esc(first.entry_batch_id)}`:''}</em></span>
+        <span><small>Proveedor</small><b>${esc(first.proveedor||'Sin proveedor')}</b><em>${first.costo_compra_cuenta_madre!=null?`Compra madre: $${money(first.costo_compra_cuenta_madre)}`:'Costo no registrado'}</em></span>
+        <span><small>Garantía / vence</small><b>${esc(String(first.vencimiento_cuenta_madre||first.expires_at||'-').slice(0,10))}</b><em>30 días según ciclo</em></span>
+        <span><small>Cuenta madre</small><b>#${esc(first.cuenta_madre_id||'-')}</b><em>${Number(first.total_perfiles||0)} perfil(es)</em></span>
+        <span><small>Ventas detectadas</small><b>${sales.length}</b><em>${latestSale?`Última: pedido #${esc(latestSale.orden_id)}`:'Sin venta enlazada'}</em></span>
+        <span><small>Fallas / reportes</small><b>${reported.length}</b><em>${replacementUse.length} uso(s) como reemplazo</em></span>
+        <span><small>Recuperaciones</small><b>${recoveries.length}</b><em>${first.reemplaza_cuenta_madre_id?`Reemplaza madre #${esc(first.reemplaza_cuenta_madre_id)}`:first.reemplazada_por_cuenta_madre_id?`Reemplazada por #${esc(first.reemplazada_por_cuenta_madre_id)}`:'Sin reemplazo de madre'}</em></span>
+      </div>
+      ${sales.length?`<div class="master-trace-sales"><b>Ventas / entregas</b>${sales.slice(0,6).map(v=>`<div><span>Pedido #${esc(v.orden_id)} · ${esc(v.modalidad||'venta')}</span><strong>${esc(v.comprador_nombre||v.comprador_email||'Usuario')}</strong><small>${esc(v.comprador_tipo||'vendedor')}${v.distribuidor_nombre?` · Distribuidor: ${esc(v.distribuidor_nombre)}`:''} · $${money(v.orden_amount)} · ${esc(fmtDate(v.orden_creada))}</small></div>`).join('')}</div>`:''}
+      ${reports.length?`<div class="master-trace-reports"><b>Fallas y reemplazos</b>${reports.slice(0,6).map(r=>`<div><span>Reporte #${esc(r.id)} · ${esc(r.issue_type||'falla')}</span><strong>${esc(r.papel==='usada_como_reemplazo'?'Esta cuenta se usó como reemplazo':'Esta cuenta fue reportada')}</strong><small>${esc(r.status||'')} · ${esc(r.resolution_type||'')} · pedido #${esc(r.order_id||'-')}</small></div>`).join('')}</div>`:''}
+    </section>`;
+  }
+  window.openMasterTraceTimeline=function(){
+    const events=Array.isArray(window.masterLastTraceEvents)?window.masterLastTraceEvents:[];
+    if(!events.length)return;
+    closeModal('masterGlobalSearchModal');
+    try{
+      if(typeof renderInventoryHistorySummary==='function')renderInventoryHistorySummary(events);
+      if(typeof renderInventoryHistoryTimeline==='function')renderInventoryHistoryTimeline(events);
+      if(typeof renderInventoryHistoryModal==='function')renderInventoryHistoryModal(events);
+      if(typeof openInventoryHistoryModal==='function')openInventoryHistoryModal();
+    }catch(e){console.warn('No se pudo abrir trazabilidad completa',e);}
+  };
+
   async function runMasterGlobalSearch(){
     const input=document.getElementById('masterGlobalSearchInput'),box=document.getElementById('masterGlobalSearchResults');const q=input?.value.trim()||'';
     if(q.length<2){if(box)box.innerHTML='<div class="master-v14-empty">Escribe al menos 2 caracteres.</div>';return;}
     try{
-      if(box)box.innerHTML='<div class="small-text">Buscando…</div>';
-      const d=await api(`/api/admin/master/global-search?q=${encodeURIComponent(q)}`);
+      if(box)box.innerHTML='<div class="small-text">Buscando trazabilidad y coincidencias…</div>';
+      const [globalResult,traceResult]=await Promise.allSettled([
+        api(`/api/admin/master/global-search?q=${encodeURIComponent(q)}`),
+        api(`/api/admin/inventory-history?q=${encodeURIComponent(q)}&include_buyer=1`)
+      ]);
+      const d=globalResult.status==='fulfilled'?globalResult.value:{};
+      const trace=traceResult.status==='fulfilled'?traceResult.value:{events:[]};
       const sections=[];
+      const traceHtml=buildTracePreview(trace);
+      if(traceHtml)sections.push(traceHtml);
       if(d.users?.length)sections.push(searchGroup('Usuarios',d.users.map(x=>({icon:'👤',title:x.name||x.email,sub:`${x.email} · saldo $${money(x.balance)}`,action:`openMasterUser360(${Number(x.id)})`}))));
-      if(d.orders?.length)sections.push(searchGroup('Pedidos',d.orders.map(x=>({icon:'▤',title:`Pedido #${x.id} · ${x.product_name}`,sub:`${x.user_name||x.user_email||''} · $${money(x.amount)} · ${x.status}`,action:`masterOpenAdminTarget('adminOrdersPanel')`}))));
+      if(d.orders?.length)sections.push(searchGroup('Pedidos',d.orders.map(x=>({icon:'▤',title:`Pedido #${x.id} · ${x.product_name}`,sub:`${x.user_name||x.user_email||''} · $${money(x.amount)} · ${x.status}`,action:`openMasterManualDeliveryOrder(${Number(x.id)}, true)`}))));
+      if(d.accounts?.length && !traceHtml)sections.push(searchGroup('Inventario',d.accounts.map(x=>({icon:'🔐',title:`${x.product_name||x.platform} · ${x.account_email}`,sub:`${x.profile_name||'Sin perfil'} · ${x.status}`,action:`masterOpenAdminTarget('adminPlatformAccountsPanel')`}))));
       if(d.products?.length)sections.push(searchGroup('Productos',d.products.map(x=>({icon:'📦',title:x.name,sub:`${x.category||''} · venta $${money(x.price)} · costo $${money(x.cost_price)}`,action:`masterOpenAdminTarget('adminProductsPanel')`}))));
-      if(d.accounts?.length)sections.push(searchGroup('Inventario',d.accounts.map(x=>({icon:'🔐',title:`${x.product_name||x.platform} · ${x.account_email}`,sub:`${x.profile_name||'Sin perfil'} · ${x.status}`,action:`masterOpenAdminTarget('adminPlatformAccountsPanel')`}))));
-      if(d.mother_accounts?.length)sections.push(searchGroup('Cuentas madre',d.mother_accounts.map(x=>({icon:'🧬',title:`${x.product_name} · ${x.account_email}`,sub:`${x.provider_name||'Sin proveedor'} · ${x.status}`,action:`showSection('profit-quality')`}))));
-      if(d.reports?.length)sections.push(searchGroup('Reportes',d.reports.map(x=>({icon:'⚠️',title:`Reporte #${x.id} · ${x.issue_type}`,sub:`${x.user_name||x.user_email||''} · ${x.status}`,action:`masterOpenAdminTarget('adminAccountReportsPanel')`}))));
+      if(d.reports?.length && !traceHtml)sections.push(searchGroup('Reportes',d.reports.map(x=>({icon:'⚠️',title:`Reporte #${x.id} · ${x.issue_type}`,sub:`${x.user_name||x.user_email||''} · ${x.status}`,action:`masterOpenAdminTarget('adminAccountReportsPanel')`}))));
       if(box)box.innerHTML=sections.join('')||'<div class="master-v14-empty">No encontramos coincidencias.</div>';
     }catch(e){if(box)box.innerHTML=`<div class="master-v14-error">${esc(e.message||'Error de búsqueda')}</div>`;}
   }
   function searchGroup(title,items){return `<section class="master-search-group"><h3>${esc(title)}</h3>${items.map(i=>`<button onclick="${i.action};closeMasterGlobalSearch()"><span>${i.icon}</span><span><b>${esc(i.title)}</b><small>${esc(i.sub)}</small></span><i>→</i></button>`).join('')}</section>`;}
   window.masterOpenAdminTarget=function(id){if(typeof showSection==='function')showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80);};
+
+  function ensureManualDeliveriesModal(){
+    addModal('masterManualDeliveriesModal','Pedidos por entregar',`<div class="master-v15-trace-help"><b>📥 Cola de atención del administrador</b><span>Pedidos de vendedores y distribuidores que siguen pendientes de entrega o requieren intervención.</span></div><div class="master-v14-footer" style="justify-content:flex-end"><button class="outline-btn" type="button" onclick="loadMasterManualDeliveries()">↻ Actualizar</button></div><div id="masterManualDeliveriesList"><div class="small-text">Cargando…</div></div>`);
+  }
+  async function openMasterManualDeliveries(){ensureV14UI();openModal('masterManualDeliveriesModal');await loadMasterManualDeliveries();}
+  window.openMasterManualDeliveries=openMasterManualDeliveries;
+  window.closeMasterManualDeliveries=()=>closeModal('masterManualDeliveriesModal');
+  async function loadMasterManualDeliveries(){
+    const box=document.getElementById('masterManualDeliveriesList');if(box)box.innerHTML='<div class="small-text">Cargando pedidos…</div>';
+    try{
+      const d=await api('/api/admin/master/manual-deliveries?limit=150');const rows=d.rows||[];
+      const count=document.getElementById('masterManualDeliveryCount');if(count)count.textContent=rows.filter(r=>String(r.product_type||'').toLowerCase().includes('manual')).length;
+      if(!box)return;
+      box.innerHTML=rows.length?`<div class="master-delivery-queue">${rows.map(r=>`<article class="master-delivery-item"><div><span class="master-delivery-id">#${Number(r.id)}</span><div><b>${esc(r.product_name||'Producto')}</b><small>${esc(r.customer_name||r.customer_email||'Usuario')} · ${esc(r.buyer_type||'vendedor')}${r.distributor_name?` · distribuidor ${esc(r.distributor_name)}`:''}</small><small>$${money(r.amount)} · ${esc(r.status)} · ${esc(fmtDate(r.created_at))}</small></div></div><span class="master-delivery-reason">${esc(String(r.queue_reason||'').replaceAll('_',' '))}</span><button class="primary-btn" type="button" onclick="openMasterManualDeliveryOrder(${Number(r.id)})">Atender</button></article>`).join('')}</div>`:'<div class="master-v14-empty">No hay pedidos pendientes por entregar.</div>';
+    }catch(e){if(box)box.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudo cargar la cola')}</div>`;}
+  }
+  window.loadMasterManualDeliveries=loadMasterManualDeliveries;
+  async function openMasterManualDeliveryOrder(orderId, fromSearch=false){
+    try{
+      const d=await api(`/api/admin/master/manual-deliveries?order_id=${Number(orderId)}&limit=1${fromSearch?'&include_closed=1':''}`);
+      let row=(d.rows||[])[0];
+      if(!row && fromSearch){
+        if(typeof showSection==='function')showSection('admin');
+        setTimeout(()=>document.getElementById('adminOrdersPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+        return;
+      }
+      if(!row)throw new Error('Ese pedido ya no está pendiente; revisa el historial de Pedidos.');
+      if(typeof loadProducts==='function' && (!Array.isArray(window.allProducts)||!window.allProducts.length)){try{await loadProducts();}catch(_){}}
+      closeModal('masterManualDeliveriesModal');closeModal('masterGlobalSearchModal');
+      if(typeof showSection==='function')showSection('admin');
+      if(Array.isArray(window.adminOrders))window.adminOrders=[row];else adminOrders=[row];
+      const box=document.getElementById('adminOrdersList');
+      if(box && typeof renderAdminOrderCompactFinal==='function'){
+        box.innerHTML=renderAdminOrderCompactFinal(row);
+        const item=document.getElementById(`admin-order-compact-${Number(row.id)}`);item?.classList.add('open');
+        const details=item?.querySelector('.compact-details');if(details)details.style.display='block';
+      }
+      setTimeout(()=>document.getElementById('adminOrdersPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+    }catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo abrir el pedido','error');}
+  }
+  window.openMasterManualDeliveryOrder=openMasterManualDeliveryOrder;
 
   function ensureUser360Modal(){addModal('masterUser360Modal','Ficha 360° del usuario','<div id="masterUser360Body"><div class="small-text">Cargando…</div></div>');}
   async function openMasterUser360(userId){
@@ -219,7 +318,7 @@
   async function saveMasterSupplier(ev){ev.preventDefault();try{await api('/api/admin/master/suppliers',{method:'POST',body:JSON.stringify({name:document.getElementById('masterSupplierName').value,contact_name:document.getElementById('masterSupplierContact').value,phone:document.getElementById('masterSupplierPhone').value,email:document.getElementById('masterSupplierEmail').value,notes:document.getElementById('masterSupplierNotes').value})});ev.target.reset();await loadMasterSuppliers();if(typeof showMessage==='function')showMessage('Proveedor guardado');}catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo guardar proveedor',true);}}
   async function saveMasterPurchase(ev){ev.preventDefault();try{await api('/api/admin/master/inventory-purchases',{method:'POST',body:JSON.stringify({supplier_id:document.getElementById('masterPurchaseSupplier').value||null,supplier_name:document.getElementById('masterPurchaseSupplierText').value,purchase_date:document.getElementById('masterPurchaseDate').value||null,item_count:document.getElementById('masterPurchaseCount').value,total_amount:document.getElementById('masterPurchaseTotal').value,description:document.getElementById('masterPurchaseDescription').value,notes:document.getElementById('masterPurchaseNotes').value})});ev.target.reset();document.getElementById('masterPurchaseCount').value='1';document.getElementById('masterPurchaseDate').value=new Date().toISOString().slice(0,10);await loadMasterSuppliers();if(typeof showMessage==='function')showMessage('Compra registrada');}catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo registrar compra',true);}}
 
-  function init(){ensureV14UI();const date=document.getElementById('masterPurchaseDate');if(date&&!date.value)date.value=new Date().toISOString().slice(0,10);}
+  function init(){ensureV14UI();const date=document.getElementById('masterPurchaseDate');if(date&&!date.value)date.value=new Date().toISOString().slice(0,10);loadMasterManualDeliveries().catch(()=>{});}
   if(typeof registerLoadAppHook==='function') registerLoadAppHook(async()=>init(),{name:'master-ops-v1-4',order:980});
   if(typeof registerSectionHook==='function') registerSectionHook(name=>{if((name==='dashboard'||name==='admin')&&isMain())setTimeout(init,20);});
   document.addEventListener('keydown',e=>{if(!isMain())return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openMasterGlobalSearch();}if(e.key==='Escape')document.querySelectorAll('.master-v14-modal:not(.hidden)').forEach(x=>closeModal(x.id));});

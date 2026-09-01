@@ -1,7 +1,7 @@
 {
   "name": "servicios-digitales",
-  "version": "1.4.0",
-  "description": "Servicios Digitales Peters - Version Maestra V1.4 Operacion del Dueño",
+  "version": "1.5.1",
+  "description": "Servicios Digitales Peters - Version Maestra V1.5.1 Trazabilidad, Entregas y Proveedor de Inventario",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
