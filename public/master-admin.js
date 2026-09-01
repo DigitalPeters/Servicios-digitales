@@ -139,8 +139,6 @@
             <button class="master-module" onclick="openProductsFromDashboard()"><span class="master-module-icon">📦</span><span><b>Productos</b><small>Catálogo y precios</small></span><em id="masterCountProducts">0</em></button>
             <button class="master-module" onclick="openInventoryFromDashboard()"><span class="master-module-icon">🔐</span><span><b>Inventario</b><small>Cuentas disponibles</small></span><em id="masterCountInventory">0</em></button>
             <button class="master-module" onclick="openOrdersFromDashboard()"><span class="master-module-icon">▤</span><span><b>Pedidos</b><small>Ventas y entregas</small></span><em id="masterCountOrders">0</em></button>
-            <button class="master-module" onclick="openAccountReportsFromDashboard()"><span class="master-module-icon">⚠️</span><span><b>Reportes</b><small>Fallas y soporte</small></span><em id="masterCountReports">0</em></button>
-            <button class="master-module" onclick="openBalanceRequests()"><span class="master-module-icon">💳</span><span><b>Solicitudes</b><small>Recargas por validar</small></span><em id="masterCountBalance">0</em></button>
             <button class="master-module" onclick="openAdminPanelsMaster()"><span class="master-module-icon">🏢</span><span><b>Paneles admin</b><small>Renta y propietarios</small></span><em id="masterCountPanels">0</em></button>
             <button class="master-module" onclick="showSection('profit-quality')"><span class="master-module-icon">💹</span><span><b>Rentabilidad</b><small>Costos, calidad y utilidad</small></span><i>→</i></button>
           </div>

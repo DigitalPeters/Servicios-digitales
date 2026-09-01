@@ -36,19 +36,23 @@
     }
 
     const modules=document.querySelector('#masterOperationsPanel .master-module-grid');
-    if(modules && !document.getElementById('masterSuppliersModule')){
-      const supplier=document.createElement('button');
-      supplier.id='masterSuppliersModule';supplier.className='master-module';supplier.innerHTML='<span class="master-module-icon">🚚</span><span><b>Proveedores</b><small>Compras e inversión</small></span><i>→</i>';
-      supplier.onclick=openMasterSuppliers;
-      modules.appendChild(supplier);
-      const quick=document.createElement('button');
-      quick.id='masterQuickSaleModule';quick.className='master-module master-module-accent';quick.innerHTML='<span class="master-module-icon">⚡</span><span><b>Venta rápida</b><small>WhatsApp / mostrador</small></span><i>→</i>';
-      quick.onclick=openMasterQuickSale;
-      modules.prepend(quick);
-      const deliveries=document.createElement('button');
-      deliveries.id='masterManualDeliveriesModule';deliveries.className='master-module master-module-pending';deliveries.innerHTML='<span class="master-module-icon">📥</span><span><b>Pedidos por entregar</b><small>Vendedores y distribuidores</small></span><em id="masterManualDeliveryCount">0</em>';
-      deliveries.onclick=openMasterManualDeliveries;
-      modules.prepend(deliveries);
+    // Pedidos por atender, fallas pendientes y saldo por validar ya viven en los KPI superiores.
+    // Evitamos repetir esos accesos en la zona de gestión.
+    document.getElementById('masterManualDeliveriesModule')?.remove();
+    document.getElementById('masterQuickSaleModule')?.remove();
+    if(modules){
+      if(!document.getElementById('masterStorePreviewModule')){
+        const shop=document.createElement('button');
+        shop.id='masterStorePreviewModule';shop.className='master-module master-module-store';shop.innerHTML='<span class="master-module-icon">🛒</span><span><b>Tienda</b><small>Validar precios por vendedor</small></span><i>→</i>';
+        shop.onclick=openMasterStorePreview;
+        modules.prepend(shop);
+      }
+      if(!document.getElementById('masterSuppliersModule')){
+        const supplier=document.createElement('button');
+        supplier.id='masterSuppliersModule';supplier.className='master-module';supplier.innerHTML='<span class="master-module-icon">🚚</span><span><b>Proveedores</b><small>Compras e inversión</small></span><i>→</i>';
+        supplier.onclick=openMasterSuppliers;
+        modules.appendChild(supplier);
+      }
     }
 
     const admin=document.getElementById('section-admin');
@@ -87,31 +91,33 @@
     }
 
     ensureQuickSaleModal();
+    ensureStorePreviewModal();
     ensureSearchModal();
     ensureUser360Modal();
     ensureManualDeliveriesModal();
   }
 
   function ensureQuickSaleModal(){
-    const modal=addModal('masterQuickSaleModal','Venta rápida',`
-      <div class="master-v14-callout"><b>Registra ventas que recibes por WhatsApp, teléfono o mostrador.</b><span>Puede entregar inventario automáticamente y decidir si el cobro sale del saldo del vendedor o fue pagado por fuera.</span></div>
+    const modal=addModal('masterQuickSaleModal','Venta rápida · Cliente final',`
+      <div class="master-v14-callout"><b>Venta directa de Servicios Digitales Peters a tu cliente final.</b><span>No selecciona vendedor ni distribuidor y no descuenta saldos. Registra al cliente, el producto y lo que realmente cobraste.</span></div>
       <form id="masterQuickSaleForm" class="master-v14-form">
-        <div class="master-v14-grid2"><label>Vendedor / cliente<select id="masterQuickUser" required><option value="">Selecciona…</option></select></label><label>Producto<select id="masterQuickProduct" required><option value="">Selecciona…</option></select></label></div>
-        <div id="masterQuickQuote" class="master-v14-quote">Selecciona usuario y producto.</div>
+        <div class="master-v14-grid3">
+          <label>Nombre del cliente final<input id="masterQuickCustomerName" placeholder="Ej. Juan Pérez" required/></label>
+          <label>WhatsApp / teléfono<input id="masterQuickCustomerPhone" placeholder="Opcional"/></label>
+          <label>Correo<input id="masterQuickCustomerEmail" type="email" placeholder="Opcional"/></label>
+        </div>
+        <label>Producto<select id="masterQuickProduct" required><option value="">Selecciona…</option></select></label>
+        <div id="masterQuickQuote" class="master-v14-quote">Selecciona un producto.</div>
         <div id="masterQuickRequiredFields" class="master-v14-grid2"></div>
-        <div class="master-v14-grid3"><label>Monto de la venta<input id="masterQuickAmount" type="number" min="0" step="0.01" required/></label><label>Método de pago<select id="masterQuickPayment"><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="saldo">Saldo del vendedor</option><option value="otro">Otro</option></select></label><label>Nota<input id="masterQuickNote" placeholder="Opcional"/></label></div>
-        <div class="master-v14-checks"><label><input id="masterQuickChargeBalance" type="checkbox"/> Descontar del saldo del vendedor</label><label><input id="masterQuickAutoDeliver" type="checkbox" checked/> Entrega automática si aplica</label><label><input id="masterQuickSuccess" type="checkbox" checked/> Marcar éxito cuando no requiera entrega</label></div>
+        <div class="master-v14-grid3"><label>Monto cobrado al cliente<input id="masterQuickAmount" type="number" min="0" step="0.01" required/></label><label>Método de pago<select id="masterQuickPayment"><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option></select></label><label>Nota<input id="masterQuickNote" placeholder="Opcional"/></label></div>
+        <div class="master-v14-checks"><label><input id="masterQuickAutoDeliver" type="checkbox" checked/> Entrega automática si aplica</label><label><input id="masterQuickSuccess" type="checkbox" checked/> Marcar éxito cuando no requiera entrega</label></div>
         <div id="masterQuickResult"></div>
-        <div class="master-v14-footer"><button type="button" class="outline-btn" onclick="closeMasterQuickSale()">Cancelar</button><button type="submit" class="primary-btn">Registrar venta</button></div>
+        <div class="master-v14-footer"><button type="button" class="outline-btn" onclick="closeMasterQuickSale()">Cancelar</button><button type="submit" class="primary-btn">Registrar venta al cliente</button></div>
       </form>`);
     const form=modal.querySelector('#masterQuickSaleForm');
     if(form && !form.dataset.bound){form.dataset.bound='1';form.addEventListener('submit',submitMasterQuickSale);}
-    ['masterQuickUser','masterQuickProduct'].forEach(id=>document.getElementById(id)?.addEventListener('change',refreshQuickQuote));
-    document.getElementById('masterQuickPayment')?.addEventListener('change',()=>{
-      const value=document.getElementById('masterQuickPayment')?.value;
-      const cb=document.getElementById('masterQuickChargeBalance');if(cb)cb.checked=value==='saldo';
-    });
-    document.getElementById('masterQuickChargeBalance')?.addEventListener('change',e=>{if(e.target.checked){const p=document.getElementById('masterQuickPayment');if(p)p.value='saldo';}});
+    const product=document.getElementById('masterQuickProduct');
+    if(product&&!product.dataset.quoteBound){product.dataset.quoteBound='1';product.addEventListener('change',refreshQuickQuote);}
   }
 
   async function openMasterQuickSale(){
@@ -119,23 +125,22 @@
     const result=document.getElementById('masterQuickResult');if(result)result.innerHTML='';
     try{
       quickOptions=await api('/api/admin/master/quick-sale/options');
-      const u=document.getElementById('masterQuickUser'),p=document.getElementById('masterQuickProduct');
-      if(u)u.innerHTML='<option value="">Selecciona vendedor / cliente…</option>'+(quickOptions.users||[]).map(x=>`<option value="${x.id}">${esc(x.name||x.email)} · $${money(x.balance)}</option>`).join('');
-      if(p)p.innerHTML='<option value="">Selecciona producto…</option>'+(quickOptions.products||[]).map(x=>`<option value="${x.id}">${esc(x.name)} · ${esc(x.category||'')} · stock ${Number(x.stock||0)}</option>`).join('');
-      const date=document.getElementById('masterPurchaseDate');if(date&&!date.value)date.value=new Date().toISOString().slice(0,10);
-    }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron cargar opciones')}</div>`;}
+      const p=document.getElementById('masterQuickProduct');
+      if(p)p.innerHTML='<option value="">Selecciona producto…</option>'+(quickOptions.products||[]).map(x=>`<option value="${x.id}">${esc(x.name)} · ${esc(x.category||'')} · $${money(x.price)} · stock ${Number(x.stock||0)}</option>`).join('');
+      if(p?.value)await refreshQuickQuote();
+    }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron cargar productos')}</div>`;}
   }
   window.openMasterQuickSale=openMasterQuickSale;
   window.closeMasterQuickSale=()=>closeModal('masterQuickSaleModal');
 
   async function refreshQuickQuote(){
-    const userId=document.getElementById('masterQuickUser')?.value,productId=document.getElementById('masterQuickProduct')?.value;
+    const productId=document.getElementById('masterQuickProduct')?.value;
     const quote=document.getElementById('masterQuickQuote');
-    if(!userId||!productId){quickQuote=null;if(quote)quote.textContent='Selecciona usuario y producto.';return;}
+    if(!productId){quickQuote=null;if(quote)quote.textContent='Selecciona un producto.';return;}
     try{
-      quickQuote=await api(`/api/admin/master/quick-sale/quote?user_id=${encodeURIComponent(userId)}&product_id=${encodeURIComponent(productId)}`);
+      quickQuote=await api(`/api/admin/master/quick-sale/quote?product_id=${encodeURIComponent(productId)}`);
       const amount=document.getElementById('masterQuickAmount');if(amount)amount.value=Number(quickQuote.amount||0).toFixed(2);
-      if(quote)quote.innerHTML=`<span><b>${esc(quickQuote.user?.name||quickQuote.user?.email)}</b><small>Saldo $${money(quickQuote.user?.balance)}</small></span><span><b>${esc(quickQuote.product?.name)}</b><small>Precio efectivo $${money(quickQuote.amount)} · stock ${Number(quickQuote.product?.stock||0)}</small></span>`;
+      if(quote)quote.innerHTML=`<span><b>${esc(quickQuote.product?.name)}</b><small>Precio base $${money(quickQuote.amount)} · stock ${Number(quickQuote.product?.stock||0)}</small></span><span><b>Cliente final</b><small>Puedes ajustar el monto cobrado antes de registrar.</small></span>`;
       const fields=document.getElementById('masterQuickRequiredFields');
       if(fields){const list=Array.isArray(quickQuote.product?.required_fields)?quickQuote.product.required_fields:[];fields.innerHTML=list.map((f,i)=>`<label>${esc(f)}<input class="master-quick-extra" data-field="${esc(f)}" id="masterQuickExtra${i}" required/></label>`).join('');}
     }catch(e){if(quote)quote.innerHTML=`<span class="master-v14-error">${esc(e.message||'No se pudo cotizar')}</span>`;}
@@ -147,18 +152,79 @@
     try{
       const orderData={};document.querySelectorAll('.master-quick-extra').forEach(input=>orderData[input.dataset.field]=input.value.trim());
       const payload={
-        user_id:Number(document.getElementById('masterQuickUser').value),product_id:Number(document.getElementById('masterQuickProduct').value),
+        customer_mode:'final',product_id:Number(document.getElementById('masterQuickProduct').value),
+        final_customer:{name:document.getElementById('masterQuickCustomerName').value.trim(),phone:document.getElementById('masterQuickCustomerPhone').value.trim(),email:document.getElementById('masterQuickCustomerEmail').value.trim()},
         amount:Number(document.getElementById('masterQuickAmount').value),payment_method:document.getElementById('masterQuickPayment').value,
-        note:document.getElementById('masterQuickNote').value,charge_balance:document.getElementById('masterQuickChargeBalance').checked,
-        auto_deliver:document.getElementById('masterQuickAutoDeliver').checked,mark_success:document.getElementById('masterQuickSuccess').checked,order_data:orderData
+        note:document.getElementById('masterQuickNote').value,auto_deliver:document.getElementById('masterQuickAutoDeliver').checked,
+        mark_success:document.getElementById('masterQuickSuccess').checked,order_data:orderData
       };
-      if(result)result.innerHTML='<div class="small-text">Registrando venta…</div>';
+      if(result)result.innerHTML='<div class="small-text">Registrando venta al cliente…</div>';
       const d=await api('/api/admin/master/quick-sale',{method:'POST',body:JSON.stringify(payload)});
-      if(result)result.innerHTML=`<div class="master-v14-success"><b>✓ ${esc(d.message)}</b><span>Pedido #${Number(d.order_id)} · $${money(d.amount)}${d.immediate_delivery?' · entrega automática':''}</span></div>`;
+      if(result)result.innerHTML=`<div class="master-v14-success"><b>✓ ${esc(d.message)}</b><span>${esc(d.customer_name||'Cliente final')} · Pedido #${Number(d.order_id)} · $${money(d.amount)}${d.immediate_delivery?' · entrega automática':''}</span></div>`;
       if(typeof loadMasterOperations==='function')loadMasterOperations(false);
       if(typeof loadAdminOrders==='function')loadAdminOrders();
       await refreshQuickQuote();
     }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudo registrar la venta')}</div>`;}
+  }
+
+  let masterStoreProducts=[];
+  function ensureStorePreviewModal(){
+    const modal=addModal('masterStorePreviewModal','Tienda · Validar precios',`
+      <div class="master-v14-callout"><b>Comprueba exactamente el precio que verá cada vendedor o distribuidor.</b><span>Selecciona una persona y compara su precio efectivo contra el precio base configurado en Productos.</span></div>
+      <div class="master-store-toolbar">
+        <label>Ver precios como<select id="masterStoreViewer"><option value="">Cliente final / precio base</option></select></label>
+        <label>Buscar producto<input id="masterStoreSearch" placeholder="Nombre o categoría"/></label>
+        <button type="button" class="outline-btn" id="masterStoreOpenBaseBtn">Abrir tienda base</button>
+      </div>
+      <div id="masterStoreViewerInfo" class="master-store-viewer-info"></div>
+      <div id="masterStorePreviewList" class="master-store-preview-list"><div class="master-v14-empty">Abre la tienda para cargar precios.</div></div>`);
+    const viewer=modal.querySelector('#masterStoreViewer');
+    if(viewer&&!viewer.dataset.bound){viewer.dataset.bound='1';viewer.addEventListener('change',loadMasterStorePreview);}
+    const search=modal.querySelector('#masterStoreSearch');
+    if(search&&!search.dataset.bound){search.dataset.bound='1';search.addEventListener('input',renderMasterStorePreview);}
+    const base=modal.querySelector('#masterStoreOpenBaseBtn');
+    if(base&&!base.dataset.bound){base.dataset.bound='1';base.addEventListener('click',()=>{closeModal('masterStorePreviewModal');if(typeof showSection==='function')showSection('shop');});}
+  }
+
+  async function openMasterStorePreview(){
+    ensureV14UI();openModal('masterStorePreviewModal');
+    const list=document.getElementById('masterStorePreviewList');if(list)list.innerHTML='<div class="small-text">Cargando precios…</div>';
+    try{
+      const d=await api('/api/admin/master/store-preview/options');
+      const select=document.getElementById('masterStoreViewer');
+      if(select){
+        const current=select.value;
+        select.innerHTML='<option value="">Cliente final / precio base</option>'+(d.viewers||[]).map(v=>`<option value="${v.id}">${esc(v.type)} · ${esc(v.name||v.email)}</option>`).join('');
+        if([...select.options].some(o=>o.value===current))select.value=current;
+      }
+      await loadMasterStorePreview();
+    }catch(e){if(list)list.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudo abrir la tienda')}</div>`;}
+  }
+  window.openMasterStorePreview=openMasterStorePreview;
+
+  async function loadMasterStorePreview(){
+    const list=document.getElementById('masterStorePreviewList');if(list)list.innerHTML='<div class="small-text">Calculando precios visibles…</div>';
+    try{
+      const userId=document.getElementById('masterStoreViewer')?.value||'';
+      const d=await api(`/api/admin/master/store-preview${userId?`?user_id=${encodeURIComponent(userId)}`:''}`);
+      masterStoreProducts=Array.isArray(d.products)?d.products:[];
+      const info=document.getElementById('masterStoreViewerInfo');
+      if(info)info.innerHTML=`<b>${esc(d.viewer?.type||'Vista')}</b><span>${esc(d.viewer?.name||'Cliente final / precio base')}${d.viewer?.email?` · ${esc(d.viewer.email)}`:''}</span>`;
+      renderMasterStorePreview();
+    }catch(e){if(list)list.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron calcular los precios')}</div>`;}
+  }
+  window.loadMasterStorePreview=loadMasterStorePreview;
+
+  function renderMasterStorePreview(){
+    const list=document.getElementById('masterStorePreviewList');if(!list)return;
+    const term=String(document.getElementById('masterStoreSearch')?.value||'').trim().toLowerCase();
+    const rows=masterStoreProducts.filter(p=>!term||String(p.name||'').toLowerCase().includes(term)||String(p.category||'').toLowerCase().includes(term));
+    if(!rows.length){list.innerHTML='<div class="master-v14-empty">No hay productos que coincidan.</div>';return;}
+    list.innerHTML=rows.map(p=>{
+      const changed=Math.abs(Number(p.price||0)-Number(p.base_price||0))>.009;
+      const stockLabel=Number(p.reusable_stock||0)===1?'Sin límite':(Number(p.stock_enabled||0)===1?`${Number(p.stock||0)} disponibles`:'Según producto');
+      return `<article class="master-store-product"><div><small>${esc(p.category||'Otros')}</small><b>${esc(p.name||'Producto')}</b><span>${esc(stockLabel)}</span></div><div class="master-store-price"><small>Precio visible</small><b>$${money(p.price)}</b>${changed?`<span>Base $${money(p.base_price)}</span>`:'<span>Precio base</span>'}</div></article>`;
+    }).join('');
   }
 
   function ensureSearchModal(){
@@ -234,7 +300,7 @@
       const traceHtml=buildTracePreview(trace);
       if(traceHtml)sections.push(traceHtml);
       if(d.users?.length)sections.push(searchGroup('Usuarios',d.users.map(x=>({icon:'👤',title:x.name||x.email,sub:`${x.email} · saldo $${money(x.balance)}`,action:`openMasterUser360(${Number(x.id)})`}))));
-      if(d.orders?.length)sections.push(searchGroup('Pedidos',d.orders.map(x=>({icon:'▤',title:`Pedido #${x.id} · ${x.product_name}`,sub:`${x.user_name||x.user_email||''} · $${money(x.amount)} · ${x.status}`,action:`openMasterManualDeliveryOrder(${Number(x.id)}, true)`}))));
+      if(d.orders?.length)sections.push(searchGroup('Pedidos',d.orders.map(x=>{let od={};try{od=typeof x.order_data==='string'?JSON.parse(x.order_data||'{}'):(x.order_data||{});}catch(_){}const buyer=od._cliente_final_nombre?`Cliente final: ${od._cliente_final_nombre}`:(x.user_name||x.user_email||'');return {icon:'▤',title:`Pedido #${x.id} · ${x.product_name}`,sub:`${buyer} · $${money(x.amount)} · ${x.status}`,action:`openMasterManualDeliveryOrder(${Number(x.id)}, true)`};})));
       if(d.accounts?.length && !traceHtml)sections.push(searchGroup('Inventario',d.accounts.map(x=>({icon:'🔐',title:`${x.product_name||x.platform} · ${x.account_email}`,sub:`${x.profile_name||'Sin perfil'} · ${x.status}`,action:`masterOpenAdminTarget('adminPlatformAccountsPanel')`}))));
       if(d.products?.length)sections.push(searchGroup('Productos',d.products.map(x=>({icon:'📦',title:x.name,sub:`${x.category||''} · venta $${money(x.price)} · costo $${money(x.cost_price)}`,action:`masterOpenAdminTarget('adminProductsPanel')`}))));
       if(d.reports?.length && !traceHtml)sections.push(searchGroup('Reportes',d.reports.map(x=>({icon:'⚠️',title:`Reporte #${x.id} · ${x.issue_type}`,sub:`${x.user_name||x.user_email||''} · ${x.status}`,action:`masterOpenAdminTarget('adminAccountReportsPanel')`}))));
