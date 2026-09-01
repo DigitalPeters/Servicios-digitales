@@ -193,8 +193,10 @@
       if(urgent){
         const rows=Array.isArray(d.urgent)?d.urgent:[];
         urgent.innerHTML=rows.length ? rows.map(item=>{
-          const action=item.type==='pedido' ? `openOrdersFromDashboard()` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : `openBalanceRequests()`;
-          return `<button class="master-urgent-item" onclick="${action}"><span class="master-urgent-icon">${item.type==='pedido'?'▤':item.type==='reporte'?'⚠️':'💳'}</span><span class="master-urgent-copy"><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></span><em>${formatAge(item.age_minutes)}</em><i>→</i></button>`;
+          const action=item.type==='pedido' ? `openOrdersFromDashboard()` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : item.type==='stock' ? `openInventoryFromDashboard()` : `openBalanceRequests()`;
+          const icon=item.type==='pedido'?'▤':item.type==='reporte'?'⚠️':item.type==='stock'?'📦':'💳';
+          const age=item.type==='stock' ? 'reponer' : formatAge(item.age_minutes);
+          return `<button class="master-urgent-item" onclick="${action}"><span class="master-urgent-icon">${icon}</span><span class="master-urgent-copy"><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></span><em>${age}</em><i>→</i></button>`;
         }).join('') : '<div class="master-ok"><span>✓</span><div><b>Operación al día</b><small>No hay pendientes prioritarios en este momento.</small></div></div>';
       }
       const updated=document.getElementById('masterOpsUpdated');

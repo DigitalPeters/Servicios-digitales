@@ -1,6 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
-console.log("SERVICIOS DIGITALES PETERS · VERSION MAESTRA V1 · 31-AGO-2026");
+console.log("SERVICIOS DIGITALES PETERS · VERSION MAESTRA V1.4 · OPERACION DEL DUENO");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -1431,6 +1431,9 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS charged INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_source TEXT DEFAULT 'balance'`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_quick_sale BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_by_admin_id INTEGER`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_platform_account_id INTEGER`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_account_data TEXT DEFAULT ''`);
@@ -1527,6 +1530,42 @@ async function initDatabase() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_group ON mother_accounts (lower(product_name), lower(account_email), COALESCE(owner_admin_id, 0), status)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_replaces ON mother_accounts (replaces_mother_account_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_expiration ON mother_accounts (status, expiration_date)`);
+
+
+  // MASTER V1.4: proveedores y registro de compras de inventario.
+  // Se mantienen separados de mother_accounts para no alterar el historial existente.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id SERIAL PRIMARY KEY,
+      owner_admin_id INTEGER,
+      name TEXT NOT NULL,
+      contact_name TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'activo',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_owner_name ON suppliers ((COALESCE(owner_admin_id,0)), lower(name))`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS inventory_purchases (
+      id BIGSERIAL PRIMARY KEY,
+      owner_admin_id INTEGER,
+      supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+      supplier_name_snapshot TEXT DEFAULT '',
+      purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      description TEXT DEFAULT '',
+      item_count INTEGER NOT NULL DEFAULT 1,
+      total_amount NUMERIC NOT NULL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_inventory_purchases_owner_date ON inventory_purchases(COALESCE(owner_admin_id,0), purchase_date DESC, id DESC)`);
 
   // Vincula inventario histórico sin cuenta madre respetando cada ciclo por fecha oficial.
   await pool.query(`
@@ -6417,12 +6456,382 @@ app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (r
 
 
 // ============================================================
+// MASTER V1.4: VENTA RAPIDA + BUSCADOR + USUARIO 360 + PROVEEDORES
+// ============================================================
+async function getScopedAdminCustomer(client, req, userId, { forUpdate = false } = {}) {
+  const id = Number(userId || 0);
+  if (!id) return null;
+  const result = await client.query(
+    `SELECT id, name, email, role, balance, COALESCE(is_subadmin,false) AS is_subadmin,
+            owner_user_id, COALESCE(is_enabled,true) AS is_enabled, created_at
+     FROM users WHERE id=$1 ${forUpdate ? 'FOR UPDATE' : ''}`,
+    [id]
+  );
+  const user = result.rows[0] || null;
+  if (!user || user.role === 'admin') return null;
+  const context = await getViewerContext(id, client);
+  const expectedOwner = req.isPanelAdmin ? Number(req.user.id) : 0;
+  const actualOwner = Number(context?.owner_admin_id || 0);
+  if (actualOwner !== expectedOwner) return null;
+  return { ...user, viewer_context: context };
+}
+
+function adminOwnerId(req) {
+  return req.isPanelAdmin ? Number(req.user.id) : null;
+}
+
+app.get('/api/admin/master/quick-sale/options', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const ownerId = adminOwnerId(req);
+    const [usersResult, productsResult] = await Promise.all([
+      req.isPanelAdmin
+        ? pool.query(`WITH RECURSIVE descendants AS (
+                        SELECT id FROM users WHERE id=$1
+                        UNION ALL
+                        SELECT u.id FROM users u JOIN descendants d ON u.owner_user_id=d.id
+                      )
+                      SELECT u.id,u.name,u.email,u.balance,COALESCE(u.is_subadmin,false) AS is_subadmin
+                      FROM users u
+                      WHERE u.id IN (SELECT id FROM descendants)
+                        AND u.id<>$1 AND u.role<>'admin' AND COALESCE(u.is_enabled,true)=true
+                      ORDER BY lower(COALESCE(u.name,u.email)),u.id`, [req.user.id])
+        : pool.query(`WITH RECURSIVE ancestry AS (
+                        SELECT u.id AS root_id,u.id AS current_id,u.owner_user_id,0 AS depth FROM users u
+                        UNION ALL
+                        SELECT a.root_id,p.id,p.owner_user_id,a.depth+1
+                        FROM ancestry a JOIN users p ON p.id=a.owner_user_id
+                        WHERE a.owner_user_id IS NOT NULL AND a.depth<8
+                      ), panel_bound AS (
+                        SELECT DISTINCT a.root_id FROM ancestry a JOIN admin_panels ap ON ap.owner_user_id=a.current_id
+                      )
+                      SELECT u.id,u.name,u.email,u.balance,COALESCE(u.is_subadmin,false) AS is_subadmin
+                      FROM users u
+                      WHERE u.role<>'admin' AND COALESCE(u.is_enabled,true)=true
+                        AND NOT EXISTS (SELECT 1 FROM panel_bound pb WHERE pb.root_id=u.id)
+                      ORDER BY lower(COALESCE(u.name,u.email)),u.id`),
+      pool.query(`SELECT p.id,p.name,p.category,p.price,p.cost_price,p.product_type,p.required_fields,p.stock_enabled,
+                         ${effectiveStockExpression('p')} AS stock,
+                         ${reusableStockFlagExpression('p')} AS reusable_stock
+                  FROM products p
+                  WHERE p.active=1
+                    AND (($1::int IS NULL AND (p.owner_admin_id IS NULL OR p.owner_admin_id=0)) OR p.owner_admin_id=$1)
+                  ORDER BY p.category,p.name`, [ownerId])
+    ]);
+    res.json({ users: usersResult.rows, products: productsResult.rows });
+  } catch (err) {
+    console.error('Error opciones venta rápida:', err.message);
+    res.status(500).json({ error:'No se pudieron cargar las opciones de venta rápida' });
+  }
+});
+
+app.get('/api/admin/master/quick-sale/quote', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.query.user_id || 0);
+    const productId = Number(req.query.product_id || 0);
+    const user = await getScopedAdminCustomer(pool, req, userId);
+    if (!user) return res.status(404).json({ error:'Usuario no encontrado dentro de tu negocio' });
+    const ownerId = adminOwnerId(req);
+    const productResult = await pool.query(
+      `SELECT p.*, ${effectiveStockExpression('p')} AS stock, ${reusableStockFlagExpression('p')} AS reusable_stock
+       FROM products p WHERE p.id=$1 AND p.active=1
+       AND (($2::int IS NULL AND (p.owner_admin_id IS NULL OR p.owner_admin_id=0)) OR p.owner_admin_id=$2)`,
+      [productId, ownerId]
+    );
+    const product = productResult.rows[0];
+    if (!product) return res.status(404).json({ error:'Producto no encontrado' });
+    const price = normalizeProductType(product.product_type)==='combo_auto'
+      ? await calculateComboPrice(pool, user, product)
+      : await getEffectiveProductPrice(pool, user, product);
+    res.json({
+      user:{id:user.id,name:user.name,email:user.email,balance:Number(user.balance||0)},
+      product:{id:product.id,name:product.name,category:product.category,product_type:normalizeProductType(product.product_type),required_fields:safeJsonArray(product.required_fields),stock:Number(product.stock||0),stock_enabled:Number(product.stock_enabled||0)},
+      amount:Number(price||0)
+    });
+  } catch (err) {
+    console.error('Error cotización venta rápida:', err.message);
+    res.status(500).json({ error:'No se pudo calcular el precio de la venta' });
+  }
+});
+
+app.post('/api/admin/master/quick-sale', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = Number(req.body?.user_id || 0);
+    const productId = Number(req.body?.product_id || 0);
+    const chargeBalance = req.body?.charge_balance === true || req.body?.charge_balance === 'true' || req.body?.charge_balance === 1;
+    const autoDeliver = !(req.body?.auto_deliver === false || req.body?.auto_deliver === 'false' || req.body?.auto_deliver === 0);
+    const markSuccess = !(req.body?.mark_success === false || req.body?.mark_success === 'false' || req.body?.mark_success === 0);
+    const paymentMethod = String(req.body?.payment_method || (chargeBalance ? 'saldo' : 'externo')).trim().slice(0,80);
+    const note = String(req.body?.note || '').trim().slice(0,500);
+    const orderData = safeJsonObject(req.body?.order_data);
+    if (!userId || !productId) return res.status(400).json({ error:'Usuario y producto son obligatorios' });
+
+    await client.query('BEGIN');
+    const user = await getScopedAdminCustomer(client, req, userId, {forUpdate:true});
+    if (!user) { await client.query('ROLLBACK'); return res.status(404).json({ error:'Usuario no encontrado dentro de tu negocio' }); }
+    const ownerId = adminOwnerId(req);
+    const productResult = await client.query(
+      `SELECT p.*, ${effectiveStockExpression('p')} AS stock, ${reusableStockFlagExpression('p')} AS reusable_stock
+       FROM products p
+       WHERE p.id=$1 AND p.active=1
+         AND (($2::int IS NULL AND (p.owner_admin_id IS NULL OR p.owner_admin_id=0)) OR p.owner_admin_id=$2)
+       FOR UPDATE OF p`,
+      [productId, ownerId]
+    );
+    const product = productResult.rows[0];
+    if (!product) { await client.query('ROLLBACK'); return res.status(404).json({ error:'Producto no encontrado' }); }
+
+    const productType = normalizeProductType(product.product_type);
+    const quoted = productType==='combo_auto'
+      ? await calculateComboPrice(client, user, product)
+      : await getEffectiveProductPrice(client, user, product);
+    const hasOverride = req.body?.amount !== undefined && req.body?.amount !== null && String(req.body.amount).trim() !== '';
+    const amount = hasOverride ? Number(req.body.amount) : Number(quoted || 0);
+    if (!Number.isFinite(amount) || amount < 0) { await client.query('ROLLBACK'); return res.status(400).json({ error:'Monto inválido' }); }
+    const balanceBefore = Number(user.balance || 0);
+    if (chargeBalance && balanceBefore < amount) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error:`Saldo insuficiente. Disponible $${balanceBefore.toFixed(2)}; venta $${amount.toFixed(2)}` });
+    }
+
+    const completeOrderData = {
+      ...orderData,
+      _venta_rapida_admin: true,
+      _metodo_pago: paymentMethod,
+      ...(note ? {_nota_admin:note} : {})
+    };
+    let assignedAccounts = [];
+    let deliveredAccountData = '';
+    let status = markSuccess ? 'exito' : 'accion_en_espera';
+    let productCost = Math.max(0, Number(product.cost_price || 0));
+
+    if (productType === 'combo_auto' && autoDeliver) {
+      const items = await getComboItems(client, product.combo_items);
+      if (!items.length) { await client.query('ROLLBACK'); return res.status(400).json({ error:'El combo no tiene productos configurados' }); }
+      for (const item of items) {
+        const account = await findAvailableAccountForProduct(client, item, userId);
+        if (!account) { await client.query('ROLLBACK'); return res.status(400).json({ error:`Falta inventario para ${item.name}` }); }
+        assignedAccounts.push(account);
+      }
+      deliveredAccountData = buildComboDeliveredAccountData(assignedAccounts);
+      productCost = assignedAccounts.reduce((sum, account, idx) => sum + getPlatformAccountPurchaseCost(account, items[idx]?.cost_price), 0);
+      status = 'exito';
+    } else if (productType === 'streaming_auto' && autoDeliver) {
+      const account = await findAvailableAccountForProduct(client, product, userId);
+      if (!account) { await client.query('ROLLBACK'); return res.status(400).json({ error:'No hay una cuenta disponible para entrega automática' }); }
+      assignedAccounts = [account];
+      deliveredAccountData = buildDeliveredAccountData(account, product.name, product.category, null, product.product_type);
+      productCost = getPlatformAccountPurchaseCost(account, product.cost_price);
+      status = 'exito';
+    } else if ((productType === 'streaming_auto' || productType === 'combo_auto') && !autoDeliver) {
+      status = 'accion_en_espera';
+    }
+
+    if (productType === 'manual' && Number(product.stock_enabled || 0) === 1 && status === 'exito' && Number(product.stock || 0) <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error:'Producto agotado' });
+    }
+
+    if (chargeBalance) await client.query(`UPDATE users SET balance=balance-$1 WHERE id=$2`, [amount,userId]);
+    const distributorCostSnapshot = await getDistributorCostSnapshot(client, user, product);
+    const orderResult = await client.query(
+      `INSERT INTO orders
+       (user_id,product_id,amount,order_data,status,admin_response,charged,refunded,assigned_platform_account_id,delivered_account_data,
+        product_name_snapshot,product_category_snapshot,product_cost_snapshot,distributor_cost_snapshot,owner_admin_id,payment_source,admin_quick_sale,created_by_admin_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,$10,$11,$12,$13,$14,$15,true,$16)
+       RETURNING id,created_at`,
+      [userId,productId,amount,JSON.stringify(completeOrderData),status,deliveredAccountData,chargeBalance?1:0,
+       assignedAccounts[0]?.id || null,deliveredAccountData,product.name||'',product.category||'',productCost,distributorCostSnapshot,ownerId,
+       chargeBalance?'balance':'external',req.user.id]
+    );
+    const orderId = Number(orderResult.rows[0].id);
+
+    for (const account of assignedAccounts) {
+      const reusable = Number(product.reusable_stock || 0) === 1 && productType !== 'combo_auto';
+      await markAccountAsSold(client, account.id, orderId, userId, reusable);
+    }
+    if (productType === 'manual' && Number(product.stock_enabled || 0) === 1 && status === 'exito') {
+      await client.query(`UPDATE products SET stock=stock-1 WHERE id=$1 AND stock>0`, [productId]);
+    }
+    if (chargeBalance) {
+      await recordBalanceLedger(client, {
+        userId, ownerAdminId:ownerId, actorUserId:req.user.id, movementType:'venta_rapida_admin', amount:-amount,
+        balanceBefore, balanceAfter:balanceBefore-amount, referenceType:'order', referenceId:orderId,
+        note:`Venta rápida: ${product.name}${paymentMethod ? ` · ${paymentMethod}` : ''}`
+      });
+    }
+    await ensureDistributorSaleEarningForOrder(client, orderId);
+    await recordAdminAudit(client, req, {
+      action:'quick_sale_create', entityType:'order', entityId:orderId,
+      summary:`Venta rápida #${orderId}: ${product.name} · $${amount.toFixed(2)}`,
+      metadata:{user_id:userId,product_id:productId,amount,charge_balance:chargeBalance,auto_deliver:autoDeliver,payment_method:paymentMethod,status}
+    });
+    await client.query('COMMIT');
+
+    sendNewOrderEmail({orderId,customerName:user.name||'Cliente',customerEmail:user.email||'',productName:product.name,amount,orderData:completeOrderData});
+    res.json({
+      message: assignedAccounts.length ? 'Venta registrada y cuenta entregada correctamente' : 'Venta rápida registrada correctamente',
+      order_id:orderId,status,amount,balance_before:balanceBefore,balance_after:chargeBalance?balanceBefore-amount:balanceBefore,
+      immediate_delivery:assignedAccounts.length>0,delivered_account_data:deliveredAccountData
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('Error venta rápida:', err);
+    res.status(500).json({ error:'No se pudo registrar la venta rápida' });
+  } finally { client.release(); }
+});
+
+app.get('/api/admin/master/global-search', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({query:q,users:[],products:[],orders:[],accounts:[],mother_accounts:[],reports:[]});
+    const like = `%${q}%`;
+    const numericId = /^\d+$/.test(q) ? Number(q) : 0;
+    const ownerId = adminOwnerId(req);
+    const ownerClause = alias => `((${ownerId===null?'NULL':ownerId}::int IS NULL AND (${alias}.owner_admin_id IS NULL OR ${alias}.owner_admin_id=0)) OR ${alias}.owner_admin_id=${ownerId===null?'NULL':ownerId}::int)`;
+
+    let usersResult;
+    if (req.isPanelAdmin) {
+      usersResult = await pool.query(`WITH RECURSIVE descendants AS (SELECT id FROM users WHERE id=$1 UNION ALL SELECT u.id FROM users u JOIN descendants d ON u.owner_user_id=d.id)
+        SELECT u.id,u.name,u.email,u.balance,COALESCE(u.is_subadmin,false) AS is_subadmin
+        FROM users u WHERE u.id IN (SELECT id FROM descendants) AND u.id<>$1 AND u.role<>'admin'
+          AND (u.name ILIKE $2 OR u.email ILIKE $2 OR ($3::int>0 AND u.id=$3)) ORDER BY u.id DESC LIMIT 10`, [req.user.id,like,numericId]);
+    } else {
+      usersResult = await pool.query(`WITH RECURSIVE ancestry AS (
+          SELECT u.id root_id,u.id current_id,u.owner_user_id,0 depth FROM users u
+          UNION ALL SELECT a.root_id,p.id,p.owner_user_id,a.depth+1 FROM ancestry a JOIN users p ON p.id=a.owner_user_id WHERE a.owner_user_id IS NOT NULL AND a.depth<8
+        ), panel_bound AS (SELECT DISTINCT a.root_id FROM ancestry a JOIN admin_panels ap ON ap.owner_user_id=a.current_id)
+        SELECT u.id,u.name,u.email,u.balance,COALESCE(u.is_subadmin,false) AS is_subadmin
+        FROM users u WHERE u.role<>'admin' AND NOT EXISTS(SELECT 1 FROM panel_bound pb WHERE pb.root_id=u.id)
+          AND (u.name ILIKE $1 OR u.email ILIKE $1 OR ($2::int>0 AND u.id=$2)) ORDER BY u.id DESC LIMIT 10`, [like,numericId]);
+    }
+
+    const [products, orders, accounts, mothers, reports] = await Promise.all([
+      pool.query(`SELECT p.id,p.name,p.category,p.price,p.cost_price,p.active FROM products p WHERE ${ownerClause('p')} AND (p.name ILIKE $1 OR p.category ILIKE $1 OR ($2::int>0 AND p.id=$2)) ORDER BY p.id DESC LIMIT 10`,[like,numericId]),
+      pool.query(`SELECT o.id,o.user_id,o.amount,o.status,o.created_at,COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Producto') AS product_name,u.name AS user_name,u.email AS user_email
+                  FROM orders o LEFT JOIN products p ON p.id=o.product_id LEFT JOIN users u ON u.id=o.user_id
+                  WHERE ${ownerClause('o')} AND (($2::int>0 AND o.id=$2) OR COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'') ILIKE $1 OR u.name ILIKE $1 OR u.email ILIKE $1)
+                  ORDER BY o.id DESC LIMIT 10`,[like,numericId]),
+      pool.query(`SELECT pa.id,pa.platform,pa.product_name,pa.account_email,pa.profile_name,pa.status,pa.mother_account_id
+                  FROM platform_accounts pa WHERE ${ownerClause('pa')} AND (pa.account_email ILIKE $1 OR pa.product_name ILIKE $1 OR pa.platform ILIKE $1 OR pa.profile_name ILIKE $1 OR ($2::int>0 AND pa.id=$2)) ORDER BY pa.id DESC LIMIT 10`,[like,numericId]),
+      pool.query(`SELECT ma.id,ma.product_name,ma.account_email,ma.provider_name,ma.status,ma.expiration_date FROM mother_accounts ma
+                  WHERE ${ownerClause('ma')} AND (ma.account_email ILIKE $1 OR ma.product_name ILIKE $1 OR ma.provider_name ILIKE $1 OR ($2::int>0 AND ma.id=$2)) ORDER BY ma.id DESC LIMIT 10`,[like,numericId]),
+      pool.query(`SELECT ar.id,ar.user_id,ar.email,ar.issue_type,ar.status,ar.created_at,u.name AS user_name,u.email AS user_email
+                  FROM account_reports ar LEFT JOIN users u ON u.id=ar.user_id WHERE ${ownerClause('ar')} AND (ar.email ILIKE $1 OR ar.issue_type ILIKE $1 OR u.name ILIKE $1 OR u.email ILIKE $1 OR ($2::int>0 AND ar.id=$2)) ORDER BY ar.id DESC LIMIT 10`,[like,numericId])
+    ]);
+    res.json({query:q,users:usersResult.rows,products:products.rows,orders:orders.rows,accounts:accounts.rows,mother_accounts:mothers.rows,reports:reports.rows});
+  } catch (err) {
+    console.error('Error buscador global:', err.message);
+    res.status(500).json({ error:'No se pudo realizar la búsqueda global' });
+  }
+});
+
+app.get('/api/admin/master/users/:userId/overview', authMiddleware, adminMiddleware, async (req,res)=>{
+  try {
+    const userId=Number(req.params.userId||0);
+    const user=await getScopedAdminCustomer(pool,req,userId);
+    if(!user) return res.status(404).json({error:'Usuario no encontrado dentro de tu negocio'});
+    const ownerId=adminOwnerId(req);
+    const [orderStats, orders, reports, balanceRequests, ledger] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS orders,
+                         COUNT(*) FILTER (WHERE o.status='exito')::int AS successful_orders,
+                         COUNT(*) FILTER (WHERE o.status IN ('accion_en_espera','en_proceso'))::int AS pending_orders,
+                         COALESCE(SUM(o.amount) FILTER (WHERE o.status='exito'),0)::numeric AS revenue,
+                         COALESCE(SUM(COALESCE(NULLIF(o.product_cost_snapshot,0),NULLIF(p.cost_price,0),0)) FILTER (WHERE o.status='exito'),0)::numeric AS cost
+                  FROM orders o LEFT JOIN products p ON p.id=o.product_id
+                  WHERE o.user_id=$1 AND (($2::int IS NULL AND (o.owner_admin_id IS NULL OR o.owner_admin_id=0)) OR o.owner_admin_id=$2)`,[userId,ownerId]),
+      pool.query(`SELECT o.id,o.amount,o.status,o.created_at,o.refunded,o.payment_source,o.admin_quick_sale,
+                         COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Producto') AS product_name,
+                         COALESCE(NULLIF(o.product_cost_snapshot,0),NULLIF(p.cost_price,0),0) AS effective_cost
+                  FROM orders o LEFT JOIN products p ON p.id=o.product_id
+                  WHERE o.user_id=$1 AND (($2::int IS NULL AND (o.owner_admin_id IS NULL OR o.owner_admin_id=0)) OR o.owner_admin_id=$2)
+                  ORDER BY o.id DESC LIMIT 80`,[userId,ownerId]),
+      pool.query(`SELECT id,email,issue_type,status,created_at,admin_response FROM account_reports WHERE user_id=$1 AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2) ORDER BY id DESC LIMIT 20`,[userId,ownerId]),
+      pool.query(`SELECT id,amount,status,created_at,reference,bank FROM balance_requests WHERE user_id=$1 AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2) ORDER BY id DESC LIMIT 20`,[userId,ownerId]),
+      pool.query(`SELECT id,movement_type,amount,balance_before,balance_after,reference_type,reference_id,note,created_at FROM balance_ledger WHERE user_id=$1 AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2) ORDER BY id DESC LIMIT 30`,[userId,ownerId])
+    ]);
+    const stats=orderStats.rows[0]||{};
+    const revenue=Number(stats.revenue||0),cost=Number(stats.cost||0);
+    const lastActivity=[...orders.rows,...reports.rows,...balanceRequests.rows,...ledger.rows].map(r=>r.created_at).filter(Boolean).sort((a,b)=>new Date(b)-new Date(a))[0]||user.created_at;
+    res.json({
+      user:{id:user.id,name:user.name,email:user.email,balance:Number(user.balance||0),is_subadmin:Boolean(user.is_subadmin),owner_user_id:user.owner_user_id,is_enabled:Boolean(user.is_enabled),created_at:user.created_at,last_activity_at:lastActivity},
+      summary:{orders:Number(stats.orders||0),successful_orders:Number(stats.successful_orders||0),pending_orders:Number(stats.pending_orders||0),revenue,cost,profit:revenue-cost,reports:reports.rows.length,pending_reports:reports.rows.filter(r=>r.status==='pendiente').length,balance_requests:balanceRequests.rows.length},
+      recent_orders:orders.rows.slice(0,15),recent_reports:reports.rows.slice(0,10),recent_balance_requests:balanceRequests.rows.slice(0,10),ledger:ledger.rows
+    });
+  } catch(err){ console.error('Error usuario 360:',err.message); res.status(500).json({error:'No se pudo cargar la ficha del usuario'}); }
+});
+
+app.get('/api/admin/master/suppliers', authMiddleware, adminMiddleware, async (req,res)=>{
+  try{
+    const ownerId=adminOwnerId(req);
+    const result=await pool.query(`WITH names AS (
+        SELECT lower(trim(name)) key,trim(name) name FROM suppliers WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
+        UNION
+        SELECT lower(trim(provider_name)) key,trim(provider_name) name FROM mother_accounts WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) AND trim(COALESCE(provider_name,''))<>''
+      ), agg AS (
+        SELECT lower(trim(COALESCE(provider_name,''))) key,COUNT(*)::int mother_accounts,COALESCE(SUM(purchase_cost_total),0)::numeric invested
+        FROM mother_accounts WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) AND trim(COALESCE(provider_name,''))<>'' GROUP BY 1
+      ), purchases AS (
+        SELECT lower(trim(COALESCE(supplier_name_snapshot,''))) key,COUNT(*)::int purchase_records,COALESCE(SUM(total_amount),0)::numeric purchases_total
+        FROM inventory_purchases WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) GROUP BY 1
+      )
+      SELECT s.id,n.name,s.contact_name,s.phone,s.email,s.notes,COALESCE(s.status,'activo') status,
+             COALESCE(a.mother_accounts,0)::int mother_accounts,COALESCE(a.invested,0)::numeric invested,
+             COALESCE(p.purchase_records,0)::int purchase_records,COALESCE(p.purchases_total,0)::numeric purchases_total
+      FROM names n LEFT JOIN suppliers s ON lower(trim(s.name))=n.key AND (($1::int IS NULL AND (s.owner_admin_id IS NULL OR s.owner_admin_id=0)) OR s.owner_admin_id=$1)
+      LEFT JOIN agg a ON a.key=n.key LEFT JOIN purchases p ON p.key=n.key ORDER BY lower(n.name)`,[ownerId]);
+    const purchases=await pool.query(`SELECT ip.id,ip.purchase_date,ip.supplier_name_snapshot,ip.description,ip.item_count,ip.total_amount,ip.notes,ip.created_at
+      FROM inventory_purchases ip WHERE (($1::int IS NULL AND (ip.owner_admin_id IS NULL OR ip.owner_admin_id=0)) OR ip.owner_admin_id=$1)
+      ORDER BY ip.purchase_date DESC,ip.id DESC LIMIT 60`,[ownerId]);
+    res.json({suppliers:result.rows,purchases:purchases.rows});
+  }catch(err){console.error('Error proveedores:',err.message);res.status(500).json({error:'No se pudieron cargar proveedores'});}
+});
+
+app.post('/api/admin/master/suppliers', authMiddleware, adminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const name=String(req.body?.name||'').trim().slice(0,160);
+    if(!name) return res.status(400).json({error:'Nombre del proveedor obligatorio'});
+    const ownerId=adminOwnerId(req);
+    await client.query('BEGIN');
+    const supplierValues=[String(req.body?.contact_name||'').trim().slice(0,160),String(req.body?.phone||'').trim().slice(0,80),String(req.body?.email||'').trim().slice(0,200),String(req.body?.notes||'').trim().slice(0,1000)];
+    const existing=await client.query(`SELECT id FROM suppliers WHERE COALESCE(owner_admin_id,0)=COALESCE($1::int,0) AND lower(name)=lower($2) LIMIT 1`,[ownerId,name]);
+    const result=existing.rows[0]
+      ? await client.query(`UPDATE suppliers SET name=$2,contact_name=$3,phone=$4,email=$5,notes=$6,status='activo',updated_at=NOW() WHERE id=$1 RETURNING *`,[existing.rows[0].id,name,...supplierValues])
+      : await client.query(`INSERT INTO suppliers(owner_admin_id,name,contact_name,phone,email,notes,status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,'activo',NOW(),NOW()) RETURNING *`,[ownerId,name,...supplierValues]);
+    await recordAdminAudit(client,req,{action:'supplier_save',entityType:'supplier',entityId:result.rows[0].id,summary:`Proveedor guardado: ${name}`});
+    await client.query('COMMIT');
+    res.json({message:'Proveedor guardado',supplier:result.rows[0]});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error guardando proveedor:',err.message);if(String(err.code)==='23505')return res.status(400).json({error:'Ese proveedor ya existe'});res.status(500).json({error:'No se pudo guardar el proveedor'});}finally{client.release();}
+});
+
+app.post('/api/admin/master/inventory-purchases', authMiddleware, adminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const ownerId=adminOwnerId(req);
+    const supplierId=Number(req.body?.supplier_id||0)||null;
+    let supplierName=String(req.body?.supplier_name||'').trim().slice(0,160);
+    const total=Number(req.body?.total_amount||0);
+    const count=Math.max(1,Math.round(Number(req.body?.item_count||1)));
+    if(!Number.isFinite(total)||total<0)return res.status(400).json({error:'Total de compra inválido'});
+    await client.query('BEGIN');
+    if(supplierId){const s=await client.query(`SELECT id,name FROM suppliers WHERE id=$1 AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2)`,[supplierId,ownerId]);if(!s.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Proveedor no encontrado'});}supplierName=s.rows[0].name;}
+    if(!supplierName){await client.query('ROLLBACK');return res.status(400).json({error:'Selecciona o escribe un proveedor'});}
+    const purchase=await client.query(`INSERT INTO inventory_purchases(owner_admin_id,supplier_id,supplier_name_snapshot,purchase_date,description,item_count,total_amount,notes,created_by,created_at)
+      VALUES($1,$2,$3,COALESCE($4::date,CURRENT_DATE),$5,$6,$7,$8,$9,NOW()) RETURNING *`,[ownerId,supplierId,supplierName,req.body?.purchase_date||null,String(req.body?.description||'').trim().slice(0,300),count,total,String(req.body?.notes||'').trim().slice(0,1000),req.user.id]);
+    await recordAdminAudit(client,req,{action:'inventory_purchase_create',entityType:'inventory_purchase',entityId:purchase.rows[0].id,summary:`Compra a ${supplierName}: $${total.toFixed(2)}`,metadata:{item_count:count,purchase_date:purchase.rows[0].purchase_date}});
+    await client.query('COMMIT');res.json({message:'Compra de inventario registrada',purchase:purchase.rows[0]});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error compra inventario:',err.message);res.status(500).json({error:'No se pudo registrar la compra'});}finally{client.release();}
+});
+
+
+// ============================================================
 // VERSIÓN MAESTRA: CENTRO DE OPERACIONES + LIBRO + AUDITORÍA
 // ============================================================
 app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const ownScope = `(owner_admin_id IS NULL OR owner_admin_id = 0)`;
-    const [sales, pendingOrders, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance] = await Promise.all([
+    const [sales, pendingOrders, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance, lowStock] = await Promise.all([
       pool.query(`WITH todays AS (
                     SELECT o.*, COALESCE(p.cost_price, 0) AS current_product_cost
                     FROM orders o
@@ -6478,7 +6887,14 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       pool.query(`SELECT br.id, br.created_at, br.amount, u.name AS user_name, u.email AS user_email
                   FROM balance_requests br LEFT JOIN users u ON u.id=br.user_id
                   WHERE (br.owner_admin_id IS NULL OR br.owner_admin_id=0) AND br.status='pendiente'
-                  ORDER BY br.created_at ASC LIMIT 5`)
+                  ORDER BY br.created_at ASC LIMIT 5`),
+      pool.query(`SELECT p.id,p.name,p.category,${effectiveStockExpression('p')} AS stock
+                  FROM products p
+                  WHERE p.active=1 AND (p.owner_admin_id IS NULL OR p.owner_admin_id=0)
+                    AND COALESCE(p.stock_enabled,0)=1
+                    AND lower(trim(COALESCE(p.product_type,'streaming_auto'))) NOT LIKE '%combo%'
+                    AND ${effectiveStockExpression('p')} <= 2
+                  ORDER BY ${effectiveStockExpression('p')} ASC,p.name ASC LIMIT 8`)
     ]);
 
     const now = Date.now();
@@ -6486,8 +6902,13 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
     const urgent = [
       ...urgentOrders.rows.map(r => ({ type:'pedido', id:r.id, title:`Pedido #${r.id} · ${r.title}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
       ...urgentReports.rows.map(r => ({ type:'reporte', id:r.id, title:`Reporte #${r.id} · ${r.issue_type || 'Falla'}`, detail:`${r.user_name || r.user_email || 'Cliente'} · ${r.email || ''}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
-      ...urgentBalance.rows.map(r => ({ type:'saldo', id:r.id, title:`Solicitud de saldo #${r.id}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at }))
-    ].sort((a,b) => b.age_minutes - a.age_minutes).slice(0,10);
+      ...urgentBalance.rows.map(r => ({ type:'saldo', id:r.id, title:`Solicitud de saldo #${r.id}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
+      ...lowStock.rows.map(r => ({ type:'stock', id:r.id, title:`Stock crítico · ${r.name}`, detail:`${Number(r.stock||0)} disponible(s) · ${r.category || 'Producto'}`, age_minutes:0, created_at:new Date().toISOString() }))
+    ].sort((a,b) => {
+      if(a.type==='stock' && b.type!=='stock') return -1;
+      if(b.type==='stock' && a.type!=='stock') return 1;
+      return b.age_minutes-a.age_minutes;
+    }).slice(0,12);
 
     res.json({
       generated_at: new Date().toISOString(),
@@ -6499,6 +6920,8 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       inventory_available: Number(inventory.rows[0]?.available||0),
       quarantine: Number(quarantine.rows[0]?.total||0),
       mother_accounts_expiring_7d: Number(expiring.rows[0]?.total||0),
+      low_stock_count: lowStock.rows.length,
+      low_stock: lowStock.rows.map(r=>({id:Number(r.id),name:r.name,category:r.category,stock:Number(r.stock||0)})),
       urgent
     });
   } catch (err) {
@@ -6828,7 +7251,8 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
     const shouldChargeOnSuccess =
       status === "exito" &&
-      charged === 0;
+      charged === 0 &&
+      String(order.payment_source || 'balance').toLowerCase() !== 'external';
 
     if (shouldChargeOnSuccess && balance < amount) {
       await client.query("ROLLBACK");
@@ -6841,7 +7265,8 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
       status === "rechazado" &&
       refund_if_rejected === true &&
       charged === 1 &&
-      refunded === 0;
+      refunded === 0 &&
+      String(order.payment_source || 'balance').toLowerCase() !== 'external';
 
     if (shouldChargeOnSuccess) {
       await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [amount, order.user_id]);

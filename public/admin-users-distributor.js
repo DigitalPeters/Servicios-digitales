@@ -253,9 +253,12 @@ function renderAdminUsersWithTools(){
         : '<span class="chip" style="background:#fee2e2;color:#991b1b">Deshabilitado</span>';
       const movementDate = formatAdminUserMovementDate(u.last_activity_at);
       const movements2m = Number(u.movements_2m || 0);
-      const manageButtons = canManage
-        ? `<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
+      const overviewButton = (!isPanelOwner && u.role !== 'admin' && typeof window.openMasterUser360 === 'function')
+        ? `<button class="outline-btn" onclick="openMasterUser360(${u.id})">Ficha 360°</button>`
         : '';
+      const manageButtons = canManage
+        ? `${overviewButton}<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
+        : overviewButton;
       return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${roleText} ${chip}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Último movimiento:</b> ${movementDate}</p><p><b>Movimientos 2 meses:</b> ${movements2m}</p><div class="tools" style="margin-bottom:0">${action}${manageButtons}</div></div>`;
     }).join('') || 'No hay usuarios.';
   }
