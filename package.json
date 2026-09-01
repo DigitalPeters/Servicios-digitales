@@ -1,7 +1,7 @@
 {
   "name": "servicios-digitales",
-  "version": "1.0.0",
-  "description": "Pagina de servicios digitales",
+  "version": "1.1.0",
+  "description": "Servicios Digitales Peters - Version Maestra V1",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

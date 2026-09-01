@@ -1846,7 +1846,7 @@ async function loadAdminPanelsPhase1(){
           <tr>
             <td>
               <b>${safeText(p.business_name||'Sin nombre')}</b><br>
-              <span class="small-text">${safeText(p.email||'')}</span><br>${p.slug ? `<span class="small-text">https://${safeText(p.slug)}.katalogoclick.com</span>` : ""}
+              <span class="small-text">${safeText(p.email||'')}</span><br>${p.panel_url ? `<span class="small-text">${safeText(p.panel_url)}</span>` : ""}
             </td>
             <td>
               ${safeText(p.admin_name||'')}<br>
@@ -1936,7 +1936,7 @@ function copyAdminPanelInfoPhase1(panelId){
     `Estado: ${panel.status||''}`,
     `Plan: ${panel.plan_type||''}`,
     `Vence: ${panel.expires_at ? String(panel.expires_at).slice(0,10) : 'Sin fecha'}`,
-    `Liga: ${panel.slug ? `https://${panel.slug}.katalogoclick.com` : 'Sin subdominio'}`
+    `Liga: ${panel.panel_url || 'Sin subdominio'}`
   ].join('\n');
 
   navigator.clipboard?.writeText(text).then(
@@ -3519,7 +3519,7 @@ async function botonDePanico() {
   const email = prompt("🚨 BOTÓN DE PÁNICO (Admin) 🚨\n\nIngresa el CORREO EXACTO del cliente al que le vas a resetear la contraseña:");
   if (!email) return;
 
-  const confirmacion = confirm(`¿Estás seguro de resetear la cuenta de:\n${email}?\n\nSu nueva contraseña será temporalmente: 123456`);
+  const confirmacion = confirm(`¿Estás seguro de generar una contraseña temporal para:\n${email}?\n\nLa contraseña anterior dejará de funcionar y sus sesiones se cerrarán.`);
   if (!confirmacion) return;
 
   try {
@@ -3535,7 +3535,7 @@ async function botonDePanico() {
     
     const data = await res.json();
     if (data.success) {
-      alert(`✅ ¡ÉXITO!\n\n${data.message}\n\nDile a tu cliente que inicie sesión con 123456 y que la cambie desde su cuenta.`);
+      alert(`✅ CONTRASEÑA TEMPORAL GENERADA\n\n${data.message}\n\nContraseña temporal: ${data.temporary_password}\n\nCompártela de forma privada. El usuario deberá cambiarla desde Mi cuenta.`);
     } else {
       alert("❌ Error: " + data.error);
     }
@@ -3598,6 +3598,8 @@ async function cambiarMiPassword() {
       // Limpiamos las cajas de texto para que no se queden escritas
       document.getElementById('pass-actual').value = '';
       document.getElementById('pass-nueva').value = '';
+      if(currentUser) currentUser.must_change_password = false;
+      document.getElementById('masterSecurityNotice')?.remove();
     } else {
       alert("❌ No se pudo cambiar: " + data.error);
     }

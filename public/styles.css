@@ -2457,3 +2457,20 @@ body.modal-open{
 }
 
 .panel-invite-fields{margin-top:10px;padding:14px;border:1px solid #dfe6f3;border-radius:14px;background:#f8faff}.auth-invite-note{margin-bottom:12px;font-weight:700;color:#334155}
+
+/* ==========================================================
+   VERSION MAESTRA V1 — Centro de operaciones / auditoría
+   ========================================================== */
+.master-security-notice{margin:12px auto;padding:12px 16px;max-width:1180px;border:1px solid rgba(251,191,36,.45);background:rgba(120,53,15,.28);border-radius:12px;color:#fde68a;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+.master-security-notice button{border:0;border-radius:8px;padding:7px 11px;font-weight:800;cursor:pointer}
+.master-operations-panel{margin-top:18px;border:1px solid rgba(96,165,250,.28);box-shadow:0 18px 45px rgba(2,6,23,.22)}
+.master-head{align-items:flex-start}.master-kicker{font-size:11px;letter-spacing:.14em;font-weight:900;color:#60a5fa;margin-bottom:4px}
+.master-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0 20px}
+.master-kpi{padding:14px;border-radius:12px;background:rgba(15,23,42,.52);border:1px solid rgba(148,163,184,.16);display:flex;flex-direction:column;gap:4px;min-height:92px}
+.master-kpi span{font-size:12px;color:#cbd5e1}.master-kpi b{font-size:22px;line-height:1.2}.master-kpi small{color:#94a3b8}.master-kpi.warn{border-color:rgba(251,191,36,.36)}.master-kpi.danger{border-color:rgba(248,113,113,.42)}
+.master-two-col{display:grid;grid-template-columns:1.35fr .85fr;gap:18px}.master-two-col h3{margin:0 0 10px}
+.master-urgent-list{display:grid;gap:8px}.master-urgent-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;padding:11px 12px;border-radius:10px;border:1px solid rgba(148,163,184,.16);background:rgba(15,23,42,.35);color:inherit;cursor:pointer}.master-urgent-item:hover{border-color:rgba(96,165,250,.5);transform:translateY(-1px)}.master-urgent-item span{display:grid;gap:3px}.master-urgent-item small{color:#94a3b8}.master-urgent-item em{font-style:normal;font-weight:800;color:#fbbf24;white-space:nowrap}
+.master-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.master-actions button{padding:11px;border-radius:10px;border:1px solid rgba(96,165,250,.25);background:rgba(30,41,59,.62);color:inherit;text-align:left;cursor:pointer;font-weight:700}.master-actions button:hover{border-color:#60a5fa}.master-updated{margin-top:12px}.master-ok,.master-empty{padding:14px;border-radius:10px;background:rgba(16,185,129,.09);border:1px solid rgba(16,185,129,.22)}
+.master-data-panel{margin-top:22px;border:1px solid rgba(96,165,250,.18)}.master-ledger-summary{display:flex;gap:14px;flex-wrap:wrap;margin:12px 0}.master-ledger-summary span,.master-ledger-summary small{padding:9px 11px;border-radius:9px;background:rgba(15,23,42,.45)}.master-ledger-summary small{flex-basis:100%;color:#94a3b8}.master-positive{color:#86efac;font-weight:800}.master-negative{color:#fca5a5;font-weight:800}
+@media(max-width:900px){.master-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.master-two-col{grid-template-columns:1fr}}
+@media(max-width:560px){.master-kpi-grid,.master-actions{grid-template-columns:1fr}.master-urgent-item{align-items:flex-start}.master-kpi b{font-size:19px}}

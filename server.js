@@ -1,6 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
-console.log("VERSION RECUPERACION 11-JUN-2026");
+console.log("SERVICIOS DIGITALES PETERS · VERSION MAESTRA V1 · 31-AGO-2026");
 const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -16,9 +16,12 @@ const app = express();
 const codigosRecuperacion = new Map();
 
 const PORT = process.env.PORT || 3000;
-const SECRET = process.env.JWT_SECRET || "mi_super_secreto";
+const SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
+if (!process.env.JWT_SECRET) {
+  console.warn("[SEGURIDAD] JWT_SECRET no está configurado. Se generó una clave temporal para esta ejecución; configura JWT_SECRET antes de producción.");
+}
 
-const PANEL_BASE_DOMAIN = String(process.env.PANEL_BASE_DOMAIN || "katalogoclick.com")
+const PANEL_BASE_DOMAIN = String(process.env.PANEL_BASE_DOMAIN || "serviciosdigitalespeters.com")
   .trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
 
 const MAIN_ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
@@ -319,6 +322,54 @@ const pool = new Pool({
 
 console.log("DATABASE_URL existe:", !!process.env.DATABASE_URL);
 
+function getOwnerScopeFromRequest(req) {
+  return req && req.isPanelAdmin ? Number(req.user.id) : null;
+}
+
+function cleanAuditMetadata(value) {
+  try {
+    const data = value && typeof value === 'object' ? value : {};
+    const blocked = new Set(['password', 'account_password', 'new_password', 'proof', 'evidence_image']);
+    return Object.fromEntries(Object.entries(data).filter(([key]) => !blocked.has(String(key).toLowerCase())));
+  } catch (_) {
+    return {};
+  }
+}
+
+async function recordAdminAudit(client, req, { action, entityType = '', entityId = null, summary = '', metadata = {} } = {}) {
+  try {
+    const actorId = Number(req?.user?.id || 0) || null;
+    const actorEmail = String(req?.adminUser?.email || req?.user?.email || '').trim().toLowerCase();
+    const ownerAdminId = req?.isPanelAdmin ? Number(req.user.id) : null;
+    await client.query(
+      `INSERT INTO admin_audit_log
+       (actor_user_id, actor_email, owner_admin_id, action, entity_type, entity_id, summary, metadata, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
+      [actorId, actorEmail, ownerAdminId, String(action || 'admin_action'), String(entityType || ''), entityId ? String(entityId) : null, String(summary || ''), JSON.stringify(cleanAuditMetadata(metadata))]
+    );
+  } catch (err) {
+    console.error('[AUDITORIA] No se pudo registrar acción:', err.message);
+  }
+}
+
+async function recordBalanceLedger(client, {
+  userId, ownerAdminId = null, actorUserId = null, movementType, amount,
+  balanceBefore, balanceAfter, referenceType = '', referenceId = null, note = ''
+} = {}) {
+  try {
+    await client.query(
+      `INSERT INTO balance_ledger
+       (user_id, owner_admin_id, actor_user_id, movement_type, amount, balance_before, balance_after, reference_type, reference_id, note, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())`,
+      [Number(userId), ownerAdminId ? Number(ownerAdminId) : null, actorUserId ? Number(actorUserId) : null,
+       String(movementType || 'ajuste'), Number(amount || 0), Number(balanceBefore || 0), Number(balanceAfter || 0),
+       String(referenceType || ''), referenceId ? String(referenceId) : null, String(note || '').slice(0, 500)]
+    );
+  } catch (err) {
+    console.error('[SALDO] No se pudo registrar movimiento:', err.message);
+  }
+}
+
 async function markAccountAsSold(client, accountId, orderId, userId, isReusableSale = false) {
     try {
         console.log(`[INVENTARIO] Intentando descontar cuenta ${accountId} para pedido ${orderId}`);
@@ -547,7 +598,8 @@ function generateToken(user) {
   return jwt.sign(
     {
       id: user.id,
-      role: user.role
+      role: user.role,
+      tv: Number(user.token_version || 0)
     },
     SECRET,
     {
@@ -556,7 +608,7 @@ function generateToken(user) {
   );
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -564,16 +616,45 @@ function authMiddleware(req, res, next) {
   }
 
   const token = authHeader.split(" ")[1];
-
   if (!token) {
     return res.status(401).json({ error: "Token faltante" });
   }
 
   try {
-    req.user = jwt.verify(token, SECRET);
+    const decoded = jwt.verify(token, SECRET);
+    const sessionResult = await pool.query(
+      `SELECT u.id, u.role, u.email, u.owner_user_id, COALESCE(u.is_enabled, true) AS is_enabled,
+              COALESCE(u.token_version, 0) AS token_version,
+              direct_panel.status AS direct_panel_status,
+              owner_panel.status AS owner_panel_status,
+              grand_panel.status AS grand_panel_status
+       FROM users u
+       LEFT JOIN users owner ON owner.id = u.owner_user_id
+       LEFT JOIN admin_panels direct_panel ON direct_panel.owner_user_id = u.id
+       LEFT JOIN admin_panels owner_panel ON owner_panel.owner_user_id = u.owner_user_id
+       LEFT JOIN admin_panels grand_panel ON grand_panel.owner_user_id = owner.owner_user_id
+       WHERE u.id = $1
+       LIMIT 1`,
+      [decoded.id]
+    );
+    const sessionUser = sessionResult.rows[0];
+    if (!sessionUser) return res.status(401).json({ error: "Sesión no válida" });
+    if (sessionUser.is_enabled === false) return res.status(403).json({ error: "Tu acceso está deshabilitado" });
+    if (Number(decoded.tv || 0) !== Number(sessionUser.token_version || 0)) {
+      return res.status(401).json({ error: "La sesión fue cerrada por seguridad. Inicia sesión nuevamente." });
+    }
+    const panelStatuses = [sessionUser.direct_panel_status, sessionUser.owner_panel_status, sessionUser.grand_panel_status]
+      .filter(Boolean).map(v => String(v).toLowerCase());
+    if (panelStatuses.some(status => status !== "activo")) {
+      return res.status(403).json({ error: "Panel suspendido o inactivo" });
+    }
+    req.user = { ...decoded, role: sessionUser.role, email: sessionUser.email, owner_user_id: sessionUser.owner_user_id };
     next();
-  } catch {
-    return res.status(403).json({ error: "Token inválido" });
+  } catch (err) {
+    if (err && err.name === 'JsonWebTokenError') return res.status(403).json({ error: "Token inválido" });
+    if (err && err.name === 'TokenExpiredError') return res.status(401).json({ error: "La sesión expiró. Inicia sesión nuevamente." });
+    console.error("Error validando sesión:", err.message);
+    return res.status(500).json({ error: "Error validando sesión" });
   }
 }
 
@@ -587,6 +668,7 @@ async function adminMiddleware(req, res, next) {
       `SELECT u.id, u.email, u.name, u.role, u.balance,
               COALESCE(u.is_subadmin, false) AS is_subadmin,
               u.owner_user_id,
+              COALESCE(u.must_change_password, false) AS must_change_password,
               ap.id AS admin_panel_id,
               ap.business_name AS admin_panel_business_name,
               ap.status AS admin_panel_status
@@ -1219,6 +1301,44 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS owner_user_id INTEGER`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT TRUE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS balance_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      owner_admin_id INTEGER,
+      actor_user_id INTEGER,
+      movement_type TEXT NOT NULL,
+      amount NUMERIC NOT NULL DEFAULT 0,
+      balance_before NUMERIC NOT NULL DEFAULT 0,
+      balance_after NUMERIC NOT NULL DEFAULT 0,
+      reference_type TEXT DEFAULT '',
+      reference_id TEXT,
+      note TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_balance_ledger_user_created ON balance_ledger(user_id, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_balance_ledger_owner_created ON balance_ledger(COALESCE(owner_admin_id,0), created_at DESC)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      actor_user_id INTEGER,
+      actor_email TEXT DEFAULT '',
+      owner_admin_id INTEGER,
+      action TEXT NOT NULL,
+      entity_type TEXT DEFAULT '',
+      entity_id TEXT,
+      summary TEXT DEFAULT '',
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_created ON admin_audit_log(actor_user_id, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_audit_owner_created ON admin_audit_log(COALESCE(owner_admin_id,0), created_at DESC)`);
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0`);
 
@@ -2458,6 +2578,7 @@ app.get("/api/me", authMiddleware, async (req, res) => {
       `SELECT u.id, u.name, u.email, u.role, u.balance,
               COALESCE(u.is_subadmin, false) AS is_subadmin,
               u.owner_user_id,
+              COALESCE(u.must_change_password, false) AS must_change_password,
               ap.id AS admin_panel_id,
               ap.business_name AS admin_panel_business_name,
               ap.status AS admin_panel_status,
@@ -2989,6 +3110,15 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       );
 
       const newOrderId = orderInsertResult.rows[0].id;
+      if (charged === 1) {
+        await recordBalanceLedger(client, {
+          userId, ownerAdminId: viewerContext?.owner_admin_id || null, actorUserId: null,
+          movementType: 'compra', amount: -price,
+          balanceBefore: balance, balanceAfter: balance - price,
+          referenceType: 'order', referenceId: newOrderId,
+          note: `Compra de ${product.name || 'Combo'}`
+        });
+      }
 
       for (const account of assignedAccounts) {
         await client.query(
@@ -3145,6 +3275,15 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     );
 
     const newOrderId = orderInsertResult.rows[0].id;
+    if (charged === 1) {
+      await recordBalanceLedger(client, {
+        userId, ownerAdminId: viewerContext?.owner_admin_id || null, actorUserId: null,
+        movementType: 'compra', amount: -price,
+        balanceBefore: balance, balanceAfter: balance - price,
+        referenceType: 'order', referenceId: newOrderId,
+        note: `Compra de ${product.name || productName || 'producto'}`
+      });
+    }
 
 if (assignedAccount) {
     const isReusableSale = assignedAccount.isReusableSale === true;
@@ -4430,83 +4569,101 @@ app.delete("/api/admin/users/:userId", authMiddleware, adminMiddleware, async (r
   }
 });
 
-// ADMIN: AGREGAR SALDO
+// ADMIN: AGREGAR / QUITAR SALDO — VERSIÓN MAESTRA CON LIBRO DE MOVIMIENTOS
 app.post("/api/admin/add-balance", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { user_id, amount, note } = req.body;
-
-    if (!user_id || !amount) {
-      return res.status(400).json({ error: "ID de usuario y cantidad son obligatorios" });
-    }
-
     const amountNumber = Number(amount);
-
-    if (amountNumber <= 0) {
-      return res.status(400).json({ error: "La cantidad debe ser mayor a 0" });
+    if (!user_id || !Number.isFinite(amountNumber) || amountNumber <= 0) {
+      return res.status(400).json({ error: "ID de usuario y cantidad mayor a 0 son obligatorios" });
     }
 
-    const result = await pool.query(
-      `UPDATE users SET balance = balance + $1 WHERE id = $2 AND ($3::int IS NULL OR owner_user_id = $3)`,
-      [amountNumber, user_id, req.isPanelAdmin ? req.user.id : null]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-
-    res.json({
-      message: `Saldo agregado correctamente${note ? ": " + note : ""}`
-    });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Error agregando saldo" });
-  }
-});
-
-// ADMIN: QUITAR SALDO
-app.post("/api/admin/remove-balance", authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const { user_id, amount, note } = req.body;
-
-    if (!user_id || !amount) {
-      return res.status(400).json({ error: "ID de usuario y cantidad son obligatorios" });
-    }
-
-    const amountNumber = Number(amount);
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      return res.status(400).json({ error: "La cantidad debe ser mayor a 0" });
-    }
-
-    const targetResult = await pool.query(
-      `SELECT id, balance
-       FROM users
+    await client.query('BEGIN');
+    const targetResult = await client.query(
+      `SELECT id, name, email, balance, owner_user_id FROM users
        WHERE id = $1 AND ($2::int IS NULL OR owner_user_id = $2)
-       LIMIT 1`,
+       FOR UPDATE`,
       [user_id, req.isPanelAdmin ? req.user.id : null]
     );
-
     const target = targetResult.rows[0];
     if (!target) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
+    const before = Number(target.balance || 0);
+    const after = before + amountNumber;
+    await client.query(`UPDATE users SET balance = $1 WHERE id = $2`, [after, user_id]);
+    await recordBalanceLedger(client, {
+      userId: user_id,
+      ownerAdminId: req.isPanelAdmin ? req.user.id : null,
+      actorUserId: req.user.id,
+      movementType: 'recarga_admin', amount: amountNumber,
+      balanceBefore: before, balanceAfter: after,
+      referenceType: 'admin_adjustment', note: note || 'Saldo agregado por administrador'
+    });
+    await recordAdminAudit(client, req, {
+      action: 'balance_add', entityType: 'user', entityId: user_id,
+      summary: `Saldo agregado: $${amountNumber.toFixed(2)}`,
+      metadata: { amount: amountNumber, before, after, note: note || '' }
+    });
+    await client.query('COMMIT');
+    res.json({ message: `Saldo agregado correctamente${note ? ": " + note : ""}`, balance_before: before, balance_after: after });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error(err.message);
+    res.status(500).json({ error: "Error agregando saldo" });
+  } finally { client.release(); }
+});
 
-    const currentBalance = Number(target.balance || 0);
-    if (currentBalance < amountNumber) {
-      return res.status(400).json({ error: `Saldo insuficiente para descontar. Saldo actual: $${currentBalance.toFixed(2)}` });
+app.post("/api/admin/remove-balance", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { user_id, amount, note } = req.body;
+    const amountNumber = Number(amount);
+    if (!user_id || !Number.isFinite(amountNumber) || amountNumber <= 0) {
+      return res.status(400).json({ error: "ID de usuario y cantidad mayor a 0 son obligatorios" });
     }
 
-    await pool.query(
-      `UPDATE users SET balance = balance - $1 WHERE id = $2`,
-      [amountNumber, user_id]
+    await client.query('BEGIN');
+    const targetResult = await client.query(
+      `SELECT id, name, email, balance, owner_user_id FROM users
+       WHERE id = $1 AND ($2::int IS NULL OR owner_user_id = $2)
+       FOR UPDATE`,
+      [user_id, req.isPanelAdmin ? req.user.id : null]
     );
-
-    res.json({
-      message: `Saldo descontado correctamente${note ? ": " + note : ""}`
+    const target = targetResult.rows[0];
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+    const before = Number(target.balance || 0);
+    if (before < amountNumber) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Saldo insuficiente para descontar. Saldo actual: $${before.toFixed(2)}` });
+    }
+    const after = before - amountNumber;
+    await client.query(`UPDATE users SET balance = $1 WHERE id = $2`, [after, user_id]);
+    await recordBalanceLedger(client, {
+      userId: user_id,
+      ownerAdminId: req.isPanelAdmin ? req.user.id : null,
+      actorUserId: req.user.id,
+      movementType: 'retiro_admin', amount: -amountNumber,
+      balanceBefore: before, balanceAfter: after,
+      referenceType: 'admin_adjustment', note: note || 'Saldo descontado por administrador'
     });
+    await recordAdminAudit(client, req, {
+      action: 'balance_remove', entityType: 'user', entityId: user_id,
+      summary: `Saldo descontado: $${amountNumber.toFixed(2)}`,
+      metadata: { amount: amountNumber, before, after, note: note || '' }
+    });
+    await client.query('COMMIT');
+    res.json({ message: `Saldo descontado correctamente${note ? ": " + note : ""}`, balance_before: before, balance_after: after });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error(err.message);
     res.status(500).json({ error: "Error descontando saldo" });
-  }
+  } finally { client.release(); }
 });
 
 
@@ -4827,10 +4984,21 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
     }
 
     if (status === "aprobado") {
+      const before = Number(user.balance || 0);
+      const after = before + amountNumber;
       await client.query(
-        `UPDATE users SET balance = COALESCE(balance, 0) + $1 WHERE id = $2`,
-        [amountNumber, request.user_id]
+        `UPDATE users SET balance = $1 WHERE id = $2`,
+        [after, request.user_id]
       );
+      await recordBalanceLedger(client, {
+        userId: request.user_id,
+        ownerAdminId: request.owner_admin_id || (req.isPanelAdmin ? req.user.id : null),
+        actorUserId: req.user.id,
+        movementType: 'solicitud_saldo_aprobada', amount: amountNumber,
+        balanceBefore: before, balanceAfter: after,
+        referenceType: 'balance_request', referenceId: requestId,
+        note: admin_response || `Solicitud de saldo #${requestId} aprobada`
+      });
     }
 
     await client.query(
@@ -4839,6 +5007,12 @@ app.patch("/api/admin/balance-requests/:requestId/status", authMiddleware, admin
        WHERE id = $3`,
       [status, admin_response || "", requestId]
     );
+    await recordAdminAudit(client, req, {
+      action: `balance_request_${status}`,
+      entityType: 'balance_request', entityId: requestId,
+      summary: `Solicitud de saldo #${requestId}: ${status}`,
+      metadata: { user_id: request.user_id, amount: amountNumber, status, admin_response: admin_response || '' }
+    });
 
     await client.query("COMMIT");
     transactionStarted = false;
@@ -5857,8 +6031,9 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        WHERE ar.id = $1
+         AND ($2::int IS NULL OR ar.owner_admin_id = $2 OR o.owner_admin_id = $2 OR ar.user_id = $2 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id = $2))
        FOR UPDATE`,
-      [reportId]
+      [reportId, req.isPanelAdmin ? req.user.id : null]
     );
 
     const report = reportResult.rows[0];
@@ -5891,10 +6066,18 @@ app.post("/api/admin/account-reports/:reportId/refund-proportional", authMiddlew
       return res.status(400).json({ error: "No hay días restantes para reembolsar" });
     }
 
-    await client.query(
-      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
+    const refundBalanceResult = await client.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance`,
       [refundAmount, report.user_id]
     );
+    const refundAfter = Number(refundBalanceResult.rows[0]?.balance || 0);
+    await recordBalanceLedger(client, {
+      userId: report.user_id, ownerAdminId: report.owner_admin_id || null, actorUserId: req.user.id,
+      movementType: 'reembolso_proporcional', amount: refundAmount,
+      balanceBefore: refundAfter - refundAmount, balanceAfter: refundAfter,
+      referenceType: 'account_report', referenceId: reportId,
+      note: `Reembolso proporcional del reporte #${reportId}`
+    });
 
     await client.query(
       `UPDATE orders SET refunded = 1 WHERE id = $1`,
@@ -5961,8 +6144,9 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
        FROM account_reports ar
        JOIN orders o ON o.id = ar.order_id
        WHERE ar.id = $1
+         AND ($2::int IS NULL OR ar.owner_admin_id = $2 OR o.owner_admin_id = $2 OR ar.user_id = $2 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id = $2))
        FOR UPDATE`,
-      [reportId]
+      [reportId, req.isPanelAdmin ? req.user.id : null]
     );
 
     const report = reportResult.rows[0];
@@ -5988,8 +6172,16 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
       return res.status(400).json({ error: "Monto inválido para reembolso" });
     }
 
-    // Aplicar reembolso completo
-    await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [amountPaid, report.user_id]);
+    // Aplicar reembolso completo y registrarlo en el libro maestro
+    const fullRefundBalanceResult = await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance`, [amountPaid, report.user_id]);
+    const fullRefundAfter = Number(fullRefundBalanceResult.rows[0]?.balance || 0);
+    await recordBalanceLedger(client, {
+      userId: report.user_id, ownerAdminId: report.owner_admin_id || null, actorUserId: req.user.id,
+      movementType: 'reembolso_completo', amount: amountPaid,
+      balanceBefore: fullRefundAfter - amountPaid, balanceAfter: fullRefundAfter,
+      referenceType: 'account_report', referenceId: reportId,
+      note: `Reembolso completo del reporte #${reportId}`
+    });
 
     await client.query(`UPDATE orders SET refunded = 1 WHERE id = $1`, [report.order_id]);
 
@@ -6154,6 +6346,109 @@ app.get("/api/admin/dashboard-counts", authMiddleware, adminMiddleware, async (r
   } catch (err) {
     console.error("Error dashboard counts:", err.message);
     res.status(500).json({ error: err.message || "Error obteniendo conteos de dashboard" });
+  }
+});
+
+
+// ============================================================
+// VERSIÓN MAESTRA: CENTRO DE OPERACIONES + LIBRO + AUDITORÍA
+// ============================================================
+app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
+  try {
+    const ownScope = `(owner_admin_id IS NULL OR owner_admin_id = 0)`;
+    const [sales, pendingOrders, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS orders,
+                         COALESCE(SUM(amount),0)::numeric AS revenue,
+                         COALESCE(SUM(GREATEST(amount - COALESCE(product_cost_snapshot,0),0)),0)::numeric AS gross_profit
+                  FROM orders
+                  WHERE ${ownScope} AND status='exito'
+                    AND (created_at AT TIME ZONE 'America/Mexico_City')::date = (NOW() AT TIME ZONE 'America/Mexico_City')::date`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso')`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE ${ownScope} AND status='pendiente'`),
+      pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(amount),0)::numeric AS amount FROM balance_requests WHERE ${ownScope} AND status='pendiente'`),
+      pool.query(`SELECT COUNT(*)::int AS available FROM platform_accounts WHERE ${ownScope} AND status IN ('available','disponible')`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE ${ownScope} AND status='recovery_pending'`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM mother_accounts WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL AND expiration_date <= CURRENT_DATE + INTERVAL '7 days'`),
+      pool.query(`SELECT o.id, o.created_at, o.status, o.amount, COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Pedido') AS title, u.name AS user_name, u.email AS user_email
+                  FROM orders o LEFT JOIN products p ON p.id=o.product_id LEFT JOIN users u ON u.id=o.user_id
+                  WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso')
+                  ORDER BY o.created_at ASC LIMIT 5`),
+      pool.query(`SELECT ar.id, ar.created_at, ar.issue_type, ar.email, u.name AS user_name, u.email AS user_email
+                  FROM account_reports ar LEFT JOIN users u ON u.id=ar.user_id
+                  WHERE (ar.owner_admin_id IS NULL OR ar.owner_admin_id=0) AND ar.status='pendiente'
+                  ORDER BY ar.created_at ASC LIMIT 5`),
+      pool.query(`SELECT br.id, br.created_at, br.amount, u.name AS user_name, u.email AS user_email
+                  FROM balance_requests br LEFT JOIN users u ON u.id=br.user_id
+                  WHERE (br.owner_admin_id IS NULL OR br.owner_admin_id=0) AND br.status='pendiente'
+                  ORDER BY br.created_at ASC LIMIT 5`)
+    ]);
+
+    const now = Date.now();
+    const ageMinutes = value => Math.max(0, Math.round((now - new Date(value).getTime()) / 60000));
+    const urgent = [
+      ...urgentOrders.rows.map(r => ({ type:'pedido', id:r.id, title:`Pedido #${r.id} · ${r.title}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
+      ...urgentReports.rows.map(r => ({ type:'reporte', id:r.id, title:`Reporte #${r.id} · ${r.issue_type || 'Falla'}`, detail:`${r.user_name || r.user_email || 'Cliente'} · ${r.email || ''}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
+      ...urgentBalance.rows.map(r => ({ type:'saldo', id:r.id, title:`Solicitud de saldo #${r.id}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at }))
+    ].sort((a,b) => b.age_minutes - a.age_minutes).slice(0,10);
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      sales_today: { orders:Number(sales.rows[0]?.orders||0), revenue:Number(sales.rows[0]?.revenue||0), gross_profit:Number(sales.rows[0]?.gross_profit||0) },
+      pending_orders: Number(pendingOrders.rows[0]?.total||0),
+      pending_reports: Number(pendingReports.rows[0]?.total||0),
+      pending_balance_requests: Number(pendingBalance.rows[0]?.total||0),
+      pending_balance_amount: Number(pendingBalance.rows[0]?.amount||0),
+      inventory_available: Number(inventory.rows[0]?.available||0),
+      quarantine: Number(quarantine.rows[0]?.total||0),
+      mother_accounts_expiring_7d: Number(expiring.rows[0]?.total||0),
+      urgent
+    });
+  } catch (err) {
+    console.error('Error centro de operaciones:', err.message);
+    res.status(500).json({ error:'No se pudo cargar el centro de operaciones' });
+  }
+});
+
+app.get("/api/admin/master/balance-ledger", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const ownerId = getOwnerScopeFromRequest(req);
+    const limit = Math.min(200, Math.max(20, Number(req.query.limit || 80)));
+    const result = await pool.query(
+      `SELECT bl.id, bl.user_id, bl.movement_type, bl.amount, bl.balance_before, bl.balance_after,
+              bl.reference_type, bl.reference_id, bl.note, bl.created_at,
+              u.name AS user_name, u.email AS user_email,
+              actor.name AS actor_name, actor.email AS actor_email
+       FROM balance_ledger bl
+       LEFT JOIN users u ON u.id=bl.user_id
+       LEFT JOIN users actor ON actor.id=bl.actor_user_id
+       WHERE (($1::int IS NULL AND (bl.owner_admin_id IS NULL OR bl.owner_admin_id=0)) OR bl.owner_admin_id=$1)
+       ORDER BY bl.id DESC LIMIT $2`,
+      [ownerId, limit]
+    );
+    const totals = result.rows.reduce((acc,row) => {
+      const value=Number(row.amount||0); if(value>0) acc.in+=value; else acc.out+=Math.abs(value); return acc;
+    }, {in:0,out:0});
+    res.json({ rows:result.rows, totals, tracking_since:'master_v1' });
+  } catch (err) {
+    console.error('Error libro de saldo:', err.message);
+    res.status(500).json({ error:'No se pudo cargar el libro de movimientos' });
+  }
+});
+
+app.get("/api/admin/master/audit-log", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const ownerId = getOwnerScopeFromRequest(req);
+    const limit = Math.min(200, Math.max(20, Number(req.query.limit || 80)));
+    const result = await pool.query(
+      `SELECT id, actor_user_id, actor_email, action, entity_type, entity_id, summary, metadata, created_at
+       FROM admin_audit_log
+       WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
+       ORDER BY id DESC LIMIT $2`, [ownerId, limit]
+    );
+    res.json({ rows:result.rows, tracking_since:'master_v1' });
+  } catch (err) {
+    console.error('Error bitácora admin:', err.message);
+    res.status(500).json({ error:'No se pudo cargar la bitácora administrativa' });
   }
 });
 
@@ -6404,8 +6699,9 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
        FROM orders
        JOIN products ON orders.product_id = products.id
        WHERE orders.id = $1
+         AND ($2::int IS NULL OR orders.owner_admin_id = $2)
        FOR UPDATE`,
-      [orderId]
+      [orderId, req.isPanelAdmin ? req.user.id : null]
     );
 
     const order = orderResult.rows[0];
@@ -6450,27 +6746,27 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
       refunded === 0;
 
     if (shouldChargeOnSuccess) {
-      await client.query(
-        `UPDATE users SET balance = balance - $1 WHERE id = $2`,
-        [amount, order.user_id]
-      );
-
-      await client.query(
-        `UPDATE orders SET charged = 1 WHERE id = $1`,
-        [orderId]
-      );
+      await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [amount, order.user_id]);
+      await client.query(`UPDATE orders SET charged = 1 WHERE id = $1`, [orderId]);
+      await recordBalanceLedger(client, {
+        userId: order.user_id, ownerAdminId: order.owner_admin_id || null, actorUserId: req.user.id,
+        movementType: 'cobro_pedido_admin', amount: -amount,
+        balanceBefore: balance, balanceAfter: balance - amount,
+        referenceType: 'order', referenceId: orderId,
+        note: `Cobro al marcar pedido #${orderId} como éxito`
+      });
     }
 
     if (shouldRefund) {
-      await client.query(
-        `UPDATE users SET balance = balance + $1 WHERE id = $2`,
-        [amount, order.user_id]
-      );
-
-      await client.query(
-        `UPDATE orders SET refunded = 1 WHERE id = $1`,
-        [orderId]
-      );
+      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [amount, order.user_id]);
+      await client.query(`UPDATE orders SET refunded = 1 WHERE id = $1`, [orderId]);
+      await recordBalanceLedger(client, {
+        userId: order.user_id, ownerAdminId: order.owner_admin_id || null, actorUserId: req.user.id,
+        movementType: 'reembolso_pedido', amount,
+        balanceBefore: balance, balanceAfter: balance + amount,
+        referenceType: 'order', referenceId: orderId,
+        note: `Reembolso por pedido #${orderId} rechazado`
+      });
 
       await recordDistributorRefundEarningAdjustment(client, {
         orderId,
@@ -6610,6 +6906,11 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
     if (status === "exito") {
       await ensureDistributorSaleEarningForOrder(client, orderId);
     }
+    await recordAdminAudit(client, req, {
+      action:'order_status_update', entityType:'order', entityId:orderId,
+      summary:`Pedido #${orderId} actualizado a ${status}`,
+      metadata:{ status, charged:shouldChargeOnSuccess, refunded:shouldRefund, user_id:order.user_id, amount }
+    });
 
     await client.query("COMMIT");
 
@@ -8442,7 +8743,10 @@ app.get("/api/admin/admin-panels", authMiddleware, adminMiddleware, mainAdminMid
        ORDER BY id DESC`
     );
 
-    res.json(result.rows);
+    res.json(result.rows.map(panel => ({
+      ...panel,
+      panel_url: panel.slug ? buildPanelUrl(panel.slug) : ""
+    })));
   } catch (err) {
     console.error("Error listando paneles admin:", err.message);
     res.status(500).json({ error: "Error cargando paneles admin" });
@@ -8515,29 +8819,45 @@ app.patch("/api/admin/admin-panels/:id/status", authMiddleware, adminMiddleware,
 // ==========================================
 // INGRESO MANUAL DIRECTO SIN BUSCAR INVENTARIO (VERSIÓN SEGURA)
 // ==========================================
-app.post("/api/admin/reemplazo-manual-seguro", async (req, res) => {
+app.post("/api/admin/reemplazo-manual-seguro", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { reportId, email, password, profile, pin, url } = req.body;
-    
-    if (!reportId || !email || !password) {
-      return res.status(400).json({ error: "Faltan datos obligatorios." });
+    if (!reportId || !email || !password) return res.status(400).json({ error: "Faltan datos obligatorios." });
+
+    await client.query('BEGIN');
+    const reportResult = await client.query(
+      `SELECT ar.id, ar.user_id, ar.owner_admin_id
+       FROM account_reports ar
+       WHERE ar.id=$1
+         AND ($2::int IS NULL OR ar.owner_admin_id=$2 OR ar.user_id=$2 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id=$2))
+       FOR UPDATE`,
+      [reportId, req.isPanelAdmin ? req.user.id : null]
+    );
+    if (!reportResult.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: "Reporte no encontrado dentro de tu panel." });
     }
 
-    // Se crea la respuesta estructurada
     const respuestaAdmin = `✅ REEMPLAZO MANUAL ENTREGADO:\n• Correo: ${email}\n• Contraseña: ${password}\n• Perfil: ${profile || 'N/A'}\n• PIN: ${pin || 'N/A'}\n• URL: ${url || 'N/A'}`;
-
-    // Consulta SQL súper básica y segura que no exige columnas extra
-    await pool.query(
-      "UPDATE account_reports SET status = 'reemplazo', admin_response = $1 WHERE id = $2",
+    await client.query(
+      "UPDATE account_reports SET status='reemplazo', resolution_type='reemplazo', admin_response=$1, reviewed_at=NOW() WHERE id=$2",
       [respuestaAdmin, reportId]
     );
-
-    res.json({ success: true, message: "Cuenta entregada con éxito al cliente." });
+    await recordAdminAudit(client, req, {
+      action:'manual_replacement', entityType:'account_report', entityId:reportId,
+      summary:`Reemplazo manual entregado en reporte #${reportId}`,
+      metadata:{ replacement_email:String(email||''), profile:String(profile||''), url:String(url||'') }
+    });
+    await client.query('COMMIT');
+    res.json({ success:true, message:"Cuenta entregada con éxito al cliente." });
   } catch (err) {
-    console.error("Error en botón morado:", err.message);
-    res.status(500).json({ error: "Error interno: " + err.message });
-  }
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error("Error en reemplazo manual:", err.message);
+    res.status(500).json({ error:"Error interno al entregar reemplazo." });
+  } finally { client.release(); }
 });
+// ==========================================
 // ==========================================
 // RECUPERACIÓN DE CONTRASEÑA CON CÓDIGO DE 6 DÍGITOS
 // ==========================================
@@ -8643,7 +8963,7 @@ app.post("/api/user/change-password", authMiddleware, async (req, res) => {
     const hashedNewPassword = await bcrypt.hash(newPass, salt);
 
     // 4. Reemplazamos la vieja por la nueva en PostgreSQL
-    await pool.query("UPDATE users SET password = $1 WHERE id = $2", [hashedNewPassword, userId]);
+    await pool.query("UPDATE users SET password = $1, must_change_password = FALSE WHERE id = $2", [hashedNewPassword, userId]);
 
     res.json({ success: true, message: "Contraseña actualizada con éxito" });
   } catch (err) {
@@ -8653,110 +8973,122 @@ app.post("/api/user/change-password", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// BOTÓN DE PÁNICO (RESETEO A 123456 POR CORREO)
+// BOTÓN DE PÁNICO (CONTRASEÑA TEMPORAL ALEATORIA + CIERRE DE SESIONES)
 // ==========================================
 app.post("/api/admin/panic-reset", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "Ingresa el correo del usuario." });
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error:"Ingresa el correo del usuario." });
 
-    // Generamos la contraseña temporal universal: 123456
-    const hashedPass = await bcrypt.hash("123456", 10);
-    
-    // Buscamos al usuario y le aplicamos el castigo/reinicio
-    const result = await pool.query(
-      "UPDATE users SET password = $1 WHERE lower(email) = $2 RETURNING email, name", 
-      [hashedPass, email.trim().toLowerCase()]
+    await client.query('BEGIN');
+    const targetResult = await client.query(
+      `SELECT id, email, name, owner_user_id FROM users
+       WHERE lower(email)=$1
+         AND ($2::int IS NULL OR owner_user_id=$2)
+       FOR UPDATE`,
+      [email, req.isPanelAdmin ? req.user.id : null]
     );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "No se encontró ninguna cuenta con el correo: " + email });
+    const target = targetResult.rows[0];
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error:"No se encontró una cuenta que puedas administrar con ese correo." });
+    }
+    if (Number(target.id) === Number(req.user.id)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error:"Para tu propia cuenta usa la opción Cambiar contraseña." });
     }
 
-    res.json({ success: true, message: `La contraseña de ${result.rows[0].email} ahora es: 123456` });
+    const temporaryPassword = `Tmp-${crypto.randomBytes(6).toString('base64url')}!`;
+    const hashedPass = await bcrypt.hash(temporaryPassword, 10);
+    await client.query(
+      `UPDATE users SET password=$1, must_change_password=TRUE, token_version=COALESCE(token_version,0)+1 WHERE id=$2`,
+      [hashedPass, target.id]
+    );
+    await recordAdminAudit(client, req, {
+      action:'password_emergency_reset', entityType:'user', entityId:target.id,
+      summary:`Contraseña temporal generada para ${target.email}`,
+      metadata:{ target_email:target.email }
+    });
+    await client.query('COMMIT');
+    res.json({ success:true, message:`Contraseña temporal generada para ${target.email}.`, temporary_password:temporaryPassword, must_change_password:true });
   } catch (err) {
-    console.error("Error en botón de pánico:", err.message);
-    res.status(500).json({ error: "Error interno al intentar resetear la clave." });
-  }
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error("Error en reinicio de emergencia:", err.message);
+    res.status(500).json({ error:"Error interno al intentar resetear la clave." });
+  } finally { client.release(); }
 });
+// ==========================================
 // ==========================================
 // RUTA DE RECUPERACIÓN DE CUENTAS (CUARENTENA)
 // ==========================================
 app.post("/api/admin/system/check-expirations", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(`
-      UPDATE platform_accounts
-      SET status = 'recovery_pending'
-      WHERE status = 'delivered' AND expires_at IS NOT NULL AND expires_at < NOW()
-      RETURNING id, platform, account_email;
-    `);
-    res.json({ message: `Se movieron ${result.rowCount} cuentas a cuarentena.`, cuentas: result.rows });
+    const ownerId = getOwnerScopeFromRequest(req);
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE platform_accounts
+       SET status='recovery_pending'
+       WHERE status='delivered' AND expires_at IS NOT NULL AND expires_at < NOW()
+         AND (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
+       RETURNING id, platform, account_email`, [ownerId]
+    );
+    await recordAdminAudit(client, req, { action:'quarantine_expiration_check', entityType:'platform_account', summary:`${result.rowCount} cuentas movidas a cuarentena`, metadata:{ count:result.rowCount } });
+    await client.query('COMMIT');
+    res.json({ message:`Se movieron ${result.rowCount} cuentas a cuarentena.`, cuentas:result.rows });
   } catch (err) {
-    res.status(500).json({ error: "Error verificando expiraciones." });
-  }
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error:"Error verificando expiraciones." });
+  } finally { client.release(); }
 });
 
 app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        id, platform, account_email, account_password, profile_name, profile_pin,
-  -- Calculamos días restantes dinámicamente según la fecha de compra original
-  (official_purchase_date + INTERVAL '35 days' - CURRENT_TIMESTAMP) as dias_restantes
-FROM platform_accounts
-WHERE status = 'recovery_pending'
-      ORDER BY expires_at DESC
-    `);
+    const ownerId = getOwnerScopeFromRequest(req);
+    const result = await pool.query(
+      `SELECT id, platform, account_email, account_password, profile_name, profile_pin,
+              (official_purchase_date + INTERVAL '35 days' - CURRENT_TIMESTAMP) AS dias_restantes
+       FROM platform_accounts
+       WHERE status='recovery_pending'
+         AND (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
+       ORDER BY expires_at DESC`, [ownerId]
+    );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: "Error listando cuarentena." });
+    res.status(500).json({ error:"Error listando cuarentena." });
   }
 });
 
 app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { new_password } = req.body;
-    const accountId = req.params.id;
-
-    // 1. OBTENEMOS LOS DATOS ACTUALES ANTES DE LIMPIAR
-    // Esto es lo que permite que no se pierda la historia
-    const currentData = await pool.query(
-      `SELECT assigned_order_id, assigned_user_id, delivered_at 
-       FROM platform_accounts WHERE id = $1`,
-      [accountId]
+    const newPassword = String(req.body?.new_password || '');
+    const accountId = Number(req.params.id);
+    if (!accountId || !newPassword) return res.status(400).json({ error:'Cuenta y nueva contraseña son obligatorias.' });
+    const ownerId = getOwnerScopeFromRequest(req);
+    await client.query('BEGIN');
+    const currentResult = await client.query(
+      `SELECT id, assigned_order_id, assigned_user_id, delivered_at, platform, account_email
+       FROM platform_accounts
+       WHERE id=$1 AND status='recovery_pending'
+         AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2)
+       FOR UPDATE`, [accountId, ownerId]
     );
-
-    if (currentData.rows.length > 0) {
-      const { assigned_order_id, assigned_user_id, delivered_at } = currentData.rows[0];
-      
-      // 2. REGISTRAMOS EN LA BITÁCORA (Historial)
-      // Si la cuenta tuvo una asignación, guardamos el rastro
-      if (assigned_order_id) {
-        await pool.query(
-          `INSERT INTO account_recovery_log (account_id, order_id, user_id, delivered_at, recovered_at) 
-           VALUES ($1, $2, $3, $4, NOW())`,
-          [accountId, assigned_order_id, assigned_user_id, delivered_at]
-        );
-      }
+    const current=currentResult.rows[0];
+    if(!current){ await client.query('ROLLBACK'); return res.status(404).json({error:'Cuenta de cuarentena no encontrada dentro de tu panel.'}); }
+    if(current.assigned_order_id){
+      await client.query(`INSERT INTO account_recovery_log (account_id, order_id, user_id, delivered_at, recovered_at) VALUES ($1,$2,$3,$4,NOW())`, [accountId,current.assigned_order_id,current.assigned_user_id,current.delivered_at]);
     }
-
-    // 3. AHORA SÍ: Liberamos la cuenta para el siguiente ciclo
-    await pool.query(`
-      UPDATE platform_accounts
-      SET status = 'available', 
-          account_password = $1, 
-          assigned_order_id = NULL, 
-          assigned_user_id = NULL, 
-          delivered_at = NULL, 
-          expires_at = NULL
-      WHERE id = $2 AND status = 'recovery_pending'
-    `, [new_password, accountId]);
-    
-    res.json({ message: "Cuenta liberada. Historial archivado correctamente." });
+    await client.query(`UPDATE platform_accounts SET status='available', account_password=$1, assigned_order_id=NULL, assigned_user_id=NULL, delivered_at=NULL, expires_at=NULL WHERE id=$2`, [newPassword,accountId]);
+    await recordAdminAudit(client, req, { action:'quarantine_release', entityType:'platform_account', entityId:accountId, summary:`Cuenta ${current.platform || ''} liberada de cuarentena`, metadata:{ account_email:current.account_email } });
+    await client.query('COMMIT');
+    res.json({ message:'Cuenta liberada. Historial archivado correctamente.' });
   } catch (err) {
-    console.error("Error al liberar cuenta:", err);
-    res.status(500).json({ error: "Error al archivar y liberar la cuenta." });
-  }
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('Error al liberar cuenta:', err.message);
+    res.status(500).json({ error:'Error al archivar y liberar la cuenta.' });
+  } finally { client.release(); }
 });
 
 initDatabase()
@@ -8773,36 +9105,40 @@ initDatabase()
 
 app.get("/api/admin/recovery-history", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT l.recovered_at, pa.platform, pa.account_email, l.order_id 
-      FROM account_recovery_log l
-      JOIN platform_accounts pa ON l.account_id = pa.id
-      ORDER BY l.recovered_at DESC LIMIT 50
-    `);
+    const ownerId=getOwnerScopeFromRequest(req);
+    const result=await pool.query(
+      `SELECT l.recovered_at, pa.platform, pa.account_email, l.order_id
+       FROM account_recovery_log l JOIN platform_accounts pa ON l.account_id=pa.id
+       WHERE (($1::int IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id=0)) OR pa.owner_admin_id=$1)
+       ORDER BY l.recovered_at DESC LIMIT 50`, [ownerId]
+    );
     res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: "Error al obtener historial" });
-  }
+  } catch (err) { res.status(500).json({ error:"Error al obtener historial" }); }
 });
 
 // ==========================================
 // RUTA PARA DESECHAR CUENTAS (Eliminar de cuarentena)
 // ==========================================
 app.post("/api/admin/accounts/:id/discard", authMiddleware, adminMiddleware, async (req, res) => {
+  const client=await pool.connect();
   try {
-    const accountId = req.params.id;
-    
-    // Cambiamos el estado a 'discarded' para que ya no aparezca en el sistema de cuarentena
-    await pool.query(
-      "UPDATE platform_accounts SET status = 'discarded' WHERE id = $1", 
-      [accountId]
+    const accountId=Number(req.params.id), ownerId=getOwnerScopeFromRequest(req);
+    await client.query('BEGIN');
+    const result=await client.query(
+      `UPDATE platform_accounts SET status='discarded'
+       WHERE id=$1 AND status='recovery_pending'
+         AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2)
+       RETURNING id, platform, account_email`, [accountId,ownerId]
     );
-    
-    res.json({ message: "Cuenta desechada correctamente." });
+    if(!result.rows[0]){ await client.query('ROLLBACK'); return res.status(404).json({error:'Cuenta no encontrada dentro de tu cuarentena.'}); }
+    await recordAdminAudit(client, req, { action:'quarantine_discard', entityType:'platform_account', entityId:accountId, summary:`Cuenta desechada: ${result.rows[0].platform || ''}`, metadata:{account_email:result.rows[0].account_email} });
+    await client.query('COMMIT');
+    res.json({ message:'Cuenta desechada correctamente.' });
   } catch (err) {
-    console.error("Error al desechar cuenta:", err);
-    res.status(500).json({ error: "Error al desechar la cuenta." });
-  }
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('Error al desechar cuenta:', err.message);
+    res.status(500).json({ error:'Error al desechar la cuenta.' });
+  } finally { client.release(); }
 });
 
 

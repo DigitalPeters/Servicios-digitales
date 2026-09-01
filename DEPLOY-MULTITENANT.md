@@ -4,7 +4,7 @@ Esta versión mantiene el sistema actual y agrega una primera capa multi-tenant 
 
 ## Qué agrega
 
-- Cada panel puede tener un `slug` y una URL como `https://nombre-negocio.katalogoclick.com`.
+- Cada panel puede tener un `slug` y una URL como `https://nombre-negocio.TU_DOMINIO.com`.
 - El propietario del panel queda asociado a ese panel como `super admin`/admin existente.
 - Los registros hechos desde el subdominio se crean automáticamente como usuarios/vendedores del panel.
 - Los vendedores quedan ligados mediante `owner_user_id` y conservan la lógica actual de productos, pedidos, inventario y distribuidores.
@@ -17,13 +17,13 @@ Esta versión mantiene el sistema actual y agrega una primera capa multi-tenant 
 
 En Railway agrega:
 
-`PANEL_BASE_DOMAIN=katalogoclick.com`
+`PANEL_BASE_DOMAIN=TU_DOMINIO.com`
 
 No pongas aquí `https://` ni una ruta.
 
 ## DNS
 
-Para que cualquier subdominio funcione, el DNS debe enviar `*.katalogoclick.com` al mismo servicio de Railway que ejecuta esta aplicación. La configuración exacta del registro depende de lo que Railway muestre para el dominio personalizado/wildcard.
+Para que cualquier subdominio funcione, el DNS debe enviar `*.TU_DOMINIO.com` al mismo servicio de Railway que ejecuta esta aplicación. La configuración exacta del registro depende de lo que Railway muestre para el dominio personalizado/wildcard.
 
 ## Flujo de prueba
 
@@ -33,7 +33,7 @@ Para que cualquier subdominio funcione, el DNS debe enviar `*.katalogoclick.com`
 4. Envía el enlace al prospecto.
 5. El prospecto elige nombre de negocio, captura su nombre, correo, contraseña, teléfono y datos bancarios.
 6. El sistema genera un slug, por ejemplo `streaming-juan`.
-7. El panel queda en `https://streaming-juan.katalogoclick.com`.
+7. El panel queda en `https://streaming-juan.TU_DOMINIO.com`.
 8. El propietario entra como administrador.
 9. Comparte esa URL con sus vendedores.
 10. Los nuevos registros desde esa URL quedan asociados automáticamente al propietario del panel.
