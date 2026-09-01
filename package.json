@@ -1,7 +1,7 @@
 {
   "name": "servicios-digitales",
-  "version": "1.6.0",
-  "description": "Servicios Digitales Peters - Version Maestra V1.6 Inteligencia de inventario y finanzas",
+  "version": "1.6.1",
+  "description": "Servicios Digitales Peters - Version Maestra V1.6.1 Reembolsos y navegacion",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

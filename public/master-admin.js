@@ -28,7 +28,7 @@
     if(typeof ensureAdminPanelsPhase1UI === 'function') ensureAdminPanelsPhase1UI();
     if(typeof showSection === 'function') showSection('admin');
     if(typeof loadAdminPanelsPhase1 === 'function') loadAdminPanelsPhase1();
-    setTimeout(()=>document.getElementById('adminPanelsPanelPhase1')?.scrollIntoView({behavior:'smooth',block:'start'}),100);
+    setTimeout(()=>document.getElementById('adminPanelsPanelPhase1')?.scrollIntoView({behavior:'auto',block:'start'}),100);
   }
   window.openAdminPanelsMaster=openAdminPanelsMaster;
 
@@ -245,7 +245,7 @@
   function openPanel(id, loader){
     if(typeof showSection==='function') showSection('admin');
     setTimeout(()=>{
-      const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+      const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'auto',block:'start'});
       if(typeof loader==='function') loader();
     },80);
   }

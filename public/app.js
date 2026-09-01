@@ -119,6 +119,14 @@ function showSection(name) {
   document.querySelectorAll('.section').forEach(item => item.classList.remove('active'));
   section.classList.add('active');
 
+  // MASTER V1.6.1: cada cambio de módulo inicia desde arriba. Los accesos que
+  // apuntan a un panel interno hacen su scrollIntoView después de este reset.
+  try { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); } catch (_) { window.scrollTo(0, 0); }
+  const mainScroller = document.getElementById('main-content') || document.getElementById('appSection');
+  if(mainScroller) mainScroller.scrollTop = 0;
+  if(document.documentElement) document.documentElement.scrollTop = 0;
+  if(document.body) document.body.scrollTop = 0;
+
   document.querySelectorAll('.menu-btn').forEach(button => {
     button.classList.toggle('active', button.dataset.section === normalizedName);
   });
@@ -1306,7 +1314,7 @@ function openManualPendingOrdersFromDashboard(){
   showSection('admin');
   setTimeout(()=>{
     const panel = document.getElementById('adminOrdersPanel');
-    if(panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+    if(panel) panel.scrollIntoView({behavior:'auto', block:'start'});
     if(typeof renderAdminOrdersManualPendingOnly === 'function') renderAdminOrdersManualPendingOnly();
   },120);
 }
@@ -3243,7 +3251,7 @@ window.buyProduct = async function(productId){
       setTimeout(() => {
         loadBalanceRequests();
         const panel = document.getElementById('adminBalanceRequestsPanel');
-        if (panel) panel.scrollIntoView({ behavior:'smooth', block:'start' });
+        if (panel) panel.scrollIntoView({ behavior:'auto', block:'start' });
         removeBrokenVentasProductoFromBalance();
       }, 120);
     } else {

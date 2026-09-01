@@ -134,3 +134,10 @@ No se borran tablas ni datos existentes.
 - Conciliación automática de saldos contra `balance_ledger`.
 - Nuevo módulo exclusivo del dueño: **Inteligencia**.
 
+
+## Master V1.6.1 — Reembolsos y navegación
+- Módulo visible de reembolsos con historial por pedido.
+- Reembolsos como KPI de Inteligencia financiera con cantidad y monto.
+- Navegación reinicia el scroll al cambiar de módulo.
+- Saltos internos del admin se alinean debajo de la barra superior.
+- No requiere migración de base de datos.

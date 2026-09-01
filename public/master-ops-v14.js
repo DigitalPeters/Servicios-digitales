@@ -308,7 +308,7 @@
     }catch(e){if(box)box.innerHTML=`<div class="master-v14-error">${esc(e.message||'Error de búsqueda')}</div>`;}
   }
   function searchGroup(title,items){return `<section class="master-search-group"><h3>${esc(title)}</h3>${items.map(i=>`<button onclick="${i.action};closeMasterGlobalSearch()"><span>${i.icon}</span><span><b>${esc(i.title)}</b><small>${esc(i.sub)}</small></span><i>→</i></button>`).join('')}</section>`;}
-  window.masterOpenAdminTarget=function(id){if(typeof showSection==='function')showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}),80);};
+  window.masterOpenAdminTarget=function(id){if(typeof showSection==='function')showSection('admin');setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'auto',block:'start'}),80);};
 
   function ensureManualDeliveriesModal(){
     addModal('masterManualDeliveriesModal','Pedidos por entregar',`<div class="master-v15-trace-help"><b>📥 Cola de atención del administrador</b><span>Pedidos de vendedores y distribuidores que siguen pendientes de entrega o requieren intervención.</span></div><div class="master-v14-footer" style="justify-content:flex-end"><button class="outline-btn" type="button" onclick="loadMasterManualDeliveries()">↻ Actualizar</button></div><div id="masterManualDeliveriesList"><div class="small-text">Cargando…</div></div>`);
@@ -332,7 +332,7 @@
       let row=(d.rows||[])[0];
       if(!row && fromSearch){
         if(typeof showSection==='function')showSection('admin');
-        setTimeout(()=>document.getElementById('adminOrdersPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+        setTimeout(()=>document.getElementById('adminOrdersPanel')?.scrollIntoView({behavior:'auto',block:'start'}),80);
         return;
       }
       if(!row)throw new Error('Ese pedido ya no está pendiente; revisa el historial de Pedidos.');
@@ -346,7 +346,7 @@
         const item=document.getElementById(`admin-order-compact-${Number(row.id)}`);item?.classList.add('open');
         const details=item?.querySelector('.compact-details');if(details)details.style.display='block';
       }
-      setTimeout(()=>document.getElementById('adminOrdersPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),80);
+      setTimeout(()=>document.getElementById('adminOrdersPanel')?.scrollIntoView({behavior:'auto',block:'start'}),80);
     }catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo abrir el pedido','error');}
   }
   window.openMasterManualDeliveryOrder=openMasterManualDeliveryOrder;
@@ -368,7 +368,7 @@
   window.openMasterUser360=openMasterUser360;
   function miniTable(rows,heads){if(!rows.length)return '<div class="master-v14-empty">Sin movimientos.</div>';return `<div class="table-wrap"><table class="mini-table"><thead><tr>${heads.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;}
 
-  async function openMasterSuppliers(){ensureV14UI();if(typeof showSection==='function')showSection('admin');setTimeout(()=>document.getElementById('masterSuppliersPanel')?.scrollIntoView({behavior:'smooth',block:'start'}),80);await loadMasterSuppliers();}
+  async function openMasterSuppliers(){ensureV14UI();if(typeof showSection==='function')showSection('admin');setTimeout(()=>document.getElementById('masterSuppliersPanel')?.scrollIntoView({behavior:'auto',block:'start'}),80);await loadMasterSuppliers();}
   window.openMasterSuppliers=openMasterSuppliers;
   async function loadMasterSuppliers(){
     if(!isMain())return;const list=document.getElementById('masterSuppliersList'),purchases=document.getElementById('masterPurchasesList');
