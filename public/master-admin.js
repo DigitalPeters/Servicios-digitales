@@ -24,49 +24,133 @@
     if(app) app.insertBefore(banner, app.firstChild);
   }
 
+  function openAdminPanelsMaster(){
+    if(typeof ensureAdminPanelsPhase1UI === 'function') ensureAdminPanelsPhase1UI();
+    if(typeof showSection === 'function') showSection('admin');
+    if(typeof loadAdminPanelsPhase1 === 'function') loadAdminPanelsPhase1();
+    setTimeout(()=>document.getElementById('adminPanelsPanelPhase1')?.scrollIntoView({behavior:'smooth',block:'start'}),100);
+  }
+  window.openAdminPanelsMaster=openAdminPanelsMaster;
+
+  function bindStatMirror(sourceId,targetId){
+    const target=document.getElementById(targetId);
+    if(!target) return;
+    const bind=()=>{
+      const source=document.getElementById(sourceId);
+      if(!source) return false;
+      const copy=()=>{ target.textContent=(source.textContent||'0').trim() || '0'; };
+      copy();
+      if(source.dataset.masterMirrorBound !== targetId){
+        source.dataset.masterMirrorBound=targetId;
+        new MutationObserver(copy).observe(source,{subtree:true,childList:true,characterData:true});
+      }
+      return true;
+    };
+    if(bind()) return;
+    [250,700,1500,3000].forEach(ms=>setTimeout(bind,ms));
+  }
+
+  function bindMasterStats(){
+    [
+      ['statUsers','masterCountUsers'],
+      ['statProducts','masterCountProducts'],
+      ['statInventory','masterCountInventory'],
+      ['statOrders','masterCountOrders'],
+      ['statReports','masterCountReports'],
+      ['statBalanceRequests','masterCountBalance'],
+      ['statAdminPanelsMainFinal','masterCountPanels']
+    ].forEach(([source,target])=>bindStatMirror(source,target));
+  }
+
+  function activateOwnerVisualMode(){
+    const app=document.getElementById('appSection');
+    const dashboard=document.getElementById('section-dashboard');
+    if(!isMain()){
+      app?.classList.remove('master-owner-mode');
+      dashboard?.classList.remove('master-owner-dashboard');
+      return;
+    }
+    app?.classList.add('master-owner-mode');
+    dashboard?.classList.add('master-owner-dashboard');
+    const home=document.querySelector('#appSection .topbar-home-btn');
+    if(home && !home.dataset.masterOriginalLabel){
+      home.dataset.masterOriginalLabel=home.textContent || '';
+      home.textContent='🏠 Panel maestro';
+    }
+  }
+
   function ensureMasterUI(){
     if(!isMain()){
       document.getElementById('masterOperationsPanel')?.remove();
       document.getElementById('masterLedgerPanel')?.remove();
       document.getElementById('masterAuditPanel')?.remove();
+      activateOwnerVisualMode();
       return;
     }
 
+    activateOwnerVisualMode();
     const dashboard=document.getElementById('section-dashboard');
     if(dashboard && !document.getElementById('masterOperationsPanel')){
       const panel=document.createElement('div');
       panel.id='masterOperationsPanel';
-      panel.className='panel master-operations-panel';
+      panel.className='master-command-center';
       panel.innerHTML=`
-        <div class="panel-head master-head">
-          <div>
-            <div class="master-kicker">VERSIÓN MAESTRA</div>
-            <h2>Centro de operaciones</h2>
-            <p class="small-text">Lo que requiere tu atención hoy, sin buscarlo módulo por módulo.</p>
+        <div class="master-command-header">
+          <div class="master-command-title">
+            <div class="master-brand-line"><span class="master-brand-mark">SDP</span><span>VERSIÓN MAESTRA</span></div>
+            <h1>Centro de control</h1>
+            <p>Vista exclusiva del administrador principal de Servicios Digitales Peters.</p>
           </div>
-          <button class="outline-btn" style="width:auto" onclick="loadMasterOperations(true)">Actualizar</button>
+          <div class="master-command-controls">
+            <span class="master-system-status"><i></i> Operación activa</span>
+            <button class="master-refresh-btn" onclick="loadMasterOperations(true)">↻ Actualizar</button>
+          </div>
         </div>
-        <div id="masterOpsKpis" class="master-kpi-grid"><div class="small-text">Cargando operación...</div></div>
-        <div class="master-two-col">
-          <div>
-            <h3>🚨 Atención prioritaria</h3>
-            <div id="masterUrgentList" class="master-urgent-list"><div class="small-text">Revisando pendientes...</div></div>
-          </div>
-          <div>
-            <h3>⚡ Accesos rápidos del dueño</h3>
-            <div class="master-actions">
-              <button onclick="openMasterLedger()">💰 Libro de saldo</button>
-              <button onclick="openMasterAudit()">🛡️ Bitácora admin</button>
-              <button onclick="openBalanceRequests()">💳 Solicitudes de saldo</button>
-              <button onclick="openAccountReportsFromDashboard()">⚠️ Reportes de falla</button>
-              <button onclick="openInventoryFromDashboard()">🔐 Inventario</button>
-              <button onclick="openOrdersFromDashboard()">▤ Pedidos</button>
+
+        <div id="masterOpsKpis" class="master-kpi-grid"><div class="master-loading">Cargando resumen de operación…</div></div>
+
+        <div class="master-workspace-grid">
+          <section class="master-focus-card">
+            <div class="master-section-heading">
+              <div><span class="master-eyebrow">OPERACIÓN</span><h2>Atención prioritaria</h2></div>
+              <span class="master-section-badge">HOY</span>
             </div>
-            <div id="masterOpsUpdated" class="small-text master-updated"></div>
+            <div id="masterUrgentList" class="master-urgent-list"><div class="master-loading">Revisando pendientes…</div></div>
+          </section>
+
+          <section class="master-focus-card master-quick-card">
+            <div class="master-section-heading">
+              <div><span class="master-eyebrow">ACCESOS</span><h2>Acciones del dueño</h2></div>
+            </div>
+            <div class="master-actions">
+              <button onclick="openMasterLedger()"><span>💰</span><b>Libro de saldo</b></button>
+              <button onclick="openMasterAudit()"><span>🛡️</span><b>Bitácora admin</b></button>
+              <button onclick="openBalanceRequests()"><span>💳</span><b>Validar saldo</b></button>
+              <button onclick="openAccountReportsFromDashboard()"><span>⚠️</span><b>Atender fallas</b></button>
+            </div>
+            <div id="masterOpsUpdated" class="master-updated"></div>
+          </section>
+        </div>
+
+        <section class="master-management-section">
+          <div class="master-section-heading master-management-heading">
+            <div><span class="master-eyebrow">GESTIÓN</span><h2>Administrar el negocio</h2><p>Entradas directas a los módulos que utilizas para operar.</p></div>
           </div>
-        </div>`;
-      const charts=document.getElementById('dashboardChartsPanel');
-      if(charts) dashboard.insertBefore(panel, charts); else dashboard.appendChild(panel);
+          <div class="master-module-grid">
+            <button class="master-module" onclick="openUsersFromDashboard()"><span class="master-module-icon">👥</span><span><b>Usuarios</b><small>Vendedores y cuentas</small></span><em id="masterCountUsers">0</em></button>
+            <button class="master-module" onclick="openProductsFromDashboard()"><span class="master-module-icon">📦</span><span><b>Productos</b><small>Catálogo y precios</small></span><em id="masterCountProducts">0</em></button>
+            <button class="master-module" onclick="openInventoryFromDashboard()"><span class="master-module-icon">🔐</span><span><b>Inventario</b><small>Cuentas disponibles</small></span><em id="masterCountInventory">0</em></button>
+            <button class="master-module" onclick="openOrdersFromDashboard()"><span class="master-module-icon">▤</span><span><b>Pedidos</b><small>Ventas y entregas</small></span><em id="masterCountOrders">0</em></button>
+            <button class="master-module" onclick="openAccountReportsFromDashboard()"><span class="master-module-icon">⚠️</span><span><b>Reportes</b><small>Fallas y soporte</small></span><em id="masterCountReports">0</em></button>
+            <button class="master-module" onclick="openBalanceRequests()"><span class="master-module-icon">💳</span><span><b>Solicitudes</b><small>Recargas por validar</small></span><em id="masterCountBalance">0</em></button>
+            <button class="master-module" onclick="openAdminPanelsMaster()"><span class="master-module-icon">🏢</span><span><b>Paneles admin</b><small>Renta y propietarios</small></span><em id="masterCountPanels">0</em></button>
+            <button class="master-module" onclick="showSection('profit-quality')"><span class="master-module-icon">💹</span><span><b>Rentabilidad</b><small>Costos, calidad y utilidad</small></span><i>→</i></button>
+          </div>
+        </section>`;
+      dashboard.prepend(panel);
+      bindMasterStats();
+    } else {
+      bindMasterStats();
     }
 
     const admin=document.getElementById('section-admin');
@@ -99,27 +183,28 @@
     try{
       const d=await api('/api/admin/master/operations');
       if(kpis) kpis.innerHTML=`
-        <div class="master-kpi"><span>💵 Ventas hoy</span><b>$${money(d.sales_today?.revenue)}</b><small>${Number(d.sales_today?.orders||0)} pedidos</small></div>
-        <div class="master-kpi"><span>📈 Utilidad bruta hoy</span><b>$${money(d.sales_today?.gross_profit)}</b><small>Venta − costo registrado</small></div>
-        <div class="master-kpi ${Number(d.pending_orders)>0?'warn':''}"><span>▤ Pedidos pendientes</span><b>${Number(d.pending_orders||0)}</b><small>Por atender / proceso</small></div>
-        <div class="master-kpi ${Number(d.pending_reports)>0?'danger':''}"><span>⚠️ Fallas pendientes</span><b>${Number(d.pending_reports||0)}</b><small>Requieren respuesta</small></div>
-        <div class="master-kpi ${Number(d.pending_balance_requests)>0?'warn':''}"><span>💳 Saldo por validar</span><b>${Number(d.pending_balance_requests||0)}</b><small>$${money(d.pending_balance_amount)} solicitado</small></div>
-        <div class="master-kpi"><span>🔐 Stock disponible</span><b>${Number(d.inventory_available||0)}</b><small>Cuentas listas</small></div>
-        <div class="master-kpi ${Number(d.quarantine)>0?'warn':''}"><span>♻️ Cuarentena</span><b>${Number(d.quarantine||0)}</b><small>Cuentas por recuperar</small></div>
-        <div class="master-kpi ${Number(d.mother_accounts_expiring_7d)>0?'warn':''}"><span>⏰ Vencen en 7 días</span><b>${Number(d.mother_accounts_expiring_7d||0)}</b><small>Cuentas madre</small></div>`;
+        <button class="master-kpi master-kpi-money" onclick="openSalesReport()"><span class="master-kpi-top"><i>💵</i> Ventas hoy</span><b>$${money(d.sales_today?.revenue)}</b><small>${Number(d.sales_today?.orders||0)} pedidos completados</small></button>
+        <button class="master-kpi master-kpi-profit" onclick="showSection('profit-quality')"><span class="master-kpi-top"><i>📈</i> Utilidad bruta</span><b>$${money(d.sales_today?.gross_profit)}</b><small>Venta menos costo registrado</small></button>
+        <button class="master-kpi ${Number(d.pending_orders)>0?'master-kpi-warn':''}" onclick="openOrdersFromDashboard()"><span class="master-kpi-top"><i>▤</i> Pedidos pendientes</span><b>${Number(d.pending_orders||0)}</b><small>Por atender o en proceso</small></button>
+        <button class="master-kpi ${Number(d.pending_reports)>0?'master-kpi-danger':''}" onclick="openAccountReportsFromDashboard()"><span class="master-kpi-top"><i>⚠️</i> Fallas pendientes</span><b>${Number(d.pending_reports||0)}</b><small>Requieren respuesta</small></button>
+        <button class="master-kpi ${Number(d.pending_balance_requests)>0?'master-kpi-warn':''}" onclick="openBalanceRequests()"><span class="master-kpi-top"><i>💳</i> Saldo por validar</span><b>${Number(d.pending_balance_requests||0)}</b><small>$${money(d.pending_balance_amount)} solicitado</small></button>
+        <button class="master-kpi" onclick="openInventoryFromDashboard()"><span class="master-kpi-top"><i>🔐</i> Stock disponible</span><b>${Number(d.inventory_available||0)}</b><small>Cuentas listas para vender</small></button>
+        <button class="master-kpi ${Number(d.quarantine)>0?'master-kpi-warn':''}" onclick="openInventoryFromDashboard()"><span class="master-kpi-top"><i>♻️</i> Cuarentena</span><b>${Number(d.quarantine||0)}</b><small>Cuentas por recuperar</small></button>
+        <button class="master-kpi ${Number(d.mother_accounts_expiring_7d)>0?'master-kpi-warn':''}" onclick="showSection('alerts')"><span class="master-kpi-top"><i>⏰</i> Vencen en 7 días</span><b>${Number(d.mother_accounts_expiring_7d||0)}</b><small>Cuentas madre a revisar</small></button>`;
 
       if(urgent){
         const rows=Array.isArray(d.urgent)?d.urgent:[];
         urgent.innerHTML=rows.length ? rows.map(item=>{
           const action=item.type==='pedido' ? `openOrdersFromDashboard()` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : `openBalanceRequests()`;
-          return `<button class="master-urgent-item" onclick="${action}"><span><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></span><em>${formatAge(item.age_minutes)}</em></button>`;
-        }).join('') : '<div class="master-ok">✅ No hay pendientes prioritarios en este momento.</div>';
+          return `<button class="master-urgent-item" onclick="${action}"><span class="master-urgent-icon">${item.type==='pedido'?'▤':item.type==='reporte'?'⚠️':'💳'}</span><span class="master-urgent-copy"><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></span><em>${formatAge(item.age_minutes)}</em><i>→</i></button>`;
+        }).join('') : '<div class="master-ok"><span>✓</span><div><b>Operación al día</b><small>No hay pendientes prioritarios en este momento.</small></div></div>';
       }
       const updated=document.getElementById('masterOpsUpdated');
-      if(updated) updated.textContent=`Actualizado: ${new Date(d.generated_at || Date.now()).toLocaleString('es-MX')}`;
-      if(showFeedback && typeof showMessage==='function') showMessage('Centro de operaciones actualizado');
+      if(updated) updated.textContent=`Última actualización: ${new Date(d.generated_at || Date.now()).toLocaleString('es-MX')}`;
+      bindMasterStats();
+      if(showFeedback && typeof showMessage==='function') showMessage('Centro de control actualizado');
     }catch(e){
-      if(kpis) kpis.innerHTML=`<div class="small-text">No se pudo cargar el Centro de operaciones: ${esc(e.message||'error')}</div>`;
+      if(kpis) kpis.innerHTML=`<div class="master-load-error">No se pudo cargar el Centro de control: ${esc(e.message||'error')}</div>`;
     }
   }
   window.loadMasterOperations=loadMasterOperations;
@@ -171,11 +256,14 @@
       ensureSecurityNotice();
       ensureMasterUI();
       if(isMain()) await loadMasterOperations(false);
-    }, {name:'master-admin-v1',order:950});
+    }, {name:'master-admin-v1-1',order:950});
   }
   if(typeof registerSectionHook==='function'){
     registerSectionHook(function masterAdminSectionHook(name){
-      if(name==='dashboard' && isMain()) loadMasterOperations(false);
+      if(name==='dashboard' && isMain()){
+        ensureMasterUI();
+        loadMasterOperations(false);
+      }
       if(name==='admin' && isMain()) ensureMasterUI();
     });
   }
