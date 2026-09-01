@@ -2862,3 +2862,42 @@ body.modal-open{
 .master-store-price{display:flex;flex-direction:column;text-align:right;white-space:nowrap}.master-store-price small{color:#64748b;font-weight:700}.master-store-price b{font-size:22px;color:#0f172a}.master-store-price span{font-size:12px;color:#64748b}
 @media(max-width:800px){.master-store-toolbar{grid-template-columns:1fr}.master-store-toolbar .outline-btn{width:100%}.master-store-preview-list{grid-template-columns:1fr}}
 @media(max-width:520px){.master-store-product{align-items:flex-start;flex-direction:column}.master-store-price{text-align:left}}
+
+/* ==========================================================
+   MASTER V1.6 · INTELIGENCIA DE INVENTARIO Y FINANZAS
+   ========================================================== */
+.master-module-intelligence{border-color:#c7d7ff;background:linear-gradient(135deg,#f8fbff,#f1f6ff)}
+.master-module-intelligence .master-module-icon{background:#e8efff}
+.master-intelligence-panel{overflow:visible}
+.master-intelligence-head{align-items:flex-end;gap:18px}
+.master-intelligence-period{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.master-intelligence-period label{display:grid;gap:5px;font-weight:800;font-size:12px;color:#52627a}
+.master-intelligence-period input{min-width:150px;padding:11px 12px;border:1px solid #d6dfed;border-radius:12px;background:#fff}
+.master-finance-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0 10px}
+.master-finance-kpi{border:1px solid #dfe6f0;border-radius:18px;padding:17px;background:#fff;display:grid;gap:5px;box-shadow:0 9px 22px rgba(15,31,58,.05)}
+.master-finance-kpi small{font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
+.master-finance-kpi b{font-size:27px;color:#10213d}
+.master-finance-kpi span{font-size:12px;color:#78879b;font-weight:700}
+.master-finance-kpi.master-finance-net{background:linear-gradient(135deg,#f3fff8,#eafaf2);border-color:#aee6c6}
+.master-finance-kpi.master-finance-net.negative{background:linear-gradient(135deg,#fff7f7,#fff0f0);border-color:#f1bbbb}
+.master-finance-kpi.master-finance-net.negative b{color:#b42318}.master-finance-kpi.master-finance-net.positive b{color:#087a4b}
+.master-finance-explain{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.master-finance-explain span{background:#f6f8fb;border:1px solid #e1e7ef;border-radius:999px;padding:8px 11px;font-size:12px;color:#506079}
+.master-intelligence-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(330px,.75fr);gap:16px;align-items:start}
+.master-intelligence-block{border:1px solid #dfe6f0;border-radius:20px;background:#fff;padding:18px;margin-top:14px}
+.master-v14-subhead>div h3{margin:0}.master-v14-subhead>div span{display:block;margin-top:4px}
+.master-stock-table-wrap{width:100%;overflow:auto;border:1px solid #e5eaf1;border-radius:16px}
+.master-stock-table{width:100%;min-width:900px;border-collapse:collapse}
+.master-stock-table th,.master-stock-table td{padding:12px 11px;text-align:left;border-bottom:1px solid #e9edf3;font-size:13px;white-space:nowrap}
+.master-stock-table th{background:#f6f8fb;color:#55657b;font-size:11px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;z-index:1}
+.master-stock-table td:first-child{min-width:190px;white-space:normal}.master-stock-table td:first-child small{display:block;color:#8793a5;margin-top:3px}
+.master-stock-risk{display:inline-flex;border-radius:999px;padding:6px 9px;font-weight:900;font-size:11px}
+.master-stock-risk.danger{background:#fee8e7;color:#b42318}.master-stock-risk.warn{background:#fff0d5;color:#9a5500}.master-stock-risk.watch{background:#fff8d8;color:#806800}.master-stock-risk.ok{background:#def7ea;color:#087a4b}.master-stock-risk.muted{background:#eef2f6;color:#667085}
+.master-trend-up{color:#b54708;font-weight:900}
+.master-recon-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 12px}.master-recon-summary span{background:#f5f7fa;border-radius:14px;padding:12px;display:grid;gap:2px}.master-recon-summary b{font-size:22px}.master-recon-summary small{color:#77859a}.master-recon-summary .ok{background:#eaf9f1}.master-recon-summary .danger{background:#fff0ef;color:#b42318}
+.master-recon-list{display:grid;gap:8px;max-height:430px;overflow:auto}.master-recon-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;border:1px solid #e4e9f0;border-radius:14px;padding:11px}.master-recon-item>div{display:grid;gap:2px}.master-recon-item small{color:#7b8799}.master-recon-chip{display:inline-flex;width:max-content;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:900}.master-recon-chip.danger{background:#fee8e7;color:#b42318}.master-recon-chip.ok{background:#def7ea;color:#087a4b}.master-recon-chip.muted{background:#edf1f5;color:#667085}
+.master-cash-block{margin-top:16px}.master-v16-callout{display:flex;gap:8px;flex-wrap:wrap;background:#fff8e8;border:1px solid #f2d58c;border-radius:14px;padding:11px 13px;margin-bottom:14px;font-size:12px;color:#6f5313}.master-v16-callout span{color:#7e6b3e}
+.master-v16-cash-form{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;align-items:end;margin-bottom:16px}.master-v16-cash-form label{display:grid;gap:5px;font-size:12px;font-weight:800;color:#52627a}.master-v16-cash-form input,.master-v16-cash-form select{width:100%;padding:11px 12px;border:1px solid #d6dfed;border-radius:12px;background:#fff}.master-v16-cash-description{grid-column:span 2}.master-v16-cash-notes{grid-column:span 2}.master-v16-profit-check{display:flex!important;grid-column:span 2;align-items:center;gap:8px;background:#f5f8fc;border-radius:12px;padding:11px 12px}.master-v16-profit-check input{width:auto}.master-v16-save-cash{grid-column:span 1}
+.master-cash-table .master-cash-type{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:900}.master-cash-type.ingreso{background:#def7ea;color:#087a4b}.master-cash-type.gasto{background:#fee8e7;color:#b42318}.master-delete-cash{border:0;background:#f3f5f8;border-radius:9px;width:30px;height:30px;font-size:20px;cursor:pointer;color:#8b1e1e}.master-delete-cash:hover{background:#fee8e7}
+@media(max-width:1200px){.master-finance-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.master-intelligence-grid{grid-template-columns:1fr}.master-v16-cash-form{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){.master-finance-kpis{grid-template-columns:1fr}.master-intelligence-period{width:100%}.master-intelligence-period label{flex:1}.master-intelligence-period input{min-width:0;width:100%}.master-v16-cash-form{grid-template-columns:1fr}.master-v16-cash-description,.master-v16-cash-notes,.master-v16-profit-check,.master-v16-save-cash{grid-column:span 1}.master-recon-item{grid-template-columns:1fr}.master-recon-summary{grid-template-columns:1fr}}

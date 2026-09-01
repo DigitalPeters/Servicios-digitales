@@ -116,3 +116,21 @@ No se borran tablas ni datos existentes.
 4. Búsqueda global (usuario, pedido, correo de cuenta, reporte, referencia).
 5. Auditoría endpoint por endpoint antes de generar el clon comercial.
 6. Respaldos/restauración documentados y probados.
+
+## Master V1.2 — Costos por cuenta madre y perfil
+- Configuración de costo total por cuenta madre.
+- Opción de venta por perfil.
+- Cantidad configurable de perfiles.
+- Costo por perfil automático (`costo total / perfiles`) o manual.
+- Costo efectivo integrado a ventas futuras, rentabilidad, reemplazos y Centro de control.
+- Backfill conservador de pedidos históricos con costo $0 cuando el costo completo del pedido puede determinarse.
+- Bitácora administrativa al modificar costos.
+## Master V1.6 — Inteligencia de inventario y finanzas
+
+- Pronóstico de stock por velocidad de venta 7/30 días.
+- Cobertura estimada y compra sugerida a 7 días.
+- Caja/gastos administrativos con impacto configurable en utilidad.
+- Utilidad neta separando ingreso admin, costo vendido, reemplazos, gastos e inversión.
+- Conciliación automática de saldos contra `balance_ledger`.
+- Nuevo módulo exclusivo del dueño: **Inteligencia**.
+

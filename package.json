@@ -1,7 +1,7 @@
 {
   "name": "servicios-digitales",
-  "version": "1.5.3",
-  "description": "Servicios Digitales Peters - Version Maestra V1.5.3 Alertas de renovacion y cuentas madre",
+  "version": "1.6.0",
+  "description": "Servicios Digitales Peters - Version Maestra V1.6 Inteligencia de inventario y finanzas",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

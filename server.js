@@ -1609,6 +1609,29 @@ async function initDatabase() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_inventory_purchases_owner_date ON inventory_purchases(COALESCE(owner_admin_id,0), purchase_date DESC, id DESC)`);
 
+  // MASTER V1.6: caja administrativa / gastos reales del negocio.
+  // inventory_purchases sigue separado para no duplicar el costo de inventario en la utilidad.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_cash_movements (
+      id BIGSERIAL PRIMARY KEY,
+      owner_admin_id INTEGER,
+      movement_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      movement_type TEXT NOT NULL DEFAULT 'gasto',
+      category TEXT NOT NULL DEFAULT 'otros',
+      amount NUMERIC NOT NULL DEFAULT 0,
+      description TEXT DEFAULT '',
+      payment_method TEXT DEFAULT '',
+      supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+      supplier_name_snapshot TEXT DEFAULT '',
+      affects_profit BOOLEAN NOT NULL DEFAULT TRUE,
+      notes TEXT DEFAULT '',
+      created_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_cash_owner_date ON admin_cash_movements(COALESCE(owner_admin_id,0), movement_date DESC, id DESC)`);
+  await pool.query(`ALTER TABLE admin_cash_movements ADD COLUMN IF NOT EXISTS affects_profit BOOLEAN NOT NULL DEFAULT TRUE`);
+
   // Vincula inventario histórico sin cuenta madre respetando cada ciclo por fecha oficial.
   await pool.query(`
     INSERT INTO mother_accounts
@@ -7006,6 +7029,216 @@ app.post('/api/admin/master/inventory-purchases', authMiddleware, adminMiddlewar
   }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error compra inventario:',err.message);res.status(500).json({error:'No se pudo registrar la compra'});}finally{client.release();}
 });
 
+
+
+// ============================================================
+// MASTER V1.6: INTELIGENCIA DE INVENTARIO + FINANZAS
+// ============================================================
+app.get('/api/admin/master/inventory-intelligence', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const localToday = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
+    const result = await pool.query(`
+      WITH velocity AS (
+        SELECT o.product_id,
+               COALESCE(SUM(GREATEST(COALESCE(o.quantity,1),1)) FILTER (
+                 WHERE ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date >= (${localToday} - 6)
+               ),0)::numeric AS sold_7d,
+               COALESCE(SUM(GREATEST(COALESCE(o.quantity,1),1)) FILTER (
+                 WHERE ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date >= (${localToday} - 29)
+               ),0)::numeric AS sold_30d
+        FROM orders o
+        WHERE COALESCE(o.owner_admin_id,0)=0
+          AND o.status='exito'
+          AND COALESCE(o.refunded,0)=0
+          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date >= (${localToday} - 29)
+        GROUP BY o.product_id
+      )
+      SELECT p.id,p.name,p.category,p.product_type,p.stock_enabled,
+             ${effectiveStockExpression('p')}::int AS current_stock,
+             COALESCE(v.sold_7d,0)::numeric AS sold_7d,
+             COALESCE(v.sold_30d,0)::numeric AS sold_30d
+      FROM products p
+      LEFT JOIN velocity v ON v.product_id=p.id
+      WHERE COALESCE(p.owner_admin_id,0)=0
+        AND COALESCE(p.active,1)=1
+        AND COALESCE(p.stock_enabled,0)=1
+        AND lower(trim(COALESCE(p.product_type,'streaming_auto'))) NOT LIKE '%combo%'
+      ORDER BY p.name ASC
+    `);
+
+    const rows=result.rows.map(row=>{
+      const stock=Math.max(0,Number(row.current_stock||0));
+      const sold7=Math.max(0,Number(row.sold_7d||0));
+      const sold30=Math.max(0,Number(row.sold_30d||0));
+      const avg7=sold7/7;
+      const avg30=sold30/30;
+      // Damos mayor peso a la semana reciente; si no hubo ventas recientes usamos 30 días.
+      const dailyRate=avg7>0 ? avg7 : avg30;
+      const coverage=dailyRate>0 ? stock/dailyRate : null;
+      const target7=Math.max(0,Math.ceil((dailyRate*7)-stock));
+      const trend=avg30>0 ? ((avg7-avg30)/avg30)*100 : (avg7>0 ? 100 : 0);
+      let risk='sin_movimiento',label='Sin movimiento reciente';
+      if(dailyRate>0 && stock<=0){risk='sin_stock';label='Sin stock';}
+      else if(coverage!==null && coverage<=1){risk='critico';label='Menos de 1 día';}
+      else if(coverage!==null && coverage<=3){risk='alto';label='Hasta 3 días';}
+      else if(coverage!==null && coverage<=7){risk='medio';label='Hasta 7 días';}
+      else if(dailyRate>0){risk='estable';label='Stock estable';}
+      return {
+        id:Number(row.id),name:row.name,category:row.category,product_type:row.product_type,
+        current_stock:stock,sold_7d:sold7,sold_30d:sold30,
+        avg_daily_7d:Number(avg7.toFixed(2)),avg_daily_30d:Number(avg30.toFixed(2)),
+        demand_rate:Number(dailyRate.toFixed(2)),coverage_days:coverage===null?null:Number(coverage.toFixed(1)),
+        suggested_purchase_7d:target7,trend_percent:Number(trend.toFixed(1)),risk,risk_label:label
+      };
+    }).sort((a,b)=>{
+      const rank={sin_stock:0,critico:1,alto:2,medio:3,estable:4,sin_movimiento:5};
+      return (rank[a.risk]??9)-(rank[b.risk]??9) || (a.coverage_days??999)-(b.coverage_days??999) || a.name.localeCompare(b.name);
+    });
+    res.json({generated_at:new Date().toISOString(),target_days:7,risk_count:rows.filter(r=>['sin_stock','critico','alto'].includes(r.risk)).length,rows});
+  }catch(err){console.error('Error inteligencia inventario:',err.message);res.status(500).json({error:'No se pudo calcular el pronóstico de inventario'});}
+});
+
+app.get('/api/admin/master/balance-reconciliation', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const result=await pool.query(`
+      WITH RECURSIVE panel_tree(user_id) AS (
+        SELECT owner_user_id FROM admin_panels WHERE owner_user_id IS NOT NULL
+        UNION
+        SELECT u2.id FROM users u2 JOIN panel_tree pt ON u2.owner_user_id=pt.user_id
+      ), continuity AS (
+        SELECT user_id,COUNT(*) FILTER (WHERE prev_after IS NOT NULL AND ABS(balance_before-prev_after)>0.009)::int AS breaks
+        FROM (
+          SELECT bl.user_id,bl.balance_before,bl.balance_after,
+                 LAG(bl.balance_after) OVER(PARTITION BY bl.user_id ORDER BY bl.id) AS prev_after
+          FROM balance_ledger bl
+          WHERE COALESCE(bl.owner_admin_id,0)=0
+        ) q GROUP BY user_id
+      )
+      SELECT u.id,u.name,u.email,u.balance,u.is_subadmin,u.owner_user_id,u.is_enabled,
+             bl.id AS ledger_id,bl.balance_after AS ledger_balance,bl.created_at AS ledger_created_at,
+             COALESCE(c.breaks,0)::int AS continuity_breaks,
+             CASE WHEN bl.id IS NULL THEN NULL ELSE (u.balance-bl.balance_after) END AS difference
+      FROM users u
+      LEFT JOIN LATERAL (
+        SELECT id,balance_after,created_at FROM balance_ledger
+        WHERE user_id=u.id AND COALESCE(owner_admin_id,0)=0
+        ORDER BY id DESC LIMIT 1
+      ) bl ON TRUE
+      LEFT JOIN continuity c ON c.user_id=u.id
+      WHERE NOT EXISTS (SELECT 1 FROM panel_tree pt WHERE pt.user_id=u.id)
+      ORDER BY CASE WHEN bl.id IS NULL THEN 2 WHEN ABS(u.balance-bl.balance_after)>0.009 OR COALESCE(c.breaks,0)>0 THEN 0 ELSE 1 END,
+               ABS(COALESCE(u.balance-bl.balance_after,0)) DESC,u.name ASC,u.id ASC
+    `);
+    const rows=result.rows.map(r=>{
+      const diff=r.difference===null?null:Number(r.difference||0);
+      const breaks=Number(r.continuity_breaks||0);
+      const status=r.ledger_id===null?'sin_historial':(Math.abs(diff||0)>0.009||breaks>0?'diferencia':'correcto');
+      return {id:Number(r.id),name:r.name,email:r.email,balance:Number(r.balance||0),is_subadmin:Boolean(r.is_subadmin),owner_user_id:r.owner_user_id,is_enabled:Boolean(r.is_enabled),ledger_balance:r.ledger_id===null?null:Number(r.ledger_balance||0),ledger_created_at:r.ledger_created_at,difference:diff,continuity_breaks:breaks,status};
+    });
+    res.json({generated_at:new Date().toISOString(),summary:{users:rows.length,correct:rows.filter(r=>r.status==='correcto').length,mismatch:rows.filter(r=>r.status==='diferencia').length,no_history:rows.filter(r=>r.status==='sin_historial').length},rows});
+  }catch(err){console.error('Error conciliacion saldos:',err.message);res.status(500).json({error:'No se pudo conciliar los saldos'});}
+});
+
+app.get('/api/admin/master/cash-movements', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const {startDate,endDate}=normalizeAnalyticsDateRange(req.query.start_date,req.query.end_date);
+    const limit=Math.min(300,Math.max(1,Number(req.query.limit||120)));
+    const result=await pool.query(`SELECT acm.*,s.name AS supplier_name
+      FROM admin_cash_movements acm LEFT JOIN suppliers s ON s.id=acm.supplier_id
+      WHERE COALESCE(acm.owner_admin_id,0)=0 AND acm.movement_date BETWEEN $1::date AND $2::date
+      ORDER BY acm.movement_date DESC,acm.id DESC LIMIT $3`,[startDate,endDate,limit]);
+    res.json({start_date:startDate,end_date:endDate,rows:result.rows});
+  }catch(err){console.error('Error movimientos caja:',err.message);res.status(500).json({error:err.message||'No se pudieron cargar movimientos de caja'});}
+});
+
+app.post('/api/admin/master/cash-movements', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const type=String(req.body?.movement_type||'').trim().toLowerCase();
+    if(!['ingreso','gasto'].includes(type)) return res.status(400).json({error:'Tipo de movimiento inválido'});
+    const amount=Number(req.body?.amount||0);
+    if(!Number.isFinite(amount)||amount<=0) return res.status(400).json({error:'El monto debe ser mayor a cero'});
+    const supplierId=Number(req.body?.supplier_id||0)||null;
+    let supplierName=String(req.body?.supplier_name||'').trim().slice(0,160);
+    await client.query('BEGIN');
+    if(supplierId){const q=await client.query(`SELECT id,name FROM suppliers WHERE id=$1 AND COALESCE(owner_admin_id,0)=0`,[supplierId]);if(!q.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Proveedor no encontrado'});}supplierName=q.rows[0].name;}
+    const movement=await client.query(`INSERT INTO admin_cash_movements
+      (owner_admin_id,movement_date,movement_type,category,amount,description,payment_method,supplier_id,supplier_name_snapshot,affects_profit,notes,created_by,created_at)
+      VALUES(NULL,COALESCE($1::date,(NOW() AT TIME ZONE 'America/Mexico_City')::date),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW()) RETURNING *`,[
+        req.body?.movement_date||null,type,String(req.body?.category||'otros').trim().slice(0,80)||'otros',amount,
+        String(req.body?.description||'').trim().slice(0,300),String(req.body?.payment_method||'').trim().slice(0,80),supplierId,supplierName,
+        req.body?.affects_profit!==false && String(req.body?.affects_profit||'true').toLowerCase()!=='false',String(req.body?.notes||'').trim().slice(0,1000),req.user.id
+      ]);
+    await recordAdminAudit(client,req,{action:'cash_movement_create',entityType:'cash_movement',entityId:movement.rows[0].id,summary:`${type==='ingreso'?'Ingreso':'Gasto'} de caja: $${amount.toFixed(2)}`,metadata:{category:movement.rows[0].category,affects_profit:movement.rows[0].affects_profit}});
+    await client.query('COMMIT');res.json({message:'Movimiento de caja registrado',movement:movement.rows[0]});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error movimiento caja:',err.message);res.status(500).json({error:'No se pudo guardar el movimiento'});}finally{client.release();}
+});
+
+app.delete('/api/admin/master/cash-movements/:id', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const id=Number(req.params.id||0);if(!id)return res.status(400).json({error:'Movimiento inválido'});
+    await client.query('BEGIN');
+    const q=await client.query(`DELETE FROM admin_cash_movements WHERE id=$1 AND COALESCE(owner_admin_id,0)=0 RETURNING *`,[id]);
+    if(!q.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Movimiento no encontrado'});}
+    await recordAdminAudit(client,req,{action:'cash_movement_delete',entityType:'cash_movement',entityId:id,summary:`Movimiento de caja eliminado: $${Number(q.rows[0].amount||0).toFixed(2)}`,metadata:{movement_type:q.rows[0].movement_type,category:q.rows[0].category}});
+    await client.query('COMMIT');res.json({message:'Movimiento eliminado'});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error eliminando movimiento caja:',err.message);res.status(500).json({error:'No se pudo eliminar el movimiento'});}finally{client.release();}
+});
+
+app.get('/api/admin/master/finance-summary', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req,res)=>{
+  try{
+    const {startDate,endDate}=normalizeAnalyticsDateRange(req.query.start_date,req.query.end_date);
+    const [sales,replacements,cash,purchases,categories]=await Promise.all([
+      pool.query(`WITH base AS (
+        SELECT o.id,o.amount,GREATEST(COALESCE(o.quantity,1),1)::int AS qty,o.product_cost_snapshot,COALESCE(p.cost_price,0) AS product_cost,
+               CASE WHEN COALESCE(refs.refund_amount,0)>0 THEN LEAST(o.amount,refs.refund_amount) WHEN COALESCE(o.refunded,0)=1 THEN o.amount ELSE 0 END AS refund_amount,
+               GREATEST(0,COALESCE(earn.final_earning,0)) AS distributor_earning,
+               COALESCE((SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')}) FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
+                 WHERE COALESCE(pa.owner_admin_id,0)=0 AND (pa.assigned_order_id=o.id OR pa.id=o.assigned_platform_account_id OR EXISTS(SELECT 1 FROM account_recovery_log arl WHERE arl.order_id=o.id AND arl.account_id=pa.id))),0) AS inventory_cost
+        FROM orders o LEFT JOIN products p ON p.id=o.product_id
+        LEFT JOIN LATERAL (SELECT COALESCE(SUM(ar.refund_amount),0) refund_amount FROM account_reports ar WHERE ar.order_id=o.id AND COALESCE(ar.refund_amount,0)>0) refs ON TRUE
+        LEFT JOIN LATERAL (SELECT COALESCE(SUM(del.amount),0) final_earning FROM distributor_earnings_ledger del WHERE del.order_id=o.id AND del.movement_type IN ('venta','ajuste_reembolso')) earn ON TRUE
+        WHERE o.status='exito' AND COALESCE(o.owner_admin_id,0)=0
+          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
+      ), calc AS (
+        SELECT *,COALESCE(NULLIF(product_cost_snapshot,0),NULLIF(inventory_cost,0),NULLIF(product_cost,0)*qty,0) AS effective_cost FROM base
+      )
+      SELECT COUNT(*)::int orders,COALESCE(SUM(amount),0)::numeric gross_sales,COALESCE(SUM(refund_amount),0)::numeric refunds,
+             COALESCE(SUM(distributor_earning),0)::numeric distributor_earnings,
+             COALESCE(SUM(amount-refund_amount-distributor_earning),0)::numeric admin_revenue,
+             COALESCE(SUM(effective_cost),0)::numeric sale_cost
+      FROM calc`,[startDate,endDate]),
+      pool.query(`SELECT COALESCE(SUM(${effectivePlatformAccountCostSql('pa','ma')}),0)::numeric replacement_cost,COUNT(*)::int replacements
+        FROM account_reports ar JOIN platform_accounts pa ON pa.id=ar.replacement_account_id LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id
+        WHERE COALESCE(ar.owner_admin_id,0)=0 AND ar.replacement_account_id IS NOT NULL
+          AND ((ar.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
+      pool.query(`SELECT COALESCE(SUM(amount) FILTER(WHERE movement_type='ingreso'),0)::numeric manual_income,
+                         COALESCE(SUM(amount) FILTER(WHERE movement_type='gasto'),0)::numeric manual_expenses,
+                         COALESCE(SUM(amount) FILTER(WHERE movement_type='ingreso' AND affects_profit),0)::numeric profit_income,
+                         COALESCE(SUM(amount) FILTER(WHERE movement_type='gasto' AND affects_profit),0)::numeric profit_expenses
+                  FROM admin_cash_movements WHERE COALESCE(owner_admin_id,0)=0 AND movement_date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
+      pool.query(`SELECT COALESCE(SUM(total_amount),0)::numeric invested,COALESCE(SUM(item_count),0)::int units,COUNT(*)::int purchases
+                  FROM inventory_purchases WHERE COALESCE(owner_admin_id,0)=0 AND purchase_date BETWEEN $1::date AND $2::date`,[startDate,endDate]),
+      pool.query(`SELECT movement_type,category,COALESCE(SUM(amount),0)::numeric total,COUNT(*)::int movements
+                  FROM admin_cash_movements WHERE COALESCE(owner_admin_id,0)=0 AND movement_date BETWEEN $1::date AND $2::date
+                  GROUP BY movement_type,category ORDER BY movement_type,ABS(SUM(amount)) DESC`,[startDate,endDate])
+    ]);
+    const s=sales.rows[0]||{},r=replacements.rows[0]||{},c=cash.rows[0]||{},p=purchases.rows[0]||{};
+    const adminRevenue=Number(s.admin_revenue||0),saleCost=Number(s.sale_cost||0),replacementCost=Number(r.replacement_cost||0);
+    const operatingExpenses=Number(c.profit_expenses||0),otherIncome=Number(c.profit_income||0);
+    const operatingProfit=adminRevenue-saleCost-replacementCost;
+    const netProfit=operatingProfit-operatingExpenses+otherIncome;
+    res.json({start_date:startDate,end_date:endDate,timezone:'America/Mexico_City',summary:{
+      orders:Number(s.orders||0),gross_sales:Number(s.gross_sales||0),refunds:Number(s.refunds||0),distributor_earnings:Number(s.distributor_earnings||0),
+      admin_revenue:adminRevenue,sale_cost:saleCost,replacement_cost:replacementCost,replacements:Number(r.replacements||0),operating_profit:operatingProfit,
+      other_income:otherIncome,operating_expenses:operatingExpenses,net_profit:netProfit,
+      inventory_investment:Number(p.invested||0),inventory_purchase_units:Number(p.units||0),inventory_purchases:Number(p.purchases||0),
+      manual_cash_income:Number(c.manual_income||0),manual_cash_expenses:Number(c.manual_expenses||0),manual_cash_balance:Number(c.manual_income||0)-Number(c.manual_expenses||0),
+      margin_percent:adminRevenue>0?Number(((netProfit/adminRevenue)*100).toFixed(2)):0
+    },categories:categories.rows.map(x=>({movement_type:x.movement_type,category:x.category,total:Number(x.total||0),movements:Number(x.movements||0)}))});
+  }catch(err){console.error('Error resumen financiero:',err.message);res.status(500).json({error:err.message||'No se pudo calcular el resumen financiero'});}
+});
 
 // ============================================================
 // VERSIÓN MAESTRA: CENTRO DE OPERACIONES + LIBRO + AUDITORÍA
