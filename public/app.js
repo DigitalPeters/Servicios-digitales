@@ -4021,34 +4021,40 @@ async function loadExpiringAlerts() {
   const list = document.getElementById('expiringAlertsList');
   if (!list) return;
 
+  const asLocalServiceDate = value => {
+    const raw=String(value||'').slice(0,10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T12:00:00`) : new Date(value);
+  };
+
   try {
-    list.innerHTML = '<p class="small-text">Buscando cuentas por vencer...</p>';
+    list.innerHTML = '<p class="small-text">Buscando renovaciones de los próximos 3 días...</p>';
     const accounts = await api('/api/alerts/expiring');
     if(currentUser && String(currentUser.role || '').toLowerCase() === 'admin' && typeof loadMotherAccountsAlerts === 'function'){
       loadMotherAccountsAlerts();
     }
 
     if (accounts.length === 0) {
-      list.innerHTML = '<p style="color: green; font-weight: bold;">✅ No hay cuentas por vencer pronto. Todo al día.</p>';
+      list.innerHTML = '<p style="color: green; font-weight: bold;">✅ No hay renovaciones de clientes en los próximos 3 días.</p>';
       return;
     }
 
     list.innerHTML = accounts.map(acc => {
-      const fechaVence = new Date(acc.expires_at);
+      const fechaVence = asLocalServiceDate(acc.expires_at);
       const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' };
       const textoVence = fechaVence.toLocaleDateString('es-MX', opcionesFecha);
+      const days = Number(acc.days_remaining || 0);
+      const when = days === 0 ? 'Vence hoy' : days === 1 ? 'Vence mañana' : `Vence en ${days} días`;
 
       return `
-        <div class="item" style="border: 1px solid #ffcc80; background: #fff8e1; margin-bottom: 10px; padding: 12px; border-radius: 6px;">
-          <div style="display:flex; justify-content:space-between; align-items: center;">
+        <div class="item" style="border: 1px solid #ffcc80; background: #fff8e1; margin-bottom: 10px; padding: 12px; border-radius: 10px;">
+          <div style="display:flex; justify-content:space-between; align-items: center; gap:12px; flex-wrap:wrap;">
             <div>
-              <b style="color: #d84315; font-size: 16px;">Vence: ${textoVence}</b><br>
-              <span style="font-size: 14px; font-weight: bold;">${acc.product_name}</span>
+              <b style="color: #d84315; font-size: 16px;">${safeText(when)} · ${safeText(textoVence)}</b><br>
+              <span style="font-size: 14px; font-weight: bold;">${safeText(acc.product_name || 'Streaming')}</span>
             </div>
             <div style="text-align: right;">
-              <span style="font-size: 13px;">
-                <b>Pedido:</b> #${acc.id}
-              </span>
+              <span style="font-size: 13px;"><b>Pedido:</b> #${Number(acc.id || 0)}</span><br>
+              <span class="small-text">Ciclo de 30 días</span>
             </div>
           </div>
         </div>
@@ -4056,7 +4062,7 @@ async function loadExpiringAlerts() {
     }).join('');
 
   } catch (e) {
-    list.innerHTML = `<p style="color:red;">Error cargando alertas: ${e.message}</p>`;
+    list.innerHTML = `<p style="color:red;">Error cargando alertas: ${safeText(e.message)}</p>`;
   }
 }
 
@@ -4064,33 +4070,48 @@ async function loadMotherAccountsAlerts() {
   const list = document.getElementById('motherAccountsList');
   if (!list) return;
 
+  const asLocalServiceDate = value => {
+    const raw=String(value||'').slice(0,10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T12:00:00`) : new Date(value);
+  };
+
   try {
-    list.innerHTML = '<p class="small-text">Calculando fechas de proveedor...</p>';
+    list.innerHTML = '<p class="small-text">Revisando cuentas madre que requieren decisión de renovación...</p>';
     const accounts = await api('/api/admin/alerts/mother-accounts');
 
     if (accounts.length === 0) {
-      list.innerHTML = '<p style="color: green; font-weight: bold;">✅ Tienes margen. Ninguna cuenta madre vence en los próximos 5 días.</p>';
+      list.innerHTML = '<p style="color: green; font-weight: bold;">✅ Ninguna cuenta madre vence en los próximos 5 días.</p>';
       return;
     }
 
     list.innerHTML = accounts.map(acc => {
-      const fechaCompra = new Date(acc.official_purchase_date);
-      const fechaVence = new Date(acc.mother_expiration);
+      const fechaCompra = asLocalServiceDate(acc.official_purchase_date);
+      const fechaVence = asLocalServiceDate(acc.mother_expiration);
       const opcionesFecha = { year: 'numeric', month: 'short', day: 'numeric' };
       const perfiles=Number(acc.profile_count || 0);
       const disponibles=Number(acc.available_profiles || 0);
+      const days=Number(acc.days_remaining || 0);
+      const when=days===0?'VENCE HOY':days===1?'VENCE MAÑANA':`VENCE EN ${days} DÍAS`;
+      const recommendation=disponibles <= 1
+        ? '🔴 Renovar o comprar reemplazo cuanto antes: queda poco inventario.'
+        : '🟠 Revisar renovación con proveedor o preparar cuenta de reemplazo.';
 
       return `
-        <div class="item" style="border: 1px solid #ef9a9a; background: #ffebee; margin-bottom: 10px; padding: 12px; border-radius: 6px;">
-          <div style="display:flex; justify-content:space-between; align-items: center; gap:12px;">
-            <div>
-              <b style="color: #c62828; font-size: 16px;">Vence Proveedor: ${fechaVence.toLocaleDateString('es-MX', opcionesFecha)}</b><br>
+        <div class="item" style="border: 1px solid #ef9a9a; background: #fff7f7; margin-bottom: 12px; padding: 14px; border-radius: 10px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+            <div style="min-width:260px;flex:1;">
+              <b style="color: #c62828; font-size: 16px;">${safeText(when)} · ${fechaVence.toLocaleDateString('es-MX', opcionesFecha)}</b><br>
+              <span style="font-size: 15px; font-weight:800;">${safeText(acc.product_name || acc.platform || 'Cuenta madre')}</span><br>
               <span style="font-size: 14px;"><b>Correo:</b> ${safeText(acc.account_email || '')}</span><br>
-              <span style="font-size: 13px; color: #555;">Plataforma: ${safeText(acc.product_name || acc.platform || '')} | Fecha original: ${fechaCompra.toLocaleDateString('es-MX', opcionesFecha)}</span>
+              <span style="font-size: 13px;"><b>Proveedor:</b> ${safeText(acc.provider_name || 'Sin proveedor registrado')}</span><br>
+              <span style="font-size: 13px; color:#667085;">Compra original: ${fechaCompra.toLocaleDateString('es-MX', opcionesFecha)}</span>
+              <div style="margin-top:9px;font-size:13px;font-weight:700;">${recommendation}</div>
             </div>
-            <div style="text-align: right; min-width:110px;">
+            <div style="text-align:right; min-width:160px;">
               <span style="font-size: 13px;"><b>Cuenta madre:</b> #${Number(acc.id || 0)}</span><br>
-              <span style="font-size: 13px; font-weight:bold;">Perfiles: ${perfiles} · Disponibles: ${disponibles}</span>
+              <span style="font-size: 13px; font-weight:bold;">Perfiles: ${perfiles}</span><br>
+              <span style="font-size: 13px; font-weight:bold;">Disponibles: ${disponibles}</span><br>
+              <button class="outline-btn" style="width:auto;margin-top:8px;" onclick="openInventoryFromDashboard()">Revisar inventario</button>
             </div>
           </div>
         </div>
@@ -4098,7 +4119,7 @@ async function loadMotherAccountsAlerts() {
     }).join('');
 
   } catch (e) {
-    list.innerHTML = `<p style="color:red;">Error cargando alertas: ${e.message}</p>`;
+    list.innerHTML = `<p style="color:red;">Error cargando alertas: ${safeText(e.message)}</p>`;
   }
 }
 

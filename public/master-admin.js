@@ -186,14 +186,15 @@
         <button class="master-kpi ${Number(d.pending_balance_requests)>0?'master-kpi-warn':''}" onclick="openBalanceRequests()"><span class="master-kpi-top"><i>💳</i> Saldo por validar</span><b>${Number(d.pending_balance_requests||0)}</b><small>$${money(d.pending_balance_amount)} solicitado</small></button>
         <button class="master-kpi" onclick="openInventoryFromDashboard()"><span class="master-kpi-top"><i>🔐</i> Stock disponible</span><b>${Number(d.inventory_available||0)}</b><small>Cuentas listas para vender</small></button>
         <button class="master-kpi ${Number(d.quarantine)>0?'master-kpi-warn':''}" onclick="openInventoryFromDashboard()"><span class="master-kpi-top"><i>♻️</i> Cuarentena</span><b>${Number(d.quarantine||0)}</b><small>Cuentas por recuperar</small></button>
-        <button class="master-kpi ${Number(d.mother_accounts_expiring_7d)>0?'master-kpi-warn':''}" onclick="showSection('alerts')"><span class="master-kpi-top"><i>⏰</i> Vencen en 7 días</span><b>${Number(d.mother_accounts_expiring_7d||0)}</b><small>Cuentas madre a revisar</small></button>`;
+        <button class="master-kpi ${Number(d.renewals_expiring_3d)>0?'master-kpi-warn':''}" onclick="showSection('alerts')"><span class="master-kpi-top"><i>⏰</i> Renovaciones en 3 días</span><b>${Number(d.renewals_expiring_3d||0)}</b><small>Clientes de streaming a contactar</small></button>
+        <button class="master-kpi ${Number(d.mother_accounts_expiring_5d)>0||Number(d.mother_accounts_expired)>0?'master-kpi-danger':''}" onclick="showSection('alerts')"><span class="master-kpi-top"><i>🧾</i> Cuentas madre por vencer</span><b>${Number(d.mother_accounts_expiring_5d||0)}</b><small>${Number(d.mother_accounts_expired||0)} vencida(s) activa(s) · revisar renovación/compra</small></button>`;
 
       if(urgent){
         const rows=Array.isArray(d.urgent)?d.urgent:[];
         urgent.innerHTML=rows.length ? rows.map(item=>{
-          const action=item.type==='pedido' ? `(typeof openMasterManualDeliveries==='function'?openMasterManualDeliveries():openOrdersFromDashboard())` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : item.type==='stock' ? `openInventoryFromDashboard()` : `openBalanceRequests()`;
-          const icon=item.type==='pedido'?'▤':item.type==='reporte'?'⚠️':item.type==='stock'?'📦':'💳';
-          const age=item.type==='stock' ? 'reponer' : formatAge(item.age_minutes);
+          const action=item.type==='mother_expiry' ? `showSection('alerts')` : item.type==='pedido' ? `(typeof openMasterManualDeliveries==='function'?openMasterManualDeliveries():openOrdersFromDashboard())` : item.type==='reporte' ? `openAccountReportsFromDashboard()` : item.type==='stock' ? `openInventoryFromDashboard()` : `openBalanceRequests()`;
+          const icon=item.type==='mother_expiry'?'⏳':item.type==='pedido'?'▤':item.type==='reporte'?'⚠️':item.type==='stock'?'📦':'💳';
+          const age=item.type==='mother_expiry' ? (item.recommendation || `${Number(item.days_remaining||0)} día(s)`) : item.type==='stock' ? 'reponer' : formatAge(item.age_minutes);
           return `<button class="master-urgent-item" onclick="${action}"><span class="master-urgent-icon">${icon}</span><span class="master-urgent-copy"><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></span><em>${age}</em><i>→</i></button>`;
         }).join('') : '<div class="master-ok"><span>✓</span><div><b>Operación al día</b><small>No hay pendientes prioritarios en este momento.</small></div></div>';
       }

@@ -3506,28 +3506,46 @@ return res.json({
 app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   try {
     const viewer = await getViewerContext(req.user.id);
-    const scope = adminOwnedWhere(viewer, "orders");
+    const scope = adminOwnedWhere(viewer, "o");
+    const localToday = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
 
     const result = await pool.query(`
-  SELECT
-    id,
-    product_name_snapshot AS product_name,
-    created_at,
-    (created_at + INTERVAL '28 days') AS expires_at
-  FROM orders
-  WHERE status = 'exito'
-  AND refunded = 0
-  AND ${scope.clause}
-  AND (
-    created_at + INTERVAL '28 days'
-  )::date
-  BETWEEN CURRENT_DATE
-  AND (CURRENT_DATE + INTERVAL '3 days')::date
-  ORDER BY expires_at ASC
+      WITH renewal_orders AS (
+        SELECT
+          o.id,
+          COALESCE(NULLIF(o.product_name_snapshot,''), p.name, 'Producto') AS product_name,
+          o.created_at,
+          (((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date + 30) AS expires_at
+        FROM orders o
+        LEFT JOIN products p ON p.id = o.product_id
+        WHERE o.status = 'exito'
+          AND COALESCE(o.refunded,0) = 0
+          AND ${scope.clause}
+          AND (
+            NULLIF(TRIM(COALESCE(o.delivered_account_data,'')),'') IS NOT NULL
+            OR EXISTS (
+            SELECT 1
+            FROM platform_accounts pa_check
+            WHERE COALESCE(pa_check.owner_admin_id,0) = COALESCE(o.owner_admin_id,0)
+              AND (
+                pa_check.assigned_order_id = o.id
+                OR pa_check.id = o.assigned_platform_account_id
+                OR EXISTS (
+                  SELECT 1 FROM account_recovery_log arl_check
+                  WHERE arl_check.order_id = o.id AND arl_check.account_id = pa_check.id
+                )
+              )
+            )
+          )
+      )
+      SELECT id, product_name, created_at, expires_at,
+             (expires_at - ${localToday})::int AS days_remaining
+      FROM renewal_orders
+      WHERE expires_at BETWEEN ${localToday} AND (${localToday} + 3)
+      ORDER BY expires_at ASC, id ASC
     `, scope.params);
 
     res.json(result.rows);
-
   } catch (err) {
     console.error("Error buscando cuentas por vencer:", err);
     res.status(500).json({ error: "Error obteniendo alertas" });
@@ -3537,34 +3555,48 @@ app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
 app.get("/api/alerts/count", authMiddleware, async (req, res) => {
   try {
     const viewer = await getViewerContext(req.user.id);
-    const scope = adminOwnedWhere(viewer, "orders");
+    const scope = adminOwnedWhere(viewer, "o");
+    const localToday = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
 
     const result = await pool.query(`
-      SELECT COUNT(*) AS total
-      FROM orders
-      WHERE status = 'exito'
-      AND refunded = 0
-      AND ${scope.clause}
-      AND (
-        created_at + INTERVAL '28 days'
-      )::date
-      BETWEEN CURRENT_DATE
-      AND (CURRENT_DATE + INTERVAL '3 days')::date
+      WITH renewal_orders AS (
+        SELECT
+          o.id,
+          (((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date + 30) AS expires_at
+        FROM orders o
+        WHERE o.status = 'exito'
+          AND COALESCE(o.refunded,0) = 0
+          AND ${scope.clause}
+          AND (
+            NULLIF(TRIM(COALESCE(o.delivered_account_data,'')),'') IS NOT NULL
+            OR EXISTS (
+            SELECT 1
+            FROM platform_accounts pa_check
+            WHERE COALESCE(pa_check.owner_admin_id,0) = COALESCE(o.owner_admin_id,0)
+              AND (
+                pa_check.assigned_order_id = o.id
+                OR pa_check.id = o.assigned_platform_account_id
+                OR EXISTS (
+                  SELECT 1 FROM account_recovery_log arl_check
+                  WHERE arl_check.order_id = o.id AND arl_check.account_id = pa_check.id
+                )
+              )
+            )
+          )
+      )
+      SELECT COUNT(*)::int AS total
+      FROM renewal_orders
+      WHERE expires_at BETWEEN ${localToday} AND (${localToday} + 3)
     `, scope.params);
 
-    res.json({
-      count: Number(result.rows[0].total || 0)
-    });
-
+    res.json({ count: Number(result.rows[0]?.total || 0) });
   } catch (err) {
     console.error("Error obteniendo contador de renovaciones:", err.message);
-    res.status(500).json({
-      error: "Error obteniendo contador"
-    });
+    res.status(500).json({ error: "Error obteniendo contador" });
   }
 });
 
-// === AQUÍ PEGAS LA NUEVA RUTA DE ALERTAS ===
+// Alertas operativas de cuentas madre: margen de 5 días para renovar o reponer.
 app.get("/api/admin/alerts/mother-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const ownerId = req.isPanelAdmin ? req.user.id : null;
@@ -3574,16 +3606,19 @@ app.get("/api/admin/alerts/mother-accounts", authMiddleware, adminMiddleware, as
          ma.product_name AS platform,
          ma.product_name,
          ma.account_email,
+         ma.provider_name,
          ma.original_purchase_date AS official_purchase_date,
          ma.expiration_date AS mother_expiration,
          ma.replaces_mother_account_id,
+         (ma.expiration_date - (NOW() AT TIME ZONE 'America/Mexico_City')::date)::int AS days_remaining,
          COUNT(pa.id)::int AS profile_count,
-         COUNT(pa.id) FILTER (WHERE pa.status = 'available')::int AS available_profiles
+         COUNT(pa.id) FILTER (WHERE pa.status IN ('available','disponible'))::int AS available_profiles
        FROM mother_accounts ma
        LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
        WHERE ma.status = 'active'
          AND ma.expiration_date IS NOT NULL
-         AND ma.expiration_date <= (CURRENT_DATE + INTERVAL '5 days')::date
+         AND ma.expiration_date BETWEEN (NOW() AT TIME ZONE 'America/Mexico_City')::date
+                                    AND ((NOW() AT TIME ZONE 'America/Mexico_City')::date + 5)
          AND COALESCE(ma.owner_admin_id, 0) = COALESCE($1::int, 0)
        GROUP BY ma.id
        ORDER BY ma.expiration_date ASC, ma.id ASC`,
@@ -6978,15 +7013,45 @@ app.post('/api/admin/master/inventory-purchases', authMiddleware, adminMiddlewar
 app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const ownScope = `(owner_admin_id IS NULL OR owner_admin_id = 0)`;
-    const [sales, pendingOrders, manualDeliveries, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance, lowStock] = await Promise.all([
+    const localToday = `(NOW() AT TIME ZONE 'America/Mexico_City')::date`;
+    const renewalCountSql = `WITH renewal_orders AS (
+      SELECT o.id,
+             (((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date + 30) AS expires_at
+      FROM orders o
+      WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0)
+        AND o.status='exito'
+        AND COALESCE(o.refunded,0)=0
+        AND (
+          NULLIF(TRIM(COALESCE(o.delivered_account_data,'')),'') IS NOT NULL
+          OR EXISTS (
+          SELECT 1 FROM platform_accounts pa_check
+          WHERE COALESCE(pa_check.owner_admin_id,0)=0
+            AND (
+              pa_check.assigned_order_id=o.id
+              OR pa_check.id=o.assigned_platform_account_id
+              OR EXISTS (
+                SELECT 1 FROM account_recovery_log arl_check
+                WHERE arl_check.order_id=o.id AND arl_check.account_id=pa_check.id
+              )
+            )
+          )
+        )
+    )
+    SELECT COUNT(*)::int AS total
+    FROM renewal_orders
+    WHERE expires_at BETWEEN ${localToday} AND (${localToday} + 3)`;
+
+    const [
+      sales, pendingOrders, manualDeliveries, pendingReports, pendingBalance,
+      inventory, quarantine, renewals3d, motherExpiring5d, motherExpired,
+      motherExpiringList, urgentOrders, urgentReports, urgentBalance, lowStock
+    ] = await Promise.all([
       pool.query(`WITH todays AS (
                     SELECT o.*, COALESCE(p.cost_price, 0) AS current_product_cost
                     FROM orders o
                     LEFT JOIN products p ON p.id = o.product_id
                     WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id = 0)
                       AND o.status='exito'
-                      -- created_at es TIMESTAMP sin zona y se guarda en UTC en Railway.
-                      -- Primero lo interpretamos como UTC y luego lo convertimos a Ciudad de México.
                       AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date
                           = (NOW() AT TIME ZONE 'America/Mexico_City')::date
                   ), costs AS (
@@ -7023,7 +7088,27 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(amount),0)::numeric AS amount FROM balance_requests WHERE ${ownScope} AND status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS available FROM platform_accounts WHERE ${ownScope} AND status IN ('available','disponible')`),
       pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE ${ownScope} AND status='recovery_pending'`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM mother_accounts WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL AND expiration_date <= ((NOW() AT TIME ZONE 'America/Mexico_City')::date + 7)`),
+      pool.query(renewalCountSql),
+      pool.query(`SELECT COUNT(*)::int AS total
+                  FROM mother_accounts
+                  WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL
+                    AND expiration_date BETWEEN ${localToday} AND (${localToday} + 5)`),
+      pool.query(`SELECT COUNT(*)::int AS total
+                  FROM mother_accounts
+                  WHERE ${ownScope} AND status='active' AND expiration_date IS NOT NULL
+                    AND expiration_date < ${localToday}`),
+      pool.query(`SELECT ma.id,ma.product_name,ma.account_email,ma.provider_name,ma.expiration_date,
+                         (ma.expiration_date - ${localToday})::int AS days_remaining,
+                         COUNT(pa.id)::int AS profile_count,
+                         COUNT(pa.id) FILTER (WHERE pa.status IN ('available','disponible'))::int AS available_profiles
+                  FROM mother_accounts ma
+                  LEFT JOIN platform_accounts pa ON pa.mother_account_id=ma.id
+                  WHERE (ma.owner_admin_id IS NULL OR ma.owner_admin_id=0)
+                    AND ma.status='active' AND ma.expiration_date IS NOT NULL
+                    AND ma.expiration_date BETWEEN ${localToday} AND (${localToday} + 5)
+                  GROUP BY ma.id
+                  ORDER BY ma.expiration_date ASC, ma.id ASC
+                  LIMIT 8`),
       pool.query(`SELECT o.id, o.created_at, o.status, o.amount, COALESCE(NULLIF(o.product_name_snapshot,''),p.name,'Pedido') AS title, u.name AS user_name, u.email AS user_email
                   FROM orders o LEFT JOIN products p ON p.id=o.product_id LEFT JOIN users u ON u.id=o.user_id
                   WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso','pendiente')
@@ -7048,14 +7133,25 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
     const now = Date.now();
     const ageMinutes = value => Math.max(0, Math.round((now - new Date(value).getTime()) / 60000));
     const urgent = [
+      ...motherExpiringList.rows.map(r => ({
+        type:'mother_expiry', id:r.id,
+        title:`Cuenta madre #${r.id} · ${r.product_name || 'Streaming'}`,
+        detail:`${r.provider_name || 'Sin proveedor'} · ${Number(r.available_profiles||0)}/${Number(r.profile_count||0)} perfiles disponibles`,
+        days_remaining:Number(r.days_remaining||0),
+        recommendation:Number(r.available_profiles||0) <= 1 ? 'Renovar / reponer ya' : 'Revisar renovación',
+        expiration_date:r.expiration_date,
+        age_minutes:0, created_at:new Date().toISOString()
+      })),
       ...urgentOrders.rows.map(r => ({ type:'pedido', id:r.id, title:`Pedido #${r.id} · ${r.title}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
       ...urgentReports.rows.map(r => ({ type:'reporte', id:r.id, title:`Reporte #${r.id} · ${r.issue_type || 'Falla'}`, detail:`${r.user_name || r.user_email || 'Cliente'} · ${r.email || ''}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
       ...urgentBalance.rows.map(r => ({ type:'saldo', id:r.id, title:`Solicitud de saldo #${r.id}`, detail:`${r.user_name || r.user_email || 'Cliente'} · $${Number(r.amount||0).toFixed(2)}`, age_minutes:ageMinutes(r.created_at), created_at:r.created_at })),
       ...lowStock.rows.map(r => ({ type:'stock', id:r.id, title:`Stock crítico · ${r.name}`, detail:`${Number(r.stock||0)} disponible(s) · ${r.category || 'Producto'}`, age_minutes:0, created_at:new Date().toISOString() }))
     ].sort((a,b) => {
-      if(a.type==='stock' && b.type!=='stock') return -1;
-      if(b.type==='stock' && a.type!=='stock') return 1;
-      return b.age_minutes-a.age_minutes;
+      const priority={mother_expiry:0,stock:1,reporte:2,pedido:3,saldo:4};
+      const pa=priority[a.type] ?? 9, pb=priority[b.type] ?? 9;
+      if(pa!==pb) return pa-pb;
+      if(a.type==='mother_expiry' && b.type==='mother_expiry') return Number(a.days_remaining||0)-Number(b.days_remaining||0);
+      return Number(b.age_minutes||0)-Number(a.age_minutes||0);
     }).slice(0,12);
 
     res.json({
@@ -7068,7 +7164,15 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       pending_balance_amount: Number(pendingBalance.rows[0]?.amount||0),
       inventory_available: Number(inventory.rows[0]?.available||0),
       quarantine: Number(quarantine.rows[0]?.total||0),
-      mother_accounts_expiring_7d: Number(expiring.rows[0]?.total||0),
+      renewals_expiring_3d: Number(renewals3d.rows[0]?.total||0),
+      mother_accounts_expiring_5d: Number(motherExpiring5d.rows[0]?.total||0),
+      mother_accounts_expired: Number(motherExpired.rows[0]?.total||0),
+      mother_accounts_expiring: motherExpiringList.rows.map(r=>({
+        id:Number(r.id), product_name:r.product_name, account_email:r.account_email,
+        provider_name:r.provider_name, expiration_date:r.expiration_date,
+        days_remaining:Number(r.days_remaining||0), profile_count:Number(r.profile_count||0),
+        available_profiles:Number(r.available_profiles||0)
+      })),
       low_stock_count: lowStock.rows.length,
       low_stock: lowStock.rows.map(r=>({id:Number(r.id),name:r.name,category:r.category,stock:Number(r.stock||0)})),
       urgent

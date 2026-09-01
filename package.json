@@ -1,7 +1,7 @@
 {
   "name": "servicios-digitales",
-  "version": "1.5.2",
-  "description": "Servicios Digitales Peters - Version Maestra V1.5.2 Dashboard limpio, Venta a Cliente Final y Tienda de Validacion",
+  "version": "1.5.3",
+  "description": "Servicios Digitales Peters - Version Maestra V1.5.3 Alertas de renovacion y cuentas madre",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
