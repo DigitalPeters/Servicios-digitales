@@ -2668,3 +2668,25 @@ body.modal-open{
   .master-focus-card,.master-management-section{padding:15px;border-radius:15px}
   .master-urgent-item{grid-template-columns:34px minmax(0,1fr) auto!important}.master-urgent-item>i{display:none}.master-urgent-copy small{white-space:normal}
 }
+
+/* ============================================================
+   MASTER V1.2 - CONFIGURACIÓN DE COSTO POR CUENTA MADRE
+   ============================================================ */
+.pq-mother-table th:nth-child(2){min-width:290px}
+.pq-mother-table th:nth-child(3){min-width:190px}
+.pq-cost-editor{display:grid;gap:7px;min-width:270px}
+.pq-cost-editor label{font-size:.78rem;font-weight:800;color:#53627a;letter-spacing:.01em}
+.pq-cost-editor input{width:100%;min-width:0;margin:0;padding:10px 11px;border-radius:12px;border:1px solid #d6deeb;background:#fff;color:#101827}
+.pq-cost-editor input:focus{outline:2px solid rgba(46,105,218,.15);border-color:#5c8ee6}
+.pq-check{display:flex!important;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:#f2f6fc;color:#172033!important;cursor:pointer}
+.pq-check input{width:17px;height:17px;margin:0;flex:0 0 auto}
+.pq-profile-settings{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;padding:10px;border-radius:12px;background:#f7f9fd;border:1px solid #e2e8f2}
+.pq-profile-settings label{align-self:end}
+.pq-profile-settings input{grid-row:2}
+.pq-cost-preview{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 11px;border-radius:12px;background:#eaf4ff;color:#284462;font-size:.78rem}
+.pq-cost-preview b{font-size:1rem;color:#102447;white-space:nowrap}
+.pq-save-cost{width:100%;margin-top:1px;padding:10px 12px}
+.pq-effective-cost{display:grid;gap:2px;margin-top:10px;padding:9px 10px;border-radius:12px;background:#f4f7fb;border:1px solid #e3e8f0}
+.pq-effective-cost span,.pq-effective-cost small{font-size:.75rem;color:#68778c}
+.pq-effective-cost b{font-size:1.08rem;color:#15233c}
+@media(max-width:900px){.pq-profile-settings{grid-template-columns:1fr}.pq-profile-settings input{grid-row:auto}.pq-cost-editor{min-width:230px}}

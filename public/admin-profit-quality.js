@@ -105,25 +105,57 @@
   function renderProviders(rows){
     const box=document.getElementById('pqProviders'); if(!box) return;
     if(!rows?.length){box.innerHTML='<p class="small-text">Sin proveedores con actividad en este periodo.</p>';return;}
-    box.innerHTML=`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Proveedor</th><th>Cuentas madre</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Reemplazos</th><th>Utilidad</th><th>Margen</th><th>Fallas</th><th>Tasa falla</th></tr></thead><tbody>${rows.map(r=>`<tr>
-      <td><b>${esc(r.provider_name||'Sin proveedor')}</b>${r.mother_cost_missing?`<br><span class="small-text">${r.mother_cost_missing} cuenta(s) sin costo total</span>`:''}</td>
-      <td>${num(r.mother_accounts)}</td><td>${num(r.orders)}</td><td>${money(r.admin_revenue)}</td><td>${money(r.sale_cost)}</td><td>${money(r.replacement_cost)}</td>
+    box.innerHTML=`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Proveedor</th><th>Cuentas madre</th><th>Inversión registrada</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Reemplazos</th><th>Utilidad</th><th>Margen</th><th>Fallas</th><th>Tasa falla</th></tr></thead><tbody>${rows.map(r=>`<tr>
+      <td><b>${esc(r.provider_name||'Sin proveedor')}</b>${r.mother_cost_missing?`<br><span class="small-text error">${r.mother_cost_missing} cuenta(s) sin costo configurado</span>`:''}</td>
+      <td>${num(r.mother_accounts)}</td><td><b>${money(r.registered_mother_cost)}</b></td><td>${num(r.orders)}</td><td>${money(r.admin_revenue)}</td><td>${money(r.sale_cost)}</td><td>${money(r.replacement_cost)}</td>
       <td class="${num(r.profit)<0?'error':'success'}"><b>${money(r.profit)}</b></td><td>${pct(r.margin_percent)}</td><td>${num(r.failures)} (${num(r.replacements)} repl.)</td><td><b>${pct(r.failure_rate)}</b></td>
     </tr>`).join('')}</tbody></table></div>`;
   }
+
+  window.updateMotherCostPreview=function(id){
+    const totalRaw=(document.getElementById(`pq-cost-${id}`)?.value||'').trim();
+    const total=totalRaw===''?null:Number(totalRaw);
+    const byProfile=!!document.getElementById(`pq-by-profile-${id}`)?.checked;
+    const countRaw=(document.getElementById(`pq-profile-count-${id}`)?.value||'').trim();
+    const count=countRaw===''?0:Number(countRaw);
+    const overrideRaw=(document.getElementById(`pq-profile-cost-${id}`)?.value||'').trim();
+    const override=overrideRaw===''?null:Number(overrideRaw);
+    const group=document.getElementById(`pq-profile-settings-${id}`);
+    if(group) group.classList.toggle('hidden',!byProfile);
+    let effective=null, label='Sin costo configurado';
+    if(byProfile){
+      if(override!==null && Number.isFinite(override) && override>=0){effective=override;label='Costo manual por perfil';}
+      else if(total!==null && Number.isFinite(total) && count>0){effective=total/count;label='Costo calculado por perfil';}
+    }else if(total!==null && Number.isFinite(total) && total>=0){effective=total;label='Costo por cuenta completa';}
+    const preview=document.getElementById(`pq-cost-preview-${id}`);
+    if(preview) preview.innerHTML=effective===null
+      ? `<span class="error">${esc(label)}</span>`
+      : `<span>${esc(label)}</span><b>${money(effective)}</b>`;
+  };
 
   function renderMothers(rows){
     const box=document.getElementById('pqMotherAccounts'); if(!box) return;
     const active=(rows||[]).filter(r=>num(r.orders)>0 || num(r.failures)>0 || r.id);
     if(!active.length){box.innerHTML='<p class="small-text">Sin cuentas madre.</p>';return;}
-    box.innerHTML=`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Proveedor / costo total</th><th>Perfiles</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Costo reemplazos</th><th>Utilidad</th><th>Fallas</th></tr></thead><tbody>${active.map(r=>`<tr>
+    box.innerHTML=`<div class="table-wrap"><table class="mini-table pq-mother-table"><thead><tr><th>Cuenta madre</th><th>Configuración de costo</th><th>Perfiles / costo unitario</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Costo reemplazos</th><th>Utilidad</th><th>Fallas</th></tr></thead><tbody>${active.map(r=>`<tr>
       <td><b>${r.id?`#${num(r.id)} · `:''}${esc(r.product_name||'Sin producto')}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br>${statusChip(r)}</td>
-      <td>${r.id?`<input id="pq-provider-${r.id}" value="${esc(r.provider_name||'')}" placeholder="Proveedor"/><input id="pq-cost-${r.id}" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Costo total cuenta madre"/><button class="outline-btn" style="width:auto;margin-top:5px" onclick="saveMotherAnalyticsMeta(${r.id})">Guardar</button>`:`${esc(r.provider_name||'Sin proveedor')}`}</td>
-      <td>${num(r.profile_count)}<br><span class="small-text">${num(r.available_profiles)} disp. · ${num(r.failed_profiles)} fallidos</span></td>
+      <td>${r.id?`<div class="pq-cost-editor">
+          <label>Proveedor</label><input id="pq-provider-${r.id}" value="${esc(r.provider_name||'')}" placeholder="Ej. Digitalvnhe"/>
+          <label>Costo cuenta completa</label><input id="pq-cost-${r.id}" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Ej. 250.00" oninput="updateMotherCostPreview(${r.id})"/>
+          <label class="pq-check"><input id="pq-by-profile-${r.id}" type="checkbox" ${r.sell_by_profile?'checked':''} onchange="updateMotherCostPreview(${r.id})"/> <span>Esta cuenta se vende por perfiles</span></label>
+          <div id="pq-profile-settings-${r.id}" class="pq-profile-settings ${r.sell_by_profile?'':'hidden'}">
+            <label>Perfiles de la cuenta</label><input id="pq-profile-count-${r.id}" type="number" min="1" max="500" step="1" value="${r.configured_profile_count===null?'':num(r.configured_profile_count)}" placeholder="Ej. 5" oninput="updateMotherCostPreview(${r.id})"/>
+            <label>Costo manual por perfil <small>(opcional)</small></label><input id="pq-profile-cost-${r.id}" type="number" min="0" step="0.01" value="${r.profile_cost_override===null?'':num(r.profile_cost_override)}" placeholder="Vacío = calcular automático" oninput="updateMotherCostPreview(${r.id})"/>
+          </div>
+          <div id="pq-cost-preview-${r.id}" class="pq-cost-preview"></div>
+          <button class="primary-btn pq-save-cost" onclick="saveMotherAnalyticsMeta(${r.id})">Guardar costo</button>
+        </div>`:`${esc(r.provider_name||'Sin proveedor')}`}</td>
+      <td><b>${num(r.profile_count)} perfil(es) cargados</b><br><span class="small-text">${num(r.available_profiles)} disp. · ${num(r.failed_profiles)} fallidos</span><div class="pq-effective-cost"><span>Costo usado por venta</span><b>${r.effective_unit_cost===null?'—':money(r.effective_unit_cost)}</b><small>${r.sell_by_profile?`${num(r.cost_profile_count)} perfil(es) para reparto`:'Cuenta completa'}</small></div></td>
       <td>${num(r.orders)}</td><td>${money(r.admin_revenue)}</td><td>${money(r.sale_cost)}</td><td>${money(r.replacement_cost)}</td>
       <td class="${num(r.profit)<0?'error':'success'}"><b>${money(r.profit)}</b><br><span class="small-text">${pct(r.margin_percent)}</span></td>
       <td>${num(r.failures)}<br><span class="small-text">${num(r.replacements)} repl. · ${num(r.refunds)} reemb.</span></td>
     </tr>`).join('')}</tbody></table></div>`;
+    active.filter(r=>r.id).forEach(r=>updateMotherCostPreview(r.id));
   }
 
   function renderQuality(id,rows){
@@ -186,10 +218,20 @@
     try{
       const provider=(document.getElementById(`pq-provider-${id}`)?.value||'').trim();
       const raw=(document.getElementById(`pq-cost-${id}`)?.value||'').trim();
-      const body={provider_name:provider,purchase_cost_total:raw===''?null:raw};
+      const sellByProfile=!!document.getElementById(`pq-by-profile-${id}`)?.checked;
+      const countRaw=(document.getElementById(`pq-profile-count-${id}`)?.value||'').trim();
+      const profileCostRaw=(document.getElementById(`pq-profile-cost-${id}`)?.value||'').trim();
+      const body={
+        provider_name:provider,
+        purchase_cost_total:raw===''?null:raw,
+        sell_by_profile:sellByProfile,
+        configured_profile_count:sellByProfile && countRaw!==''?countRaw:null,
+        profile_cost_override:sellByProfile && profileCostRaw!==''?profileCostRaw:null
+      };
       const result=await api(`/api/admin/mother-accounts/${id}/analytics-meta`,{method:'PATCH',body:JSON.stringify(body)});
-      if(typeof showMessage==='function') showMessage(result.message||'Datos actualizados');
+      if(typeof showMessage==='function') showMessage(result.message||'Costo actualizado');
       await loadProfitQuality();
+      if(typeof loadMasterOperations==='function') loadMasterOperations(false);
     }catch(e){if(typeof showMessage==='function')showMessage(e.message||'Error guardando proveedor/costo','error');}
   };
 

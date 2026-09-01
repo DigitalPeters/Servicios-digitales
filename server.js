@@ -941,8 +941,13 @@ function normalizeProductType(value) {
 }
 
 function getPlatformAccountPurchaseCost(account, fallbackCost = 0) {
-  const rawPurchasePrice = account?.purchase_price;
+  const rawEffectivePrice = account?.effective_purchase_price;
+  if (rawEffectivePrice !== null && rawEffectivePrice !== undefined && String(rawEffectivePrice).trim() !== "") {
+    const effectivePrice = Number(rawEffectivePrice);
+    if (Number.isFinite(effectivePrice)) return Math.max(0, effectivePrice);
+  }
 
+  const rawPurchasePrice = account?.purchase_price;
   if (
     rawPurchasePrice !== null &&
     rawPurchasePrice !== undefined &&
@@ -954,6 +959,41 @@ function getPlatformAccountPurchaseCost(account, fallbackCost = 0) {
 
   const fallback = Number(fallbackCost);
   return Number.isFinite(fallback) ? Math.max(0, fallback) : 0;
+}
+
+function effectiveMotherUnitCostSql(motherAlias = 'ma') {
+  return `CASE
+    WHEN COALESCE(${motherAlias}.sell_by_profile, FALSE) = TRUE THEN
+      COALESCE(
+        ${motherAlias}.profile_cost_override,
+        CASE
+          WHEN COALESCE(${motherAlias}.configured_profile_count, 0) > 0
+               AND ${motherAlias}.purchase_cost_total IS NOT NULL
+            THEN ${motherAlias}.purchase_cost_total / ${motherAlias}.configured_profile_count
+          ELSE NULL
+        END
+      )
+    ELSE ${motherAlias}.purchase_cost_total
+  END`;
+}
+
+function effectivePlatformAccountCostSql(accountAlias = 'pa', motherAlias = 'ma') {
+  return `COALESCE(NULLIF(${accountAlias}.purchase_price, 0), ${effectiveMotherUnitCostSql(motherAlias)}, 0)`;
+}
+
+function deriveMotherUnitCost(row = {}, actualProfileCount = 0) {
+  const total = row.purchase_cost_total === null || row.purchase_cost_total === undefined || String(row.purchase_cost_total).trim() === ''
+    ? null : Number(row.purchase_cost_total);
+  const override = row.profile_cost_override === null || row.profile_cost_override === undefined || String(row.profile_cost_override).trim() === ''
+    ? null : Number(row.profile_cost_override);
+  const configured = Math.max(0, Number(row.configured_profile_count || 0));
+  const count = configured || Math.max(0, Number(actualProfileCount || 0));
+  if (row.sell_by_profile === true || row.sell_by_profile === 'true' || row.sell_by_profile === 1 || row.sell_by_profile === '1') {
+    if (override !== null && Number.isFinite(override)) return roundMoney(Math.max(0, override));
+    if (total !== null && Number.isFinite(total) && count > 0) return roundMoney(Math.max(0, total) / count);
+    return null;
+  }
+  return total !== null && Number.isFinite(total) ? roundMoney(Math.max(0, total)) : null;
 }
 
 
@@ -1463,6 +1503,9 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS provider_name TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS purchase_cost_total NUMERIC`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS sell_by_profile BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS configured_profile_count INTEGER`);
+  await pool.query(`ALTER TABLE mother_accounts ADD COLUMN IF NOT EXISTS profile_cost_override NUMERIC`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_provider ON mother_accounts (lower(provider_name))`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_group ON mother_accounts (lower(product_name), lower(account_email), COALESCE(owner_admin_id, 0), status)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_replaces ON mother_accounts (replaces_mother_account_id)`);
@@ -2429,25 +2472,28 @@ async function findAvailableAccountForProduct(client, product, userId) {
   const reusableProduct = Number(product.reusable_stock || 0) === 1;
 
   const statusCondition = reusableProduct
-    ? `lower(COALESCE(status, 'available')) IN ('available', 'disponible', 'delivered')`
-    : `status IN ('available', 'disponible')`;
+    ? `lower(COALESCE(pa.status, 'available')) IN ('available', 'disponible', 'delivered')`
+    : `pa.status IN ('available', 'disponible')`;
 
   const result = await client.query(
-    `SELECT *
-     FROM platform_accounts
+    `SELECT pa.*,
+            ${effectiveMotherUnitCostSql('ma')} AS mother_unit_cost,
+            ${effectivePlatformAccountCostSql('pa','ma')} AS effective_purchase_price
+     FROM platform_accounts pa
+     LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
      WHERE ${statusCondition}
        AND (
-         ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-         OR ($3::int IS NOT NULL AND owner_admin_id = $3)
+         ($3::int IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
+         OR ($3::int IS NOT NULL AND pa.owner_admin_id = $3)
        )
        AND (
-         lower(COALESCE(product_name, '')) = lower($1)
-         OR lower(COALESCE(platform, '')) = lower($1)
-         OR lower(COALESCE(platform, '')) = lower($2)
+         lower(COALESCE(pa.product_name, '')) = lower($1)
+         OR lower(COALESCE(pa.platform, '')) = lower($1)
+         OR lower(COALESCE(pa.platform, '')) = lower($2)
        )
-     ORDER BY CASE WHEN COALESCE(reusable, 0) = 1 THEN 0 ELSE 1 END, id ASC
+     ORDER BY CASE WHEN COALESCE(pa.reusable, 0) = 1 THEN 0 ELSE 1 END, pa.id ASC
      LIMIT 1
-     FOR UPDATE SKIP LOCKED`,
+     FOR UPDATE OF pa SKIP LOCKED`,
     [productName, productCategory, ownerId]
   );
 
@@ -3196,21 +3242,24 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
       const inventoryOwnerId = viewerContext?.owner_admin_id || null;
 
       const availableAccountResult = await client.query(
-        `SELECT *
-         FROM platform_accounts
-         WHERE ${availableCondition}
+        `SELECT pa.*,
+                ${effectiveMotherUnitCostSql('ma')} AS mother_unit_cost,
+                ${effectivePlatformAccountCostSql('pa','ma')} AS effective_purchase_price
+         FROM platform_accounts pa
+         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+         WHERE ${availableCondition.replace(/\bstatus\b/g, 'pa.status')}
            AND (
-             ($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-             OR ($3::int IS NOT NULL AND owner_admin_id = $3)
+             ($3::int IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id = 0))
+             OR ($3::int IS NOT NULL AND pa.owner_admin_id = $3)
            )
            AND (
-             lower(COALESCE(product_name, '')) = lower($1)
-             OR lower(COALESCE(platform, '')) = lower($1)
-             OR lower(COALESCE(platform, '')) = lower($2)
+             lower(COALESCE(pa.product_name, '')) = lower($1)
+             OR lower(COALESCE(pa.platform, '')) = lower($1)
+             OR lower(COALESCE(pa.platform, '')) = lower($2)
            )
-         ORDER BY CASE WHEN COALESCE(reusable, 0) = 1 THEN 0 ELSE 1 END, id ASC
+         ORDER BY CASE WHEN COALESCE(pa.reusable, 0) = 1 THEN 0 ELSE 1 END, pa.id ASC
          LIMIT 1
-         FOR UPDATE SKIP LOCKED`,
+         FOR UPDATE OF pa SKIP LOCKED`,
         [productName, productCategory, inventoryOwnerId]
       );
 
@@ -6357,12 +6406,29 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
   try {
     const ownScope = `(owner_admin_id IS NULL OR owner_admin_id = 0)`;
     const [sales, pendingOrders, pendingReports, pendingBalance, inventory, quarantine, expiring, urgentOrders, urgentReports, urgentBalance] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS orders,
-                         COALESCE(SUM(amount),0)::numeric AS revenue,
-                         COALESCE(SUM(GREATEST(amount - COALESCE(product_cost_snapshot,0),0)),0)::numeric AS gross_profit
-                  FROM orders
-                  WHERE ${ownScope} AND status='exito'
-                    AND (created_at AT TIME ZONE 'America/Mexico_City')::date = (NOW() AT TIME ZONE 'America/Mexico_City')::date`),
+      pool.query(`WITH todays AS (
+                    SELECT o.*
+                    FROM orders o
+                    WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id = 0)
+                      AND o.status='exito'
+                      AND (o.created_at AT TIME ZONE 'America/Mexico_City')::date = (NOW() AT TIME ZONE 'America/Mexico_City')::date
+                  ), costs AS (
+                    SELECT o.id,
+                           CASE WHEN COALESCE(o.product_cost_snapshot,0) > 0 THEN o.product_cost_snapshot
+                                ELSE COALESCE((
+                                  SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
+                                  FROM platform_accounts pa
+                                  LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+                                  WHERE pa.assigned_order_id = o.id
+                                    AND COALESCE(pa.owner_admin_id,0)=0
+                                ),0) END AS effective_cost
+                    FROM todays o
+                  )
+                  SELECT COUNT(*)::int AS orders,
+                         COALESCE(SUM(o.amount),0)::numeric AS revenue,
+                         COALESCE(SUM(GREATEST(o.amount - COALESCE(c.effective_cost,0),0)),0)::numeric AS gross_profit
+                  FROM todays o
+                  LEFT JOIN costs c ON c.id=o.id`),
       pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso')`),
       pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE ${ownScope} AND status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(amount),0)::numeric AS amount FROM balance_requests WHERE ${ownScope} AND status='pendiente'`),
@@ -7865,29 +7931,134 @@ function normalizeAnalyticsDateRange(startValue, endValue) {
 }
 
 app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     const id = Number(req.params.id || 0);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Cuenta madre inválida' });
+
     const providerName = String(req.body?.provider_name || '').trim().slice(0, 160);
     const rawCost = req.body?.purchase_cost_total;
     const purchaseCost = rawCost === null || rawCost === undefined || String(rawCost).trim() === '' ? null : Number(rawCost);
+    const sellByProfile = req.body?.sell_by_profile === true || req.body?.sell_by_profile === 1 || req.body?.sell_by_profile === '1' || String(req.body?.sell_by_profile || '').toLowerCase() === 'true';
+    const rawProfileCount = req.body?.configured_profile_count;
+    const configuredProfileCount = rawProfileCount === null || rawProfileCount === undefined || String(rawProfileCount).trim() === '' ? null : Number(rawProfileCount);
+    const rawProfileCost = req.body?.profile_cost_override;
+    const profileCostOverride = rawProfileCost === null || rawProfileCost === undefined || String(rawProfileCost).trim() === '' ? null : Number(rawProfileCost);
+
     if (purchaseCost !== null && (!Number.isFinite(purchaseCost) || purchaseCost < 0)) {
       return res.status(400).json({ error: 'El costo total debe ser mayor o igual a 0' });
     }
-    const result = await pool.query(
+    if (configuredProfileCount !== null && (!Number.isInteger(configuredProfileCount) || configuredProfileCount <= 0 || configuredProfileCount > 500)) {
+      return res.status(400).json({ error: 'La cantidad de perfiles debe ser un entero entre 1 y 500' });
+    }
+    if (profileCostOverride !== null && (!Number.isFinite(profileCostOverride) || profileCostOverride < 0)) {
+      return res.status(400).json({ error: 'El costo manual por perfil debe ser mayor o igual a 0' });
+    }
+    if (sellByProfile && profileCostOverride === null && purchaseCost !== null && !configuredProfileCount) {
+      return res.status(400).json({ error: 'Si vendes por perfil, indica cuántos perfiles tiene la cuenta o captura un costo manual por perfil' });
+    }
+
+    await client.query('BEGIN');
+    const beforeResult = await client.query(
+      `SELECT id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override
+       FROM mother_accounts
+       WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0
+       FOR UPDATE`,
+      [id]
+    );
+    const before = beforeResult.rows[0];
+    if (!before) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Cuenta madre no encontrada' });
+    }
+
+    const result = await client.query(
       `UPDATE mother_accounts
        SET provider_name = $2,
            purchase_cost_total = $3,
+           sell_by_profile = $4,
+           configured_profile_count = $5,
+           profile_cost_override = $6,
            updated_at = NOW()
        WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0
-       RETURNING id, provider_name, purchase_cost_total`,
-      [id, providerName, purchaseCost]
+       RETURNING id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override`,
+      [id, providerName, purchaseCost, sellByProfile, sellByProfile ? configuredProfileCount : null, sellByProfile ? profileCostOverride : null]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Cuenta madre no encontrada' });
-    res.json({ message: 'Datos de rentabilidad actualizados', mother_account: result.rows[0] });
+
+    const actualProfilesResult = await client.query(
+      `SELECT COUNT(*)::int AS total FROM platform_accounts WHERE mother_account_id = $1 AND COALESCE(owner_admin_id, 0) = 0`,
+      [id]
+    );
+    const actualProfiles = Number(actualProfilesResult.rows[0]?.total || 0);
+    const effectiveUnitCost = deriveMotherUnitCost(result.rows[0], actualProfiles);
+
+    // Si ya conocemos el costo por unidad, lo propagamos al inventario de esta cuenta madre.
+    // Así las ventas futuras guardan un snapshot de costo correcto.
+    if (effectiveUnitCost !== null) {
+      await client.query(
+        `UPDATE platform_accounts
+         SET purchase_price = $2
+         WHERE mother_account_id = $1 AND COALESCE(owner_admin_id, 0) = 0`,
+        [id, effectiveUnitCost]
+      );
+
+      // Para ventas históricas que quedaron en $0, solo hacemos backfill cuando TODAS
+      // las cuentas ligadas al pedido ya tienen costo conocido. Esto evita costos parciales en combos.
+      await client.query(
+        `WITH affected_orders AS (
+           SELECT DISTINCT assigned_order_id AS order_id
+           FROM platform_accounts
+           WHERE mother_account_id = $1
+             AND COALESCE(owner_admin_id, 0) = 0
+             AND assigned_order_id IS NOT NULL
+         ), recalculated AS (
+           SELECT pa.assigned_order_id AS order_id,
+                  SUM(COALESCE(pa.purchase_price, 0))::numeric AS total_cost,
+                  COUNT(*)::int AS account_count,
+                  COUNT(pa.purchase_price)::int AS priced_count
+           FROM platform_accounts pa
+           WHERE pa.assigned_order_id IN (SELECT order_id FROM affected_orders)
+             AND COALESCE(pa.owner_admin_id, 0) = 0
+           GROUP BY pa.assigned_order_id
+         )
+         UPDATE orders o
+         SET product_cost_snapshot = r.total_cost
+         FROM recalculated r
+         WHERE o.id = r.order_id
+           AND COALESCE(o.owner_admin_id, 0) = 0
+           AND COALESCE(o.product_cost_snapshot, 0) = 0
+           AND r.account_count = r.priced_count`,
+        [id]
+      );
+    }
+
+    await recordAdminAudit(client, req, {
+      action: 'mother_account_cost_config',
+      entityType: 'mother_account',
+      entityId: id,
+      summary: `Configuración de costo actualizada para cuenta madre #${id}`,
+      metadata: {
+        before,
+        provider_name: providerName,
+        purchase_cost_total: purchaseCost,
+        sell_by_profile: sellByProfile,
+        configured_profile_count: sellByProfile ? configuredProfileCount : null,
+        profile_cost_override: sellByProfile ? profileCostOverride : null,
+        effective_unit_cost: effectiveUnitCost
+      }
+    });
+
+    await client.query('COMMIT');
+    res.json({
+      message: 'Costo de cuenta madre actualizado',
+      mother_account: { ...result.rows[0], actual_profile_count: actualProfiles, effective_unit_cost: effectiveUnitCost }
+    });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error actualizando metadatos de cuenta madre:', err.message);
-    res.status(500).json({ error: 'Error actualizando proveedor/costo de cuenta madre' });
+    res.status(500).json({ error: err.message || 'Error actualizando proveedor/costo de cuenta madre' });
+  } finally {
+    client.release();
   }
 });
 
@@ -7954,8 +8125,10 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
          rpa.mother_account_id AS reported_mother_account_id,
          seller.name AS seller_name, seller.email AS seller_email, seller.owner_user_id AS distributor_id,
          distributor.name AS distributor_name,
-         COALESCE(repl.purchase_price, 0) AS replacement_cost,
-         CASE WHEN ar.replacement_account_id IS NOT NULL AND repl.purchase_price IS NULL THEN true ELSE false END AS replacement_cost_missing,
+         ${effectivePlatformAccountCostSql('repl','repma')} AS replacement_cost,
+         CASE WHEN ar.replacement_account_id IS NOT NULL
+                   AND COALESCE(NULLIF(repl.purchase_price, 0), ${effectiveMotherUnitCostSql('repma')}) IS NULL
+              THEN true ELSE false END AS replacement_cost_missing,
          COALESCE(NULLIF(TRIM(repma.provider_name), ''), 'Sin proveedor') AS replacement_provider_name
        FROM account_reports ar
        LEFT JOIN orders o ON o.id = ar.order_id
@@ -7974,6 +8147,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
 
     const mothersResult = await pool.query(
       `SELECT ma.id, ma.product_name, ma.account_email, ma.provider_name, ma.purchase_cost_total,
+              ma.sell_by_profile, ma.configured_profile_count, ma.profile_cost_override,
               ma.original_purchase_date, ma.expiration_date, ma.status,
               COUNT(pa.id)::int AS profile_count,
               COUNT(pa.id) FILTER (WHERE pa.status = 'available')::int AS available_profiles,
@@ -8004,11 +8178,11 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         distEarn = money(originalMargin * (1 - refundRatio));
       }
       const revenue = money(gross - refund - distEarn);
-      const cost = Math.max(0, money(row.product_cost_snapshot));
+      const snapshotCost = Math.max(0, money(row.product_cost_snapshot));
       const productName = String(row.product_name_snapshot || row.current_product_name || 'Sin producto').trim();
-      const item = { ...row, gross, refund, distributor_earning: distEarn, admin_revenue: revenue, sale_cost: cost, product_name: productName };
+      const item = { ...row, gross, refund, distributor_earning: distEarn, admin_revenue: revenue, sale_cost_snapshot: snapshotCost, sale_cost: snapshotCost, product_name: productName };
       orderMap.set(Number(row.id), item);
-      grossSales += gross; refunds += refund; distributorEarnings += distEarn; adminRevenue += revenue; saleCost += cost;
+      grossSales += gross; refunds += refund; distributorEarnings += distEarn; adminRevenue += revenue;
       const sellerKey = String(Number(row.user_id || 0));
       if (!sellerSales.has(sellerKey)) sellerSales.set(sellerKey, new Set());
       sellerSales.get(sellerKey).add(Number(row.id));
@@ -8036,20 +8210,37 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       accountProductSales.get(accountProductKey).add(oid);
     }
 
-    const motherStats = new Map(mothersResult.rows.map(row => [Number(row.id), {
-      id: Number(row.id), product_name: row.product_name || 'Sin producto', account_email: row.account_email || '',
-      provider_name: row.provider_name || '', purchase_cost_total: row.purchase_cost_total === null ? null : money(row.purchase_cost_total),
-      original_purchase_date: row.original_purchase_date, expiration_date: row.expiration_date, status: row.status || '',
-      profile_count: Number(row.profile_count || 0), available_profiles: Number(row.available_profiles || 0),
-      delivered_profiles: Number(row.delivered_profiles || 0), failed_profiles: Number(row.failed_profiles || 0),
-      orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0
-    }]));
+    const motherStats = new Map(mothersResult.rows.map(row => {
+      const actualProfileCount = Number(row.profile_count || 0);
+      const effectiveUnitCost = deriveMotherUnitCost(row, actualProfileCount);
+      return [Number(row.id), {
+        id: Number(row.id), product_name: row.product_name || 'Sin producto', account_email: row.account_email || '',
+        provider_name: row.provider_name || '', purchase_cost_total: row.purchase_cost_total === null ? null : money(row.purchase_cost_total),
+        sell_by_profile: row.sell_by_profile === true,
+        configured_profile_count: row.configured_profile_count === null ? null : Number(row.configured_profile_count),
+        profile_cost_override: row.profile_cost_override === null ? null : money(row.profile_cost_override),
+        effective_unit_cost: effectiveUnitCost,
+        cost_profile_count: Number(row.configured_profile_count || 0) || actualProfileCount,
+        original_purchase_date: row.original_purchase_date, expiration_date: row.expiration_date, status: row.status || '',
+        profile_count: actualProfileCount, available_profiles: Number(row.available_profiles || 0),
+        delivered_profiles: Number(row.delivered_profiles || 0), failed_profiles: Number(row.failed_profiles || 0),
+        orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0
+      }];
+    }));
     const unassignedMother = { id: 0, product_name: 'Sin cuenta madre', account_email: '', provider_name: '', purchase_cost_total: null,
+      sell_by_profile:false, configured_profile_count:null, profile_cost_override:null, effective_unit_cost:null, cost_profile_count:0,
       original_purchase_date: null, expiration_date: null, status: '', profile_count: 0, available_profiles: 0, delivered_profiles: 0, failed_profiles: 0,
       orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0 };
 
     for (const [orderId, order] of orderMap.entries()) {
       const links = Array.from((orderLinks.get(orderId) || new Map()).values());
+      const derivedCost = links.reduce((sum, link) => {
+        const stat = motherStats.get(Number(link.mother_account_id));
+        return sum + Math.max(0, Number(stat?.effective_unit_cost || 0));
+      }, 0);
+      order.sale_cost = money(Number(order.sale_cost_snapshot || 0) > 0 ? order.sale_cost_snapshot : derivedCost);
+      saleCost += order.sale_cost;
+
       if (!links.length) {
         unassignedMother.orders.add(orderId); unassignedMother.admin_revenue += order.admin_revenue; unassignedMother.sale_cost += order.sale_cost;
         continue;
@@ -8060,7 +8251,8 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         if (!stat) continue;
         stat.orders.add(orderId);
         stat.admin_revenue += order.admin_revenue * share;
-        stat.sale_cost += order.sale_cost * share;
+        if (Number(order.sale_cost_snapshot || 0) > 0) stat.sale_cost += order.sale_cost * share;
+        else stat.sale_cost += Math.max(0, Number(stat.effective_unit_cost || 0));
       }
     }
 
