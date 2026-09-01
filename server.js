@@ -1476,6 +1476,21 @@ async function initDatabase() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_mother_account ON platform_accounts (mother_account_id)`);
 
+  // Historial permanente de asignaciones recuperadas. Permite reconstruir
+  // rentabilidad/proveedor incluso después de liberar y reutilizar una cuenta.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS account_recovery_log (
+      id BIGSERIAL PRIMARY KEY,
+      account_id INTEGER NOT NULL,
+      order_id INTEGER NOT NULL,
+      user_id INTEGER,
+      delivered_at TIMESTAMP,
+      recovered_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_recovery_order ON account_recovery_log(order_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_recovery_account ON account_recovery_log(account_id)`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS mother_accounts (
       id SERIAL PRIMARY KEY,
@@ -6424,8 +6439,15 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                                SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
                                FROM platform_accounts pa
                                LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
-                               WHERE pa.assigned_order_id = o.id
-                                 AND COALESCE(pa.owner_admin_id,0)=0
+                               WHERE COALESCE(pa.owner_admin_id,0)=0
+                                 AND (
+                                   pa.assigned_order_id = o.id
+                                   OR pa.id = o.assigned_platform_account_id
+                                   OR EXISTS (
+                                     SELECT 1 FROM account_recovery_log arl
+                                     WHERE arl.order_id = o.id AND arl.account_id = pa.id
+                                   )
+                                 )
                              ), 0),
                              NULLIF(o.current_product_cost, 0),
                              0
@@ -8113,14 +8135,21 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
               COALESCE(NULLIF(TRIM(pa.product_name), ''), ma.product_name, 'Sin producto') AS account_product_name,
               ma.product_name AS mother_product_name
        FROM orders o
-       JOIN platform_accounts pa ON pa.assigned_order_id = o.id
+       JOIN platform_accounts pa ON (
+         pa.assigned_order_id = o.id
+         OR pa.id = o.assigned_platform_account_id
+         OR EXISTS (
+           SELECT 1
+           FROM account_recovery_log arl
+           WHERE arl.order_id = o.id AND arl.account_id = pa.id
+         )
+       )
        LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
        WHERE o.status = 'exito'
          AND COALESCE(o.owner_admin_id, 0) = 0
          AND COALESCE(pa.owner_admin_id, 0) = 0
          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
-         AND pa.mother_account_id IS NOT NULL
-         AND (pa.delivered_at IS NULL OR pa.delivered_at <= o.created_at + INTERVAL '15 minutes')`,
+         AND pa.mother_account_id IS NOT NULL`,
       [startDate, endDate]
     );
 
@@ -8176,6 +8205,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     const productSales = new Map();
     let grossSales = 0, refunds = 0, distributorEarnings = 0, adminRevenue = 0, saleCost = 0;
     let productCostFallbackOrders = 0, inventoryDerivedCostOrders = 0, snapshotCostOrders = 0;
+    let unlinkedInventoryOrders = 0;
 
     for (const row of salesResult.rows) {
       const gross = Math.max(0, money(row.amount));
@@ -8267,6 +8297,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       saleCost += order.sale_cost;
 
       if (!links.length) {
+        unlinkedInventoryOrders += 1;
         unassignedMother.orders.add(orderId); unassignedMother.admin_revenue += order.admin_revenue; unassignedMother.sale_cost += order.sale_cost;
         continue;
       }
@@ -8376,7 +8407,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       summary: {
         orders: salesResult.rows.length, gross_sales: money(grossSales), refunds: money(refunds), distributor_earnings: money(distributorEarnings),
         admin_revenue: money(adminRevenue), sale_cost: money(saleCost), replacement_cost: money(replacementCost), replacement_cost_missing: replacementCostMissing,
-        cost_sources: { snapshot_orders: snapshotCostOrders, inventory_orders: inventoryDerivedCostOrders, product_current_orders: productCostFallbackOrders },
+        cost_sources: { snapshot_orders: snapshotCostOrders, inventory_orders: inventoryDerivedCostOrders, product_current_orders: productCostFallbackOrders, unlinked_inventory_orders: unlinkedInventoryOrders },
         profit: adjustedProfit, margin_percent: adminRevenue > 0 ? Number(((adjustedProfit / adminRevenue) * 100).toFixed(2)) : 0,
         failures: reportsResult.rows.length, replacements: replacementCount, refund_reports: refundReportCount
       },

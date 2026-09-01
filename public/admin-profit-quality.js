@@ -99,6 +99,13 @@
         if(!note){note=document.createElement('div');note.className='small-text pq-cost-source-note';saleCostCard.querySelector('.dash-value')?.parentElement?.appendChild(note);}
         note.textContent=`${fallback} venta(s) usan el costo actual configurado en Productos`;
       }else if(note){note.remove();}
+
+      let linkNote=saleCostCard.querySelector('.pq-link-warning');
+      const unlinked=Number(summary.cost_sources?.unlinked_inventory_orders || 0);
+      if(unlinked>0){
+        if(!linkNote){linkNote=document.createElement('div');linkNote.className='small-text status pq-link-warning';saleCostCard.querySelector('.dash-value')?.parentElement?.appendChild(linkNote);}
+        linkNote.textContent=`${unlinked} venta(s) no conservan vínculo histórico con una cuenta madre; su costo sí se calcula, pero se agrupan en Sin proveedor.`;
+      }else if(linkNote){linkNote.remove();}
     }
 
     const target=document.getElementById('pqReplacementCost')?.closest('.dash-card');
@@ -115,7 +122,7 @@
   function renderProviders(rows){
     const box=document.getElementById('pqProviders'); if(!box) return;
     if(!rows?.length){box.innerHTML='<p class="small-text">Sin proveedores con actividad en este periodo.</p>';return;}
-    box.innerHTML=`<div class="table-wrap"><table class="mini-table"><thead><tr><th>Proveedor</th><th>Cuentas madre</th><th>Inversión registrada</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Reemplazos</th><th>Utilidad</th><th>Margen</th><th>Fallas</th><th>Tasa falla</th></tr></thead><tbody>${rows.map(r=>`<tr>
+    box.innerHTML=`<div class="table-wrap pq-table-scroll"><table class="mini-table pq-provider-table"><thead><tr><th>Proveedor</th><th>Cuentas madre</th><th>Inversión registrada</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Reemplazos</th><th>Utilidad</th><th>Margen</th><th>Fallas</th><th>Tasa falla</th></tr></thead><tbody>${rows.map(r=>`<tr>
       <td><b>${esc(r.provider_name||'Sin proveedor')}</b>${r.mother_cost_missing?`<br><span class="small-text error">${r.mother_cost_missing} cuenta(s) sin costo configurado</span>`:''}</td>
       <td>${num(r.mother_accounts)}</td><td><b>${money(r.registered_mother_cost)}</b></td><td>${num(r.orders)}</td><td>${money(r.admin_revenue)}</td><td>${money(r.sale_cost)}</td><td>${money(r.replacement_cost)}</td>
       <td class="${num(r.profit)<0?'error':'success'}"><b>${money(r.profit)}</b></td><td>${pct(r.margin_percent)}</td><td>${num(r.failures)} (${num(r.replacements)} repl.)</td><td><b>${pct(r.failure_rate)}</b></td>
@@ -147,7 +154,7 @@
     const box=document.getElementById('pqMotherAccounts'); if(!box) return;
     const active=(rows||[]).filter(r=>num(r.orders)>0 || num(r.failures)>0 || r.id);
     if(!active.length){box.innerHTML='<p class="small-text">Sin cuentas madre.</p>';return;}
-    box.innerHTML=`<div class="table-wrap"><table class="mini-table pq-mother-table"><thead><tr><th>Cuenta madre</th><th>Configuración de costo</th><th>Perfiles / costo unitario</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Costo reemplazos</th><th>Utilidad</th><th>Fallas</th></tr></thead><tbody>${active.map(r=>`<tr>
+    box.innerHTML=`<div class="table-wrap pq-table-scroll"><table class="mini-table pq-mother-table"><thead><tr><th>Cuenta madre</th><th>Configuración de costo</th><th>Perfiles / costo unitario</th><th>Ventas</th><th>Ingreso admin</th><th>Costo vendido</th><th>Costo reemplazos</th><th>Utilidad</th><th>Fallas</th></tr></thead><tbody>${active.map(r=>`<tr>
       <td><b>${r.id?`#${num(r.id)} · `:''}${esc(r.product_name||'Sin producto')}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br>${statusChip(r)}</td>
       <td>${r.id?`<div class="pq-cost-editor">
           <label>Proveedor</label><input id="pq-provider-${r.id}" value="${esc(r.provider_name||'')}" placeholder="Ej. Digitalvnhe"/>
