@@ -10357,6 +10357,27 @@ app.get("/api/bank-info", authMiddleware, async (req, res) => {
   }
 });
 
+
+// ADMIN: CONFIGURAR METODOS DE PAGO DE VENDEDORES
+app.get("/api/admin/payment-methods", authMiddleware, adminMiddleware, async (req,res)=>{
+  try{
+    const viewer=await getViewerContext(req.user.id);
+    const panel=viewer?.is_panel_admin ? await getAdminPanelForEmail(viewer.email) : null;
+    res.json({bank_name:panel?.bank_name||'',bank_holder:panel?.bank_holder||'',bank_clabe:panel?.bank_clabe||'',payment_concept:panel?.payment_concept||''});
+  }catch(e){res.status(500).json({error:'No se pudieron cargar los métodos de pago'});}
+});
+app.put("/api/admin/payment-methods", authMiddleware, adminMiddleware, async (req,res)=>{
+  try{
+    const viewer=await getViewerContext(req.user.id);
+    const panel=viewer?.is_panel_admin ? await getAdminPanelForEmail(viewer.email) : null;
+    if(!panel) return res.status(404).json({error:'Panel no encontrado'});
+    await pool.query(`UPDATE admin_panels SET bank_name=$1, bank_holder=$2, bank_clabe=$3, payment_concept=$4, updated_at=NOW() WHERE id=$5`,[
+      String(req.body.bank_name||''),String(req.body.bank_holder||''),String(req.body.bank_clabe||''),String(req.body.payment_concept||''),panel.id
+    ]);
+    res.json({message:'Datos de pago actualizados'});
+  }catch(e){res.status(500).json({error:'No se pudieron actualizar los métodos de pago'});}
+});
+
 // ADMIN: PROBAR CORREO DE NOTIFICACIÓN
 app.post("/api/admin/test-email", authMiddleware, adminMiddleware, async (req, res) => {
   try {

@@ -125,6 +125,7 @@
             <div class="master-actions master-actions-owner-only">
               <button onclick="openMasterLedger()"><span>💰</span><b>Libro de saldo</b><small>Movimientos y trazabilidad</small></button>
               <button onclick="openMasterAudit()"><span>🛡️</span><b>Bitácora admin</b><small>Seguridad y acciones</small></button>
+              <button onclick="openPaymentMethodsAdmin()"><span>💳</span><b>Métodos de pago</b><small>Datos que ven vendedores</small></button>
             </div>
             <div id="masterOpsUpdated" class="master-updated"></div>
           </section>
@@ -249,6 +250,31 @@
       if(typeof loader==='function') loader();
     },80);
   }
+
+  async function openPaymentMethodsAdmin(){
+    if(typeof showSection==='function') showSection('admin');
+    let old=document.getElementById('masterPaymentMethodsPanel');
+    if(!old){
+      old=document.createElement('div'); old.id='masterPaymentMethodsPanel'; old.className='panel master-data-panel';
+      old.innerHTML=`<div class="panel-head"><div><div class="master-kicker">PAGOS</div><h2>Métodos de pago para vendedores</h2><p class="small-text">Actualiza los datos que aparecen cuando un vendedor solicita saldo.</p></div></div>
+      <div style="display:grid;gap:10px;max-width:600px">
+      <input id="pmBank" class="form-control" placeholder="Banco">
+      <input id="pmHolder" class="form-control" placeholder="Titular">
+      <input id="pmClabe" class="form-control" placeholder="CLABE / cuenta">
+      <input id="pmConcept" class="form-control" placeholder="Concepto de pago">
+      <button class="green-btn" onclick="savePaymentMethodsAdmin()">Guardar datos de pago</button></div>`;
+      document.getElementById('section-admin')?.appendChild(old);
+    }
+    const d=await api('/api/admin/payment-methods');
+    pmBank.value=d.bank_name||''; pmHolder.value=d.bank_holder||''; pmClabe.value=d.bank_clabe||''; pmConcept.value=d.payment_concept||'';
+    old.scrollIntoView({behavior:'smooth'});
+  }
+  async function savePaymentMethodsAdmin(){
+    await api('/api/admin/payment-methods',{method:'PUT',body:JSON.stringify({bank_name:pmBank.value,bank_holder:pmHolder.value,bank_clabe:pmClabe.value,payment_concept:pmConcept.value})});
+    if(typeof showMessage==='function') showMessage('Métodos de pago actualizados');
+  }
+  window.openPaymentMethodsAdmin=openPaymentMethodsAdmin; window.savePaymentMethodsAdmin=savePaymentMethodsAdmin;
+
   window.openMasterLedger=()=>openPanel('masterLedgerPanel',loadMasterLedger);
   window.openMasterAudit=()=>openPanel('masterAuditPanel',loadMasterAudit);
 
