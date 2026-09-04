@@ -3749,6 +3749,15 @@ async function openQuarantineFromDashboard() {
   if (dashCard) dashCard.setAttribute('aria-busy', 'true');
 
   quarantineOpenRequest = (async () => {
+    // Al abrir manualmente también verificamos vencimientos; no dependemos
+    // solamente del monitor periódico del dashboard.
+    try {
+      await fetch('/api/admin/system/check-expirations', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      });
+    } catch (_) {}
+
     const response = await fetch('/api/admin/accounts/quarantine', {
       headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     });
@@ -3782,10 +3791,19 @@ async function openQuarantineFromDashboard() {
 
 function bindQuarantineDashboardCard() {
   const dashCard = document.getElementById('dashQuarantineCard');
-  if (!dashCard || dashCard.dataset.quarantineClickBound === '1') return;
+  if (!dashCard) return;
 
-  dashCard.dataset.quarantineClickBound = '1';
-  dashCard.addEventListener('click', openQuarantineFromDashboard);
+  // El HTML tiene onclick directo para que la tarjeta nunca pierda su acción.
+  // Aquí añadimos solamente soporte de teclado, sin duplicar la petición click.
+  if (dashCard.dataset.quarantineKeyBound !== '1') {
+    dashCard.dataset.quarantineKeyBound = '1';
+    dashCard.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openQuarantineFromDashboard();
+      }
+    });
+  }
 }
 
 

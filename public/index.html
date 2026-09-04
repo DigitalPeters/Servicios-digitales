@@ -255,7 +255,7 @@
           <div id="dashOrdersCard" class="dash-card clickable" onclick="openOrdersFromDashboard()"><div class="dash-icon">▤</div><div><div class="dash-label">Pedidos</div><div id="count-pedidos" class="dash-value"><span id="statOrders">0</span></div></div></div>
           <div id="dashReportsCard" class="dash-card clickable" onclick="openAccountReportsFromDashboard()"><div class="dash-icon">⚠</div><div><div class="dash-label">Reportes pendientes</div><div id="count-fallas_reportadas" class="dash-value"><span id="statReports">0</span></div></div></div>
           <div id="dashBalanceRequestsCard" class="dash-card clickable" onclick="openBalanceRequests()"><div class="dash-icon">💳</div><div><div class="dash-label">Saldo pendiente</div><div id="count-carga_pendiente" class="dash-value"><span id="statBalanceRequests">0</span></div></div></div>
-          <div id="dashQuarantineCard" class="dash-card clickable">
+          <div id="dashQuarantineCard" class="dash-card clickable" onclick="openQuarantineFromDashboard()" role="button" tabindex="0" title="Abrir cuentas en cuarentena">
             <div class="dash-icon">🚨</div>
             <div>
               <div class="dash-label">🚨 Cuentas en Cuarentena</div>
@@ -910,7 +910,7 @@
 <script src="user-orders-balance.js?v=8"></script>
 <script src="admin-commerce.js?v=7"></script>
 <script src="dashboard-stock-alerts.js?v=4"></script>
-<script src="app.js?v=25"></script>
+<script src="app.js?v=26"></script>
 <script src="admin-users-distributor.js?v=11"></script>
 <script src="admin-profit-quality.js?v=3"></script>
 <script src="master-admin.js?v=1.8.0"></script>

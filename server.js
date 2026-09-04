@@ -10697,7 +10697,7 @@ app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async
   try {
     const ownerId = getOwnerScopeFromRequest(req);
     const result = await pool.query(
-      `SELECT id, platform, account_email, account_password, profile_name, profile_pin,
+      `SELECT id, platform, account_email, profile_name, profile_pin,
               (official_purchase_date + INTERVAL '35 days' - CURRENT_TIMESTAMP) AS dias_restantes
        FROM platform_accounts
        WHERE status='recovery_pending'
@@ -10713,9 +10713,12 @@ app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async
 app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
-    const newPassword = String(req.body?.new_password || '');
+    const newPassword = String(req.body?.new_password || '').trim();
+    const newPin = String(req.body?.new_pin || '').trim();
     const accountId = Number(req.params.id);
-    if (!accountId || !newPassword) return res.status(400).json({ error:'Cuenta y nueva contraseña son obligatorias.' });
+    if (!accountId || (!newPassword && !newPin)) {
+      return res.status(400).json({ error:'Debes proporcionar una nueva contraseña o un nuevo PIN.' });
+    }
     const ownerId = getOwnerScopeFromRequest(req);
     await client.query('BEGIN');
     const currentResult = await client.query(
@@ -10730,7 +10733,18 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     if(current.assigned_order_id){
       await client.query(`INSERT INTO account_recovery_log (account_id, order_id, user_id, delivered_at, recovered_at) VALUES ($1,$2,$3,$4,NOW())`, [accountId,current.assigned_order_id,current.assigned_user_id,current.delivered_at]);
     }
-    await client.query(`UPDATE platform_accounts SET status='available', account_password=$1, assigned_order_id=NULL, assigned_user_id=NULL, delivered_at=NULL, expires_at=NULL WHERE id=$2`, [newPassword,accountId]);
+    await client.query(
+      `UPDATE platform_accounts
+          SET status='available',
+              account_password=CASE WHEN NULLIF($1,'') IS NOT NULL THEN $1 ELSE account_password END,
+              profile_pin=CASE WHEN NULLIF($2,'') IS NOT NULL THEN $2 ELSE profile_pin END,
+              assigned_order_id=NULL,
+              assigned_user_id=NULL,
+              delivered_at=NULL,
+              expires_at=NULL
+        WHERE id=$3`,
+      [newPassword, newPin, accountId]
+    );
     await recordAdminAudit(client, req, { action:'quarantine_release', entityType:'platform_account', entityId:accountId, summary:`Cuenta ${current.platform || ''} liberada de cuarentena`, metadata:{ account_email:current.account_email } });
     await client.query('COMMIT');
     res.json({ message:'Cuenta liberada. Historial archivado correctamente.' });
