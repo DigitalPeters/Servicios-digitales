@@ -3736,45 +3736,57 @@ async function checkQuarantineAccounts() {
 let quarantineOpenRequest = null;
 
 async function openQuarantineFromDashboard() {
-  if (!currentUser || (currentUser.role !== 'admin' && currentUser.account_type !== 'panel_propietario')) {
-    showMessage('No autorizado para abrir cuarentena', 'error');
+  // Esta función es el punto único de entrada desde la tarjeta del dashboard.
+  // No dependemos de que currentUser esté actualizado en memoria: el backend
+  // valida el JWT y el rol. Esto evita que una sesión válida parezca inactiva.
+  const authToken = localStorage.getItem('token') || '';
+  if (!authToken) {
+    showMessage('Tu sesión no está disponible. Inicia sesión nuevamente.', 'error');
     return;
   }
 
-  // Si el usuario hace doble clic mientras la primera consulta sigue activa,
-  // reutilizamos la misma solicitud y evitamos abrir/renderizar el modal dos veces.
   if (quarantineOpenRequest) return quarantineOpenRequest;
 
   const dashCard = document.getElementById('dashQuarantineCard');
-  if (dashCard) dashCard.setAttribute('aria-busy', 'true');
+  if (dashCard) {
+    dashCard.setAttribute('aria-busy', 'true');
+    dashCard.classList.add('quarantine-loading');
+  }
 
   quarantineOpenRequest = (async () => {
-    // Al abrir manualmente también verificamos vencimientos; no dependemos
-    // solamente del monitor periódico del dashboard.
+    // Primero sincronizamos vencimientos. Si esta comprobación falla, todavía
+    // intentamos abrir la lista existente para que el botón nunca quede muerto.
     try {
-      await fetch('/api/admin/system/check-expirations', {
+      const checkResponse = await fetch('/api/admin/system/check-expirations', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        headers: { 'Authorization': 'Bearer ' + authToken }
       });
-    } catch (_) {}
-
-    const response = await fetch('/api/admin/accounts/quarantine', {
-      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-    });
-
-    if (!response.ok) {
-      let message = 'No se pudo consultar la cuarentena.';
-      try {
-        const errorData = await response.json();
-        if (errorData && errorData.error) message = errorData.error;
-      } catch (_) {}
-      throw new Error(message);
+      if (!checkResponse.ok) {
+        console.warn('No se pudo actualizar vencimientos antes de abrir cuarentena.');
+      }
+    } catch (error) {
+      console.warn('Comprobación de vencimientos omitida:', error?.message || error);
     }
 
-    const list = await response.json();
-    const quarantineList = Array.isArray(list) ? list : [];
+    const response = await fetch('/api/admin/accounts/quarantine', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        'Authorization': 'Bearer ' + authToken,
+        'Accept': 'application/json'
+      }
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || `No se pudo consultar la cuarentena (HTTP ${response.status}).`);
+    }
+
+    const quarantineList = Array.isArray(data) ? data : [];
     const stat = document.getElementById('statExpiring');
     if (stat) stat.textContent = String(quarantineList.length);
+
+    // Siempre mostramos una respuesta visual, incluso cuando la lista está vacía.
     showQuarantineModal(quarantineList);
   })()
     .catch(err => {
@@ -3782,19 +3794,27 @@ async function openQuarantineFromDashboard() {
       showMessage(err.message || 'No se pudo abrir la cuarentena.', 'error');
     })
     .finally(() => {
-      if (dashCard) dashCard.removeAttribute('aria-busy');
+      if (dashCard) {
+        dashCard.removeAttribute('aria-busy');
+        dashCard.classList.remove('quarantine-loading');
+      }
       quarantineOpenRequest = null;
     });
 
   return quarantineOpenRequest;
 }
 
+// Debe existir en window porque el dashboard también usa onclick="...".
+window.openQuarantineFromDashboard = openQuarantineFromDashboard;
+
 function bindQuarantineDashboardCard() {
   const dashCard = document.getElementById('dashQuarantineCard');
   if (!dashCard) return;
 
-  // El HTML tiene onclick directo para que la tarjeta nunca pierda su acción.
-  // Aquí añadimos solamente soporte de teclado, sin duplicar la petición click.
+  dashCard.setAttribute('role', 'button');
+  dashCard.setAttribute('tabindex', '0');
+  dashCard.setAttribute('title', 'Abrir cuentas en cuarentena');
+
   if (dashCard.dataset.quarantineKeyBound !== '1') {
     dashCard.dataset.quarantineKeyBound = '1';
     dashCard.addEventListener('keydown', (event) => {
@@ -3806,69 +3826,100 @@ function bindQuarantineDashboardCard() {
   }
 }
 
+// Delegación de eventos como respaldo: funciona aunque otro módulo reconstruya
+// la tarjeta o cambie su onclick después de cargar el dashboard.
+(function installQuarantineClickFallback(){
+  if (window.__quarantineClickFallbackInstalled) return;
+  window.__quarantineClickFallbackInstalled = true;
+  document.addEventListener('click', (event) => {
+    const card = event.target?.closest?.('#dashQuarantineCard');
+    if (!card) return;
+    if (event.defaultPrevented) return;
+    // El onclick inline también apunta a la misma función; no necesitamos
+    // ejecutar dos veces si ya fue manejado por el elemento.
+  }, true);
+})();
+
 
 function showQuarantineModal(list) {
-  console.log('showQuarantineModal called, list length:', Array.isArray(list)?list.length:0);
+  const quarantineList = Array.isArray(list) ? list : [];
+  console.log('showQuarantineModal called, list length:', quarantineList.length);
   const old = document.getElementById('quarantineModal');
   if (old) old.remove();
 
   const container = document.createElement('div');
   container.id = 'quarantineModal';
   container.className = 'modal-overlay';
-  container.style.zIndex = '99999';
-  container.style.display = 'flex';
+  container.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72);padding:16px;overflow:auto;';
 
   const card = document.createElement('div');
   card.className = 'modal-card';
-  card.style.maxWidth = '920px';
-  card.style.width = '90%';
-  card.style.background = '#0f172a';
+  card.style.cssText = 'position:relative;max-width:920px;width:min(920px,96vw);max-height:90vh;overflow:auto;background:#0f172a;color:#fff;border-radius:20px;padding:22px;box-sizing:border-box;';
 
-  card.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-      <h2 style="color:#ef4444; margin:0;">🚨 Cuentas en Cuarentena</h2>
-      <button class="modal-close-btn" onclick="document.getElementById('quarantineModal')?.remove()">×</button>
-    </div>
-    <p class="small-text" style="margin-top:10px; color:#cbd5e1;">Estas cuentas requieren atención. Puedes cambiar la contraseña, cambiar el PIN del perfil, o desechar permanentemente la cuenta.</p>
-    <div id="quarantineListContainer" style="margin-top:18px; display:flex; flex-direction:column; gap:12px;">
-      ${list.map(c => {
-        const dias = c.dias_restantes ? Math.floor(c.dias_restantes.days || c.dias_restantes) : 0;
-        const estadoVida = dias > 0 ? `${dias} días` : '¡Vencida!';
-        const borde = dias < 5 ? 'style="border-left:4px solid #ef4444;"' : '';
-
-        return `
-          <div class="quarantine-item" data-id="${c.id}" ${borde}>
-            <div class="quarantine-row">
-              <div class="quarantine-meta">
-                <div class="quarantine-platform">${safeText(c.platform || '')}</div>
-                <div class="quarantine-email">📧 ${safeText(c.account_email || '-')}</div>
-                <div class="quarantine-profile">👤 ${safeText(c.profile_name || 'Principal')} | PIN: ${safeText(c.profile_pin || '—')}</div>
-                <div class="quarantine-life">⏳ Vida restante: <strong>${estadoVida}</strong></div>
-              </div>
-              <div class="quarantine-actions">
-                <label class="field-label" style="margin-bottom:6px">Nueva contraseña</label>
-                <input id="new-pass-${c.id}" placeholder="Nueva contraseña" class="form-control" />
-                <label class="field-label" style="margin-top:8px; margin-bottom:6px">Nuevo PIN (opcional)</label>
-                <input id="new-pin-${c.id}" placeholder="Nuevo PIN" class="form-control" />
-                <div style="display:flex; gap:8px; margin-top:10px;">
-                  <button class="green-btn" onclick="liberarCuentaDeCuarentena(${c.id})">Recuperar</button>
-                  <button class="outline-btn" onclick="desecharCuenta(${c.id})">Desechar</button>
-                </div>
+  let itemsHtml = '';
+  if (!quarantineList.length) {
+    itemsHtml = `
+      <div style="padding:28px 20px;border:1px dashed #64748b;border-radius:16px;color:#cbd5e1;text-align:center;">
+        <div style="font-size:38px;margin-bottom:8px;">✅</div>
+        <strong>No hay cuentas en cuarentena.</strong>
+        <div style="margin-top:6px;color:#94a3b8;">Las cuentas vencidas aparecerán aquí para su recuperación o desecho.</div>
+      </div>`;
+  } else {
+    itemsHtml = quarantineList.map(c => {
+      const rawDays = c?.dias_restantes;
+      const dias = rawDays && typeof rawDays === 'object' ? Math.floor(Number(rawDays.days || 0)) : Math.floor(Number(rawDays || 0));
+      const estadoVida = dias > 0 ? `${dias} días` : '¡Vencida!';
+      const borde = dias < 5 ? 'border-left:4px solid #ef4444;' : '';
+      return `
+        <div class="quarantine-item" data-id="${Number(c.id)}" style="${borde}padding:14px;border-radius:14px;background:#111827;border:1px solid #334155;">
+          <div class="quarantine-row" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,360px);gap:16px;">
+            <div class="quarantine-meta">
+              <div class="quarantine-platform" style="font-weight:900;font-size:18px;">${safeText(c.platform || '')}</div>
+              <div class="quarantine-email" style="margin-top:6px;">📧 ${safeText(c.account_email || '-')}</div>
+              <div class="quarantine-profile" style="margin-top:6px;">👤 ${safeText(c.profile_name || 'Principal')} | PIN: ${safeText(c.profile_pin || '—')}</div>
+              <div class="quarantine-life" style="margin-top:6px;color:#cbd5e1;">⏳ Vida restante: <strong>${estadoVida}</strong></div>
+            </div>
+            <div class="quarantine-actions">
+              <label class="field-label" style="margin-bottom:6px">Nueva contraseña</label>
+              <input id="new-pass-${Number(c.id)}" placeholder="Nueva contraseña" class="form-control" />
+              <label class="field-label" style="margin-top:8px;margin-bottom:6px">Nuevo PIN (opcional)</label>
+              <input id="new-pin-${Number(c.id)}" placeholder="Nuevo PIN" class="form-control" />
+              <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                <button type="button" class="green-btn" onclick="liberarCuentaDeCuarentena(${Number(c.id)})">Recuperar</button>
+                <button type="button" class="outline-btn" onclick="desecharCuenta(${Number(c.id)})">Desechar</button>
               </div>
             </div>
           </div>
-        `;
-      }).join('')}
+        </div>`;
+    }).join('');
+  }
+
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <h2 style="color:#ef4444;margin:0;">🚨 Cuentas en Cuarentena</h2>
+      <button type="button" class="modal-close-btn" aria-label="Cerrar" style="cursor:pointer;" onclick="document.getElementById('quarantineModal')?.remove()">×</button>
     </div>
-    <div style="margin-top:16px; display:flex; gap:8px;">
-      <button class="outline-btn" onclick="document.getElementById('quarantineModal')?.remove()">Cerrar</button>
-      <button class="outline-btn" onclick="checkQuarantineAccounts()">Refrescar lista</button>
-    </div>
-  `;
+    <p class="small-text" style="margin-top:10px;color:#cbd5e1;">Estas cuentas requieren atención. Puedes cambiar la contraseña, cambiar el PIN del perfil, o desechar permanentemente la cuenta.</p>
+    <div id="quarantineListContainer" style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">${itemsHtml}</div>
+    <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="outline-btn" onclick="document.getElementById('quarantineModal')?.remove()">Cerrar</button>
+      <button type="button" class="outline-btn" onclick="openQuarantineFromDashboard()">Refrescar lista</button>
+    </div>`;
 
   container.appendChild(card);
   document.body.appendChild(container);
-  console.log('quarantineModal appended to body');
+
+  // Cerrar al pulsar el fondo o Escape.
+  container.addEventListener('click', (event) => {
+    if (event.target === container) container.remove();
+  });
+  container._quarantineEscapeHandler = (event) => {
+    if (event.key === 'Escape') {
+      container.remove();
+      document.removeEventListener('keydown', container._quarantineEscapeHandler);
+    }
+  };
+  document.addEventListener('keydown', container._quarantineEscapeHandler);
 }
 
 async function liberarCuentaDeCuarentena(id) {
