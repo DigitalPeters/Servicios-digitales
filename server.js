@@ -10681,7 +10681,7 @@ app.post("/api/admin/system/check-expirations", authMiddleware, adminMiddleware,
       `UPDATE platform_accounts
        SET status='recovery_pending'
        WHERE status='delivered' AND expires_at IS NOT NULL AND expires_at < NOW()
-         AND (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
+         AND ($1::int IS NULL OR owner_admin_id=$1)
        RETURNING id, platform, account_email`, [ownerId]
     );
     await recordAdminAudit(client, req, { action:'quarantine_expiration_check', entityType:'platform_account', summary:`${result.rowCount} cuentas movidas a cuarentena`, metadata:{ count:result.rowCount } });
@@ -10697,11 +10697,11 @@ app.get("/api/admin/accounts/quarantine", authMiddleware, adminMiddleware, async
   try {
     const ownerId = getOwnerScopeFromRequest(req);
     const result = await pool.query(
-      `SELECT id, platform, account_email, profile_name, profile_pin,
+      `SELECT id, platform, account_email, account_password, profile_name, profile_pin,
               (official_purchase_date + INTERVAL '35 days' - CURRENT_TIMESTAMP) AS dias_restantes
        FROM platform_accounts
        WHERE status='recovery_pending'
-         AND (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
+         AND ($1::int IS NULL OR owner_admin_id=$1)
        ORDER BY expires_at DESC`, [ownerId]
     );
     res.json(result.rows);
@@ -10716,16 +10716,14 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     const newPassword = String(req.body?.new_password || '').trim();
     const newPin = String(req.body?.new_pin || '').trim();
     const accountId = Number(req.params.id);
-    if (!accountId || (!newPassword && !newPin)) {
-      return res.status(400).json({ error:'Debes proporcionar una nueva contraseña o un nuevo PIN.' });
-    }
+    if (!accountId || (!newPassword && !newPin)) return res.status(400).json({ error:'Captura una nueva contraseña o un nuevo PIN para recuperar la cuenta.' });
     const ownerId = getOwnerScopeFromRequest(req);
     await client.query('BEGIN');
     const currentResult = await client.query(
       `SELECT id, assigned_order_id, assigned_user_id, delivered_at, platform, account_email
        FROM platform_accounts
        WHERE id=$1 AND status='recovery_pending'
-         AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2)
+         AND ($2::int IS NULL OR owner_admin_id=$2)
        FOR UPDATE`, [accountId, ownerId]
     );
     const current=currentResult.rows[0];
@@ -10735,16 +10733,11 @@ app.post("/api/admin/accounts/:id/release", authMiddleware, adminMiddleware, asy
     }
     await client.query(
       `UPDATE platform_accounts
-          SET status='available',
-              account_password=CASE WHEN NULLIF($1,'') IS NOT NULL THEN $1 ELSE account_password END,
-              profile_pin=CASE WHEN NULLIF($2,'') IS NOT NULL THEN $2 ELSE profile_pin END,
-              assigned_order_id=NULL,
-              assigned_user_id=NULL,
-              delivered_at=NULL,
-              expires_at=NULL
-        WHERE id=$3`,
-      [newPassword, newPin, accountId]
-    );
+       SET status='available',
+           account_password=COALESCE(NULLIF($1,''), account_password),
+           profile_pin=COALESCE(NULLIF($2,''), profile_pin),
+           assigned_order_id=NULL, assigned_user_id=NULL, delivered_at=NULL, expires_at=NULL
+       WHERE id=$3`, [newPassword,newPin,accountId]);
     await recordAdminAudit(client, req, { action:'quarantine_release', entityType:'platform_account', entityId:accountId, summary:`Cuenta ${current.platform || ''} liberada de cuarentena`, metadata:{ account_email:current.account_email } });
     await client.query('COMMIT');
     res.json({ message:'Cuenta liberada. Historial archivado correctamente.' });
@@ -11065,7 +11058,7 @@ app.get("/api/admin/recovery-history", authMiddleware, adminMiddleware, async (r
     const result=await pool.query(
       `SELECT l.recovered_at, pa.platform, pa.account_email, l.order_id
        FROM account_recovery_log l JOIN platform_accounts pa ON l.account_id=pa.id
-       WHERE (($1::int IS NULL AND (pa.owner_admin_id IS NULL OR pa.owner_admin_id=0)) OR pa.owner_admin_id=$1)
+       WHERE ($1::int IS NULL OR pa.owner_admin_id=$1)
        ORDER BY l.recovered_at DESC LIMIT 50`, [ownerId]
     );
     res.json(result.rows);
@@ -11083,7 +11076,7 @@ app.post("/api/admin/accounts/:id/discard", authMiddleware, adminMiddleware, asy
     const result=await client.query(
       `UPDATE platform_accounts SET status='discarded'
        WHERE id=$1 AND status='recovery_pending'
-         AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2)
+         AND ($2::int IS NULL OR owner_admin_id=$2)
        RETURNING id, platform, account_email`, [accountId,ownerId]
     );
     if(!result.rows[0]){ await client.query('ROLLBACK'); return res.status(404).json({error:'Cuenta no encontrada dentro de tu cuarentena.'}); }
