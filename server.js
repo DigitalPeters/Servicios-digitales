@@ -1817,6 +1817,7 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_name TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_phone TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_email TEXT DEFAULT ''`);
+  await pool.query(`UPDATE account_reports ar SET owner_admin_id = o.owner_admin_id FROM orders o WHERE ar.direct_customer_report = TRUE AND ar.order_id = o.id AND o.admin_quick_sale = TRUE AND ar.owner_admin_id IS DISTINCT FROM o.owner_admin_id`);
 
   // Ganancias del distribuidor: cuenta separada del saldo comprado.
   // Cada movimiento conserva su origen para evitar créditos/retiros duplicados.
@@ -5938,7 +5939,7 @@ app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddle
     const customerName = String(orderData._cliente_final_nombre || '').trim().slice(0, 160) || 'Cliente final';
     const customerPhone = String(orderData._cliente_final_whatsapp || '').trim().slice(0, 80);
     const customerEmail = String(orderData._cliente_final_email || '').trim().slice(0, 180);
-    const reportOwner = Number(row.owner_admin_id || ownerId || req.user.id) || null;
+    const reportOwner = row.owner_admin_id != null ? Number(row.owner_admin_id) : (req.isPanelAdmin ? Number(req.user.id) : null);
 
     const insert = await client.query(`
       INSERT INTO account_reports
@@ -5983,7 +5984,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
   try {
     const { page, limit, offset } = getPaginationParams(req, 20, 100);
     const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
-    const scopeSql = `($1::int IS NULL OR account_reports.owner_admin_id = $1 OR account_reports.user_id = $1 OR account_reports.user_id IN (SELECT id FROM users WHERE owner_user_id = $1))`;
+    const scopeSql = `($1::int IS NULL OR account_reports.owner_admin_id = $1 OR account_reports.user_id = $1 OR account_reports.user_id IN (SELECT id FROM users WHERE owner_user_id = $1) OR (account_reports.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders scoped_direct_order WHERE scoped_direct_order.id = account_reports.order_id AND scoped_direct_order.admin_quick_sale = TRUE AND scoped_direct_order.owner_admin_id = $1)))`;
 
     const totalsResult = await pool.query(
       `SELECT COUNT(*)::int AS total,
@@ -7643,7 +7644,7 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                   LEFT JOIN costs c ON c.id=o.id`),
       pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso','pendiente')`),
       pool.query(`SELECT COUNT(*)::int AS total FROM orders o JOIN products p ON p.id=o.product_id WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id=0) AND o.status IN ('accion_en_espera','en_proceso','pendiente') AND lower(COALESCE(p.product_type,'')) LIKE '%manual%'`),
-      pool.query(`SELECT COUNT(*)::int AS total FROM account_reports WHERE ${ownScope} AND status='pendiente'`),
+      pool.query(`SELECT COUNT(*)::int AS total FROM account_reports ar WHERE ((${ownScope}) OR (ar.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders odr WHERE odr.id=ar.order_id AND odr.admin_quick_sale=TRUE AND (odr.owner_admin_id IS NULL OR odr.owner_admin_id=0)))) AND ar.status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(amount),0)::numeric AS amount FROM balance_requests WHERE ${ownScope} AND status='pendiente'`),
       pool.query(`SELECT COUNT(*)::int AS available FROM platform_accounts WHERE ${ownScope} AND status IN ('available','disponible')`),
       pool.query(`SELECT COUNT(*)::int AS total FROM platform_accounts WHERE ${ownScope} AND status='recovery_pending'`),
@@ -7674,7 +7675,7 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                   ORDER BY o.created_at ASC LIMIT 5`),
       pool.query(`SELECT ar.id, ar.created_at, ar.issue_type, ar.email, u.name AS user_name, u.email AS user_email
                   FROM account_reports ar LEFT JOIN users u ON u.id=ar.user_id
-                  WHERE (ar.owner_admin_id IS NULL OR ar.owner_admin_id=0) AND ar.status='pendiente'
+                  WHERE ((ar.owner_admin_id IS NULL OR ar.owner_admin_id=0) OR (ar.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders odu WHERE odu.id=ar.order_id AND odu.admin_quick_sale=TRUE AND (odu.owner_admin_id IS NULL OR odu.owner_admin_id=0)))) AND ar.status='pendiente'
                   ORDER BY ar.created_at ASC LIMIT 5`),
       pool.query(`SELECT br.id, br.created_at, br.amount, u.name AS user_name, u.email AS user_email
                   FROM balance_requests br LEFT JOIN users u ON u.id=br.user_id
