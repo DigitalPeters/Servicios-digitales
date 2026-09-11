@@ -1813,6 +1813,10 @@ async function initDatabase() {
 
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS reported_platform TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_report BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_name TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_phone TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_email TEXT DEFAULT ''`);
 
   // Ganancias del distribuidor: cuenta separada del saldo comprado.
   // Cada movimiento conserva su origen para evitar créditos/retiros duplicados.
@@ -5854,6 +5858,126 @@ app.get("/api/my-account-reports/:reportId/evidence", authMiddleware, async (req
   }
 });
 
+// MASTER: CUENTAS ENTREGADAS EN VENTA DIRECTA PARA REPORTAR FALLAS
+app.get('/api/admin/master/quick-sale/order-accounts', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const orderId = Number(req.query.order_id || 0);
+    if (!orderId) return res.status(400).json({ error: 'Pedido inválido' });
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const result = await pool.query(`
+      SELECT pa.id, pa.platform, pa.product_name, pa.account_email, pa.profile_name, pa.profile_pin,
+             pa.status, pa.delivered_at, pa.expires_at, pa.assigned_order_id
+      FROM platform_accounts pa
+      JOIN orders o ON o.id = pa.assigned_order_id
+      WHERE o.id = $1
+        AND o.admin_quick_sale = TRUE
+        AND ($2::int IS NULL OR o.owner_admin_id = $2)
+        AND pa.assigned_order_id = o.id
+        AND pa.assigned_user_id = o.user_id
+        AND pa.status = 'delivered'
+      ORDER BY pa.id ASC`, [orderId, ownerId]);
+    res.json({ order_id: orderId, rows: result.rows });
+  } catch (err) {
+    console.error('Error cargando cuentas de venta directa:', err.message);
+    res.status(500).json({ error: 'No se pudieron cargar las cuentas de esa venta' });
+  }
+});
+
+// MASTER: REPORTAR FALLA DE UNA CUENTA VENDIDA DIRECTAMENTE A UN CLIENTE FINAL
+app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const orderId = Number(req.body?.order_id || 0);
+    const accountId = Number(req.body?.reported_account_id || 0);
+    const issueType = String(req.body?.issue_type || 'otro').trim().slice(0, 120) || 'otro';
+    const description = String(req.body?.description || '').trim().slice(0, 2000);
+    const evidenceImage = req.body?.evidence_image ? String(req.body.evidence_image) : '';
+    if (!orderId || !accountId) return res.status(400).json({ error: 'Pedido y cuenta son obligatorios' });
+    if (!description) return res.status(400).json({ error: 'Describe la falla antes de enviar el reporte' });
+
+    await client.query('BEGIN');
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const result = await client.query(`
+      SELECT o.id AS order_id, o.user_id, o.owner_admin_id, o.status, o.admin_quick_sale,
+             o.order_data, o.product_id, p.name AS product_name, p.category AS product_category,
+             pa.id AS account_id, pa.platform, pa.product_name AS account_product_name,
+             pa.account_email, pa.profile_name, pa.profile_pin, pa.status AS account_status,
+             pa.owner_admin_id AS account_owner_admin_id
+      FROM orders o
+      JOIN products p ON p.id = o.product_id
+      JOIN platform_accounts pa ON pa.assigned_order_id = o.id AND pa.assigned_user_id = o.user_id
+      WHERE o.id = $1
+        AND o.admin_quick_sale = TRUE
+        AND ($2::int IS NULL OR o.owner_admin_id = $2)
+        AND pa.id = $3
+      LIMIT 1 FOR UPDATE OF o, pa`, [orderId, ownerId, accountId]);
+    const row = result.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No se encontró esa cuenta dentro de una venta directa administrada por ti' });
+    }
+    if (String(row.account_status || '').toLowerCase() !== 'delivered') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esa cuenta ya no está en estado entregado' });
+    }
+
+    const duplicate = await client.query(`
+      SELECT id, status FROM account_reports
+      WHERE direct_customer_report = TRUE
+        AND order_id = $1
+        AND reported_account_id = $2
+        AND lower(COALESCE(status,'')) IN ('pendiente','proveedor_reportado')
+      ORDER BY id DESC LIMIT 1`, [orderId, accountId]);
+    if (duplicate.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: `Ya existe un reporte abierto (#${duplicate.rows[0].id}) para esa cuenta` });
+    }
+
+    let orderData = {};
+    try { orderData = typeof row.order_data === 'string' ? JSON.parse(row.order_data || '{}') : (row.order_data || {}); } catch (_) {}
+    const customerName = String(orderData._cliente_final_nombre || '').trim().slice(0, 160) || 'Cliente final';
+    const customerPhone = String(orderData._cliente_final_whatsapp || '').trim().slice(0, 80);
+    const customerEmail = String(orderData._cliente_final_email || '').trim().slice(0, 180);
+    const reportOwner = Number(row.owner_admin_id || ownerId || req.user.id) || null;
+
+    const insert = await client.query(`
+      INSERT INTO account_reports
+        (user_id, email, issue_type, description, status, admin_response, order_id,
+         reported_account_id, refund_amount, resolution_type, reported_platform, owner_admin_id,
+         evidence_image, direct_customer_report, direct_customer_name, direct_customer_phone, direct_customer_email)
+      VALUES ($1,$2,$3,$4,'pendiente','',$5,$6,0,'',$7,$8,$9,TRUE,$10,$11,$12)
+      RETURNING id, created_at`, [
+        req.user.id,
+        row.account_email || '',
+        issueType,
+        description,
+        orderId,
+        accountId,
+        row.platform || row.account_product_name || row.product_name || '',
+        reportOwner,
+        evidenceImage,
+        customerName,
+        customerPhone,
+        customerEmail
+      ]);
+    const reportId = Number(insert.rows[0].id);
+    await client.query('COMMIT');
+    res.json({
+      message: `Reporte #${reportId} creado. Quedó pendiente de reportar al proveedor.`,
+      report_id: reportId,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: customerEmail,
+      product_name: row.product_name,
+      account_id: accountId
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('Error creando reporte directo:', err.message);
+    res.status(500).json({ error: 'No se pudo registrar el reporte de falla' });
+  } finally { client.release(); }
+});
+
 // ADMIN: REPORTES DE CUENTA
 app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -5888,8 +6012,10 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.refund_amount,
         account_reports.resolution_type,
         CASE WHEN COALESCE(account_reports.evidence_image, '') <> '' THEN 1 ELSE 0 END AS has_evidence,
-        users.name AS customer_name,
-        users.email AS customer_email,
+        COALESCE(NULLIF(account_reports.direct_customer_name, ''), users.name) AS customer_name,
+        COALESCE(NULLIF(account_reports.direct_customer_email, ''), users.email) AS customer_email,
+        account_reports.direct_customer_phone,
+        account_reports.direct_customer_report,
         orders.amount AS order_amount,
         orders.created_at AS order_created_at,
         products.name AS product_name,
@@ -6566,7 +6692,7 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
     const reportId = req.params.reportId;
     const { status, admin_response } = req.body;
 
-    const validStatuses = ["pendiente", "resuelto", "reemplazo", "reembolso"];
+    const validStatuses = ["pendiente", "proveedor_reportado", "resuelto", "reemplazo", "reembolso"];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: "Veredicto inválido" });
@@ -6622,6 +6748,9 @@ app.get("/api/admin/orders", authMiddleware, adminMiddleware, async (req, res) =
         orders.charged,
         orders.refunded,
         orders.created_at,
+        orders.assigned_platform_account_id,
+        orders.admin_quick_sale,
+        orders.payment_source,
         users.name AS customer_name,
         users.email AS customer_email,
         products.name AS product_name,

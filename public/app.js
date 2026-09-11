@@ -1408,7 +1408,9 @@ function renderAdminOrdersManualPendingOnly(){
 
 function renderAdminReportCompactFinal(r){
   const info=calculateReportRefundInfo(r);
-  const canAct=String(r.status||'').toLowerCase()==='pendiente';
+  const isDirect=Boolean(r.direct_customer_report);
+  const reportStatus=String(r.status||'pendiente').toLowerCase();
+  const canAct=isDirect ? ['pendiente','proveedor_reportado'].includes(reportStatus) : reportStatus==='pendiente';
   const itemId=`admin-report-compact-${r.id}`;
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
@@ -1416,8 +1418,9 @@ function renderAdminReportCompactFinal(r){
     </div>
     <div class="compact-details" style="display:none">
       <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
-      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} <span class="small-text">${safeText(r.customer_email||'')}</span></p>
+      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} ${isDirect?'<span class="chip">Cliente directo</span>':''} <span class="small-text">${safeText(r.customer_email||'')}${r.direct_customer_phone?` · ${safeText(r.direct_customer_phone)}`:''}</span></p>
       <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+      ${isDirect ? `<p><b>Pedido directo:</b> #${Number(r.order_id||0)} · <b>Estado:</b> ${safeText(r.status||'pendiente')}</p>` : ''}
       <p><b>Perfil original reportado:</b> ${Number(r.reported_account_id||0)>0 ? '#'+Number(r.reported_account_id) : 'No identificado'}${Number(r.replacement_account_id||0)>0 ? ` &nbsp; <b>Perfil de reemplazo:</b> #${Number(r.replacement_account_id)}` : ''}</p>
       <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
@@ -1425,6 +1428,8 @@ function renderAdminReportCompactFinal(r){
       ${Number(r.has_evidence || 0) === 1 ? `<div class="order-proof-row"><p style="margin:5px 0"><b>Evidencia adjunta:</b></p><button class="outline-btn" style="width:auto" onclick="openReportEvidenceModal(${r.id})">👁️ Ver evidencia</button></div>` : ''}
 <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
+      ${isDirect && reportStatus==='pendiente' ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="markDirectReportProvider(${r.id})">📤 Marcar reportado al proveedor</button>` : ''}
+      ${isDirect && reportStatus==='proveedor_reportado' ? `<div class="small-text" style="margin-bottom:10px">📤 Ya está marcado como reportado al proveedor. Puedes aplicar el reemplazo cuando tengas una cuenta nueva.</div>` : ''}
       <div class="two-row">
         <button class="green-btn" onclick="replaceReportedAccountAuto(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazo (inventario)</button>
         <button class="outline-btn" onclick="replaceReportedAccountManual(${r.id})" ${canAct?'':'disabled'}>✍️ Reemplazo manual</button>
@@ -1434,7 +1439,7 @@ function renderAdminReportCompactFinal(r){
         <button class="danger-btn" style="background:#b91c1c" onclick="refundFullReportedAccount(${r.id})" ${canAct?'':'disabled'}>💸 Reembolso completo</button>
       </div>
       <div class="two-row" style="margin-top:10px">
-        <select id="reportStatus-${r.id}"><option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option><option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option></select>
+        <select id="reportStatus-${r.id}"><option value="pendiente" ${r.status==='pendiente'?'selected':''}>Pendiente</option><option value="proveedor_reportado" ${r.status==='proveedor_reportado'?'selected':''}>Reportado al proveedor</option><option value="resuelto" ${r.status==='resuelto'?'selected':''}>Resuelto</option><option value="reemplazo" ${r.status==='reemplazo'?'selected':''}>Reemplazo</option><option value="reembolso" ${r.status==='reembolso'?'selected':''}>Reembolso</option></select>
         <input id="reportResponse-${r.id}" placeholder="Respuesta para el cliente" value="${safeText(r.admin_response||'')}" />
       </div>
       <button class="outline-btn" style="width:auto" onclick="updateAccountReportStatus(${r.id})">Guardar veredicto</button>
@@ -1479,6 +1484,18 @@ async function openReportEvidenceModal(reportId){
   showMessage('No se pudo inicializar el visor de evidencia', 'error');
 }
 window.openReportEvidenceModal = openReportEvidenceModal;
+
+async function markDirectReportProvider(reportId){
+  try{
+    const response = (prompt('Opcional: agrega una nota del proveedor o número de reporte:') || '').trim();
+    const data = await api('/api/admin/account-reports/'+reportId+'/status', {
+      method:'PATCH', body:JSON.stringify({status:'proveedor_reportado', admin_response:response})
+    });
+    showMessage(data.message || 'Reporte marcado como enviado al proveedor');
+    await Promise.allSettled([loadAccountReports(currentAdminAccountReportsPage), typeof actualizarConteosDashboard==='function'?actualizarConteosDashboard():Promise.resolve()]);
+  }catch(e){showMessage(e.message||'No se pudo actualizar el reporte','error');}
+}
+window.markDirectReportProvider=markDirectReportProvider;
 
 async function updateAccountReportStatus(reportId){
   if(__reportActionBusy.has(Number(reportId))) return;
@@ -1551,8 +1568,13 @@ function renderManualDeliveryFormFinal(o){
 
 function renderAdminOrderCompactFinal(o){
   const od=parseJsonObject(o.order_data);
+  const isDirect=Boolean(o.admin_quick_sale);
+  const directCustomerName=isDirect ? (od._cliente_final_nombre || 'Cliente final') : o.customer_name;
+  const directCustomerEmail=isDirect ? (od._cliente_final_email || '') : o.customer_email;
+  const directCustomerPhone=isDirect ? (od._cliente_final_whatsapp || '') : '';
   const itemId=`admin-order-compact-${o.id}`;
   const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
+  const directReportButton=o.admin_quick_sale && hasAccountDelivery(o)?`<button class="danger-btn" type="button" onclick="openMasterDirectReport(${o.id})">⚠ Reportar falla de este cliente</button>`:'';
   const manualChip=String(o.product_type||'').toLowerCase()==='manual'?'<span class="chip">Manual</span>':'';
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
@@ -1561,8 +1583,8 @@ function renderAdminOrderCompactFinal(o){
     </div>
     <div class="compact-details" style="display:none">
       <p><b>Pedido:</b> #${o.id}</p>
-      <p><b>Cliente:</b> ${safeText(o.customer_name)}</p>
-      <p><b>Correo:</b> ${safeText(o.customer_email)}</p>
+      <p><b>Cliente:</b> ${safeText(directCustomerName)}${isDirect?' <span class="chip">Cliente directo</span>':''}</p>
+      <p><b>Correo:</b> ${safeText(directCustomerEmail)}${directCustomerPhone?` · ${safeText(directCustomerPhone)}`:''}</p>
       <p><b>Producto:</b> ${safeText(o.product_name)} ${manualChip}</p>
       <p><b>Monto:</b> $${formatMoney(o.amount)}</p>
       <p><b>Estado actual:</b> <span class="status">${safeText(getStatusText(o.status))}</span></p>
@@ -1575,6 +1597,7 @@ function renderAdminOrderCompactFinal(o){
       <textarea id="response-${o.id}">${safeText(o.admin_response||'')}</textarea>
       ${renderManualDeliveryFormFinal(o)}
       ${copyButton}
+      ${directReportButton}
       <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
       <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
     </div>

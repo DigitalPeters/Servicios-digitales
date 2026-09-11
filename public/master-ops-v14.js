@@ -91,10 +91,65 @@
     }
 
     ensureQuickSaleModal();
+    ensureDirectReportModal();
     ensureStorePreviewModal();
     ensureSearchModal();
     ensureUser360Modal();
     ensureManualDeliveriesModal();
+  }
+
+  function ensureDirectReportModal(){
+    const modal=addModal('masterDirectReportModal','Reportar falla · Cliente directo',`
+      <div class="master-v14-callout"><b>Esta falla pertenece a una venta directa.</b><span>El reporte queda ligado al pedido y al perfil exacto para que puedas reportarlo al proveedor y después reemplazarlo sin perder el historial.</span></div>
+      <form id="masterDirectReportForm" class="master-v14-form">
+        <div id="masterDirectReportCustomer" class="master-v14-quote"></div>
+        <label>Cuenta / perfil que falló<select id="masterDirectReportAccount" required><option value="">Cargando…</option></select></label>
+        <label>Tipo de falla<select id="masterDirectReportIssue"><option value="no funciona">No funciona</option><option value="credenciales incorrectas">Credenciales incorrectas</option><option value="perfil bloqueado">Perfil bloqueado</option><option value="no reproduce">No permite reproducir</option><option value="otro">Otro</option></select></label>
+        <label>¿Qué sucede?<textarea id="masterDirectReportDescription" rows="4" placeholder="Describe brevemente la falla…" required></textarea></label>
+        <div id="masterDirectReportResult"></div>
+        <div class="master-v14-footer"><button type="button" class="outline-btn" onclick="closeMasterDirectReport()">Cancelar</button><button type="submit" class="primary-btn">🚨 Registrar falla</button></div>
+      </form>`);
+    const form=modal.querySelector('#masterDirectReportForm');
+    if(form && !form.dataset.bound){form.dataset.bound='1';form.addEventListener('submit',submitDirectReport);}
+    return modal;
+  }
+  let directReportOrderId=0;
+  async function openMasterDirectReport(orderId){
+    ensureV14UI(); ensureDirectReportModal(); directReportOrderId=Number(orderId||0); openModal('masterDirectReportModal');
+    const result=document.getElementById('masterDirectReportResult'); if(result) result.innerHTML='<div class="small-text">Cargando cuentas…</div>';
+    try{
+      const orderRows=Array.isArray(window.adminOrders)?window.adminOrders:[];
+      const order=orderRows.find(x=>Number(x.id)===directReportOrderId);
+      let od={}; try{od=order&&typeof order.order_data==='string'?JSON.parse(order.order_data||'{}'):(order?.order_data||{});}catch(_){}
+      const customerName=od._cliente_final_nombre||order?.customer_name||'Cliente final';
+      const phone=od._cliente_final_whatsapp||''; const email=od._cliente_final_email||'';
+      const customer=document.getElementById('masterDirectReportCustomer');
+      if(customer)customer.innerHTML=`<span><b>${esc(customerName)}</b><small>${esc(phone||email||'Cliente final')} · Pedido #${directReportOrderId}</small></span>`;
+      const d=await api(`/api/admin/master/quick-sale/order-accounts?order_id=${directReportOrderId}`);
+      const accounts=d.rows||[]; const select=document.getElementById('masterDirectReportAccount');
+      if(!accounts.length) throw new Error('No hay un perfil entregado disponible para reportar en este pedido.');
+      if(select)select.innerHTML=accounts.map(a=>`<option value="${Number(a.id)}">${esc(a.platform||a.product_name||'Cuenta')} · ${esc(a.account_email||'')}${a.profile_name?' · '+esc(a.profile_name):''}</option>`).join('');
+      if(result)result.innerHTML='';
+    }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron cargar las cuentas')}</div>`;}
+  }
+  window.openMasterDirectReport=openMasterDirectReport;
+  window.closeMasterDirectReport=()=>closeModal('masterDirectReportModal');
+  async function submitDirectReport(ev){
+    ev.preventDefault();
+    const result=document.getElementById('masterDirectReportResult');
+    try{
+      const accountId=Number(document.getElementById('masterDirectReportAccount')?.value||0);
+      const issueType=document.getElementById('masterDirectReportIssue')?.value||'otro';
+      const description=document.getElementById('masterDirectReportDescription')?.value.trim()||'';
+      if(!accountId||!description)throw new Error('Selecciona la cuenta y describe la falla.');
+      if(result)result.innerHTML='<div class="small-text">Registrando reporte…</div>';
+      const d=await api('/api/admin/master/direct-account-reports',{method:'POST',body:JSON.stringify({order_id:directReportOrderId,reported_account_id:accountId,issue_type:issueType,description})});
+      if(result)result.innerHTML=`<div class="master-v14-success"><b>✓ Reporte #${Number(d.report_id)} registrado</b><span>Quedó pendiente de reportar al proveedor.</span></div>`;
+      if(typeof loadAdminOrders==='function')await loadAdminOrders();
+      if(typeof loadAccountReports==='function')await loadAccountReports(1);
+      if(typeof actualizarConteosDashboard==='function')await actualizarConteosDashboard();
+      setTimeout(()=>closeMasterDirectReport(),700);
+    }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudo registrar el reporte')}</div>`;}
   }
 
   function ensureQuickSaleModal(){
