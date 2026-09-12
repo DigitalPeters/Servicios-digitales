@@ -1817,7 +1817,13 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_name TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_phone TEXT DEFAULT ''`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS direct_customer_email TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_name_snapshot TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_reported_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_responded_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_response TEXT DEFAULT ''`);
   await pool.query(`UPDATE account_reports ar SET owner_admin_id = o.owner_admin_id FROM orders o WHERE ar.direct_customer_report = TRUE AND ar.order_id = o.id AND o.admin_quick_sale = TRUE AND ar.owner_admin_id IS DISTINCT FROM o.owner_admin_id`);
+  await pool.query(`UPDATE account_reports ar SET provider_name_snapshot = COALESCE(NULLIF(ma.provider_name,''),'') FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id WHERE ar.reported_account_id=pa.id AND COALESCE(ar.provider_name_snapshot,'')=''`);
+  await pool.query(`UPDATE account_reports SET provider_reported_at = reviewed_at WHERE provider_reported_at IS NULL AND status='proveedor_reportado' AND reviewed_at IS NOT NULL`);
 
   // Ganancias del distribuidor: cuenta separada del saldo comprado.
   // Cada movimiento conserva su origen para evitar créditos/retiros duplicados.
@@ -5783,6 +5789,12 @@ const insertResult = await pool.query(
 
     const reportId = insertResult.rows[0].id;
 
+    await pool.query(`UPDATE account_reports ar
+      SET provider_name_snapshot = COALESCE(NULLIF(ma.provider_name,''),'')
+      FROM platform_accounts pa
+      LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+      WHERE ar.id=$1 AND pa.id=ar.reported_account_id`, [reportId]);
+
     const customerResult = await pool.query(
       `SELECT name, email FROM users WHERE id = $1`,
       [userId]
@@ -5903,10 +5915,11 @@ app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddle
              o.order_data, o.product_id, p.name AS product_name, p.category AS product_category,
              pa.id AS account_id, pa.platform, pa.product_name AS account_product_name,
              pa.account_email, pa.profile_name, pa.profile_pin, pa.status AS account_status,
-             pa.owner_admin_id AS account_owner_admin_id
+             pa.owner_admin_id AS account_owner_admin_id, ma.provider_name
       FROM orders o
       JOIN products p ON p.id = o.product_id
       JOIN platform_accounts pa ON pa.assigned_order_id = o.id AND pa.assigned_user_id = o.user_id
+      LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
       WHERE o.id = $1
         AND o.admin_quick_sale = TRUE
         AND ($2::int IS NULL OR o.owner_admin_id = $2)
@@ -5945,8 +5958,9 @@ app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddle
       INSERT INTO account_reports
         (user_id, email, issue_type, description, status, admin_response, order_id,
          reported_account_id, refund_amount, resolution_type, reported_platform, owner_admin_id,
-         evidence_image, direct_customer_report, direct_customer_name, direct_customer_phone, direct_customer_email)
-      VALUES ($1,$2,$3,$4,'pendiente','',$5,$6,0,'',$7,$8,$9,TRUE,$10,$11,$12)
+         evidence_image, direct_customer_report, direct_customer_name, direct_customer_phone, direct_customer_email,
+         provider_name_snapshot)
+      VALUES ($1,$2,$3,$4,'pendiente','',$5,$6,0,'',$7,$8,$9,TRUE,$10,$11,$12,$13)
       RETURNING id, created_at`, [
         req.user.id,
         row.account_email || '',
@@ -5959,7 +5973,8 @@ app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddle
         evidenceImage,
         customerName,
         customerPhone,
-        customerEmail
+        customerEmail,
+        String(row.provider_name || '').trim()
       ]);
     const reportId = Number(insert.rows[0].id);
     await client.query('COMMIT');
@@ -6017,6 +6032,12 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         COALESCE(NULLIF(account_reports.direct_customer_email, ''), users.email) AS customer_email,
         account_reports.direct_customer_phone,
         account_reports.direct_customer_report,
+        account_reports.provider_name_snapshot,
+        account_reports.provider_reported_at,
+        account_reports.provider_responded_at,
+        account_reports.provider_response,
+        CASE WHEN account_reports.provider_reported_at IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (COALESCE(account_reports.provider_responded_at, NOW()) - account_reports.provider_reported_at))/3600.0)::numeric, 1) ELSE NULL END AS provider_response_hours,
+        CASE WHEN account_reports.provider_reported_at IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (account_reports.provider_reported_at - account_reports.created_at))/3600.0)::numeric, 1) ELSE NULL END AS report_to_provider_hours,
         orders.amount AS order_amount,
         orders.created_at AS order_created_at,
         products.name AS product_name,
@@ -6687,6 +6708,40 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
   }
 });
 
+// ADMIN: REGISTRAR RESPUESTA DEL PROVEEDOR
+app.patch("/api/admin/account-reports/:reportId/provider-response", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId || 0);
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const note = String(req.body?.provider_response || '').trim().slice(0, 2000);
+    const rawDate = String(req.body?.provider_responded_at || '').trim();
+    if (!reportId) return res.status(400).json({ error: 'Reporte inválido' });
+    let respondedAt = null;
+    if (rawDate) {
+      const normalized = rawDate.includes('T') ? rawDate : rawDate.replace(' ', 'T');
+      const parsed = new Date(normalized);
+      if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'Fecha de respuesta inválida' });
+      respondedAt = parsed.toISOString();
+    }
+    const q = await pool.query(`
+      UPDATE account_reports ar
+      SET provider_responded_at = COALESCE($1::timestamptz, NOW()),
+          provider_response = $2,
+          reviewed_at = COALESCE(ar.reviewed_at, NOW()),
+          status = CASE WHEN ar.status='proveedor_reportado' THEN 'proveedor_reportado' ELSE ar.status END
+      WHERE ar.id=$3
+        AND ($4::int IS NULL OR ar.owner_admin_id=$4 OR ar.user_id=$4 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id=$4)
+             OR (ar.direct_customer_report=TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$4)))
+      RETURNING id, provider_reported_at, provider_responded_at, provider_response`,
+      [respondedAt, note, reportId, ownerId]);
+    if (!q.rows[0]) return res.status(404).json({ error: 'Reporte no encontrado' });
+    res.json({ message:'Respuesta del proveedor registrada', row:q.rows[0] });
+  } catch (err) {
+    console.error('Error registrando respuesta proveedor:', err.message);
+    res.status(500).json({ error:'No se pudo registrar la respuesta del proveedor' });
+  }
+});
+
 // ADMIN: DAR VEREDICTO A REPORTE DE CUENTA
 app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -6699,11 +6754,17 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
       return res.status(400).json({ error: "Veredicto inválido" });
     }
 
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
     const result = await pool.query(
-      `UPDATE account_reports
-       SET status = $1, admin_response = $2, reviewed_at = NOW()
-       WHERE id = $3`,
-      [status, admin_response || "", reportId]
+      `UPDATE account_reports ar
+       SET status = $1,
+           admin_response = $2,
+           reviewed_at = NOW(),
+           provider_reported_at = CASE WHEN $1 = 'proveedor_reportado' AND ar.provider_reported_at IS NULL THEN NOW() ELSE ar.provider_reported_at END
+       WHERE ar.id = $3
+         AND ($4::int IS NULL OR ar.owner_admin_id = $4 OR ar.user_id = $4 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id = $4)
+              OR (ar.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$4)))`,
+      [status, admin_response || "", reportId, ownerId]
     );
 
     if (result.rowCount === 0) {
@@ -10096,6 +10157,8 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
               oh.created_at AS orden_creada,
               oh.amount AS orden_amount,
               COALESCE(NULLIF(oh.product_name_snapshot,''), ph.name, pa.product_name, 'Producto') AS producto,
+              pa.profile_name AS perfil,
+              pa.profile_pin AS pin,
               CASE
                 WHEN COALESCE(ma.sell_by_profile,false) THEN 'perfil'
                 WHEN lower(COALESCE(NULLIF(oh.product_name_snapshot,''),ph.name,'')) LIKE '%perfil%' THEN 'perfil'
@@ -10131,6 +10194,10 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
             'order_id', ar.order_id,
             'reported_account_id', ar.reported_account_id,
             'replacement_account_id', ar.replacement_account_id,
+            'provider_name_snapshot', ar.provider_name_snapshot,
+            'provider_reported_at', ar.provider_reported_at,
+            'provider_responded_at', ar.provider_responded_at,
+            'provider_response', ar.provider_response,
             'papel', CASE WHEN ar.reported_account_id=pa.id THEN 'reportada' WHEN ar.replacement_account_id=pa.id THEN 'usada_como_reemplazo' ELSE 'relacionada' END
           ) ORDER BY ar.created_at DESC)
           FROM account_reports ar
@@ -10943,6 +11010,12 @@ async function loadSupplierPerformance(start, end) {
     ), failures AS (
       SELECT lower(trim(COALESCE(ma.provider_name,''))) AS skey,
              COUNT(*)::int AS failures,
+             COUNT(*) FILTER (WHERE ar.provider_reported_at IS NOT NULL)::int AS provider_reports,
+             COUNT(*) FILTER (WHERE ar.provider_responded_at IS NOT NULL)::int AS provider_responses,
+             COUNT(*) FILTER (WHERE ar.provider_reported_at IS NOT NULL AND ar.provider_responded_at IS NULL)::int AS pending_provider_reports,
+             COALESCE(AVG(EXTRACT(EPOCH FROM (ar.provider_reported_at - ar.created_at))/3600.0) FILTER (WHERE ar.provider_reported_at IS NOT NULL),0)::numeric AS avg_report_to_provider_hours,
+             COALESCE(AVG(EXTRACT(EPOCH FROM (ar.provider_responded_at - ar.provider_reported_at))/3600.0) FILTER (WHERE ar.provider_reported_at IS NOT NULL AND ar.provider_responded_at IS NOT NULL),0)::numeric AS avg_provider_response_hours,
+             COUNT(*) FILTER (WHERE ar.provider_responded_at IS NOT NULL AND ar.provider_reported_at IS NOT NULL AND ar.provider_responded_at <= ar.provider_reported_at + INTERVAL '24 hours')::int AS responses_under_24h,
              COUNT(*) FILTER (WHERE ar.resolution_type='reemplazo' OR ar.status='reemplazo')::int AS replacements,
              COALESCE(SUM(CASE WHEN ar.replacement_account_id IS NOT NULL THEN COALESCE(NULLIF(rpa.purchase_price,0),
                CASE WHEN rma.sell_by_profile THEN COALESCE(NULLIF(rma.profile_cost_override,0),rma.purchase_cost_total/NULLIF(rma.configured_profile_count,0)) ELSE NULLIF(rma.purchase_cost_total,0) END,
@@ -10986,6 +11059,12 @@ async function loadSupplierPerformance(start, end) {
            (COALESCE(sa.revenue,0)-COALESCE(sa.sold_cost,0)-COALESCE(f.replacement_cost,0))::numeric AS profit,
            COALESCE(f.replacement_cost,0)::numeric AS replacement_cost,
            COALESCE(f.failures,0)::int AS failures,
+           COALESCE(f.provider_reports,0)::int AS provider_reports,
+           COALESCE(f.provider_responses,0)::int AS provider_responses,
+           COALESCE(f.pending_provider_reports,0)::int AS pending_provider_reports,
+           COALESCE(f.avg_report_to_provider_hours,0)::numeric AS avg_report_to_provider_hours,
+           COALESCE(f.avg_provider_response_hours,0)::numeric AS avg_provider_response_hours,
+           COALESCE(f.responses_under_24h,0)::int AS responses_under_24h,
            COALESCE(f.replacements,0)::int AS replacements,
            COALESCE(se.service_cases,0)::int AS service_cases,
            COALESCE(se.resolved_cases,0)::int AS resolved_cases,

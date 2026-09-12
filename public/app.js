@@ -1418,6 +1418,9 @@ function renderAdminReportCompactFinal(r){
     </div>
     <div class="compact-details" style="display:none">
       <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
+      <p><b>Proveedor:</b> ${safeText(r.provider_name_snapshot||'Sin proveedor registrado')}</p>
+      <p><b>📅 Reportado al proveedor:</b> ${r.provider_reported_at ? safeText(new Date(r.provider_reported_at).toLocaleString('es-MX')) : 'Pendiente de enviar'}<br><b>📥 Respuesta del proveedor:</b> ${r.provider_responded_at ? safeText(new Date(r.provider_responded_at).toLocaleString('es-MX')) : 'Aún sin respuesta'}${r.provider_response_hours!=null ? ` · <b>⏱ Tiempo de respuesta:</b> ${Number(r.provider_response_hours).toFixed(1)} h` : ''}</p>
+      ${r.provider_responded_at ? `<p><b>Respuesta/nota del proveedor:</b> ${safeText(r.provider_response||'')}</p>` : ''}
       <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} ${isDirect?'<span class="chip">Cliente directo</span>':''} <span class="small-text">${safeText(r.customer_email||'')}${r.direct_customer_phone?` · ${safeText(r.direct_customer_phone)}`:''}</span></p>
       <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
       ${isDirect ? `<p><b>Pedido directo:</b> #${Number(r.order_id||0)} · <b>Estado:</b> ${safeText(r.status||'pendiente')}</p>` : ''}
@@ -1430,6 +1433,7 @@ function renderAdminReportCompactFinal(r){
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
       ${isDirect && reportStatus==='pendiente' ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="markDirectReportProvider(${r.id})">📤 Marcar reportado al proveedor</button>` : ''}
       ${isDirect && reportStatus==='proveedor_reportado' ? `<div class="small-text" style="margin-bottom:10px">📤 Ya está marcado como reportado al proveedor. Puedes aplicar el reemplazo cuando tengas una cuenta nueva.</div>` : ''}
+      ${r.provider_reported_at && !r.provider_responded_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="registerProviderResponse(${r.id})">📥 Registrar respuesta del proveedor</button>` : ''}
       <div class="two-row">
         <button class="green-btn" onclick="replaceReportedAccountAuto(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazo (inventario)</button>
         <button class="outline-btn" onclick="replaceReportedAccountManual(${r.id})" ${canAct?'':'disabled'}>✍️ Reemplazo manual</button>
@@ -1496,6 +1500,17 @@ async function markDirectReportProvider(reportId){
   }catch(e){showMessage(e.message||'No se pudo actualizar el reporte','error');}
 }
 window.markDirectReportProvider=markDirectReportProvider;
+
+async function registerProviderResponse(reportId){
+  try{
+    const note=(prompt('¿Qué respondió el proveedor? (opcional)')||'').trim();
+    const rawDate=prompt('Fecha y hora en que respondió el proveedor. Déjala vacía para usar ahora. Formato: 2026-09-12 12:30','')||'';
+    const data=await api('/api/admin/account-reports/'+reportId+'/provider-response',{method:'PATCH',body:JSON.stringify({provider_response:note,provider_responded_at:rawDate.trim()})});
+    showMessage(data.message||'Respuesta del proveedor registrada');
+    await Promise.allSettled([loadAccountReports(currentAdminAccountReportsPage),typeof actualizarConteosDashboard==='function'?actualizarConteosDashboard():Promise.resolve()]);
+  }catch(e){showMessage(e.message||'No se pudo registrar la respuesta del proveedor','error');}
+}
+window.registerProviderResponse=registerProviderResponse;
 
 async function updateAccountReportStatus(reportId){
   if(__reportActionBusy.has(Number(reportId))) return;
