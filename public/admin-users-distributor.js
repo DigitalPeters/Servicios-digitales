@@ -660,3 +660,83 @@ window.setDistributorEarningsCurrentMonth = setDistributorEarningsCurrentMonth;
 window.downloadDistributorEarningsCsv = downloadDistributorEarningsCsv;
 window.loadDistributorEarningsWallet = loadDistributorEarningsWallet;
 window.transferDistributorEarningsToBalance = transferDistributorEarningsToBalance;
+
+// Configuración de categorías por usuario.
+// Los permisos se guardan por usuario y no se pierden al convertirlo en distribuidor.
+async function openUserCategoryPermissions(userId){
+  try{
+    const data = await api('/api/admin/users/'+Number(userId)+'/categories');
+    const user = data.user || {};
+    const available = Array.isArray(data.available_categories) ? data.available_categories : [];
+    const selected = new Set((Array.isArray(data.selected_categories) ? data.selected_categories : []).map(c=>String(c).toLowerCase()));
+
+    if(!available.length){
+      showMessage('Este catálogo todavía no tiene categorías con productos para autorizar.','error');
+      return;
+    }
+
+    document.getElementById('userCategoryPermissionModal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'userCategoryPermissionModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px;';
+    modal.innerHTML = `
+      <div style="background:#fff;color:#111827;border-radius:16px;width:min(560px,100%);max-height:90vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.28);padding:22px;">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:8px;">
+          <div>
+            <h3 style="margin:0 0 4px;">Categorías autorizadas</h3>
+            <div style="font-size:13px;color:#64748b;">${safeText(user.name||'Usuario')} · ${safeText(user.email||'')}</div>
+          </div>
+          <button type="button" class="outline-btn" style="width:auto" onclick="document.getElementById('userCategoryPermissionModal')?.remove()">Cerrar</button>
+        </div>
+        <p style="font-size:14px;color:#475569;margin:10px 0 16px;">
+          El usuario solo podrá ver y comprar productos de las categorías seleccionadas.
+          Estos permisos permanecen aunque después lo conviertas en distribuidor.
+        </p>
+        <div id="userCategoryPermissionList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+          ${available.map(category=>{
+            const checked=selected.has(String(category).toLowerCase());
+            return `<label style="display:flex;align-items:center;gap:10px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;cursor:pointer;">
+              <input type="checkbox" class="user-category-check" value="${safeText(category)}" ${checked?'checked':''}>
+              <span>${safeText(category)}</span>
+            </label>`;
+          }).join('')}
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px;">
+          <button type="button" class="outline-btn" style="width:auto" onclick="saveUserCategoryPermissions(${Number(userId)}, false)">Guardar sin activar</button>
+          <button type="button" class="primary-btn" style="width:auto" onclick="saveUserCategoryPermissions(${Number(userId)}, true)">${user.activation_pending ? 'Autorizar categorías y activar' : 'Guardar categorías'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event)=>{
+      if(event.target===modal) modal.remove();
+    });
+  }catch(e){
+    showMessage(e.message || 'No se pudieron cargar las categorías','error');
+  }
+}
+
+async function saveUserCategoryPermissions(userId, activate){
+  try{
+    const modal=document.getElementById('userCategoryPermissionModal');
+    if(!modal) return;
+    const categories=[...modal.querySelectorAll('.user-category-check:checked')].map(input=>input.value);
+    if(activate && !categories.length){
+      showMessage('Selecciona al menos una categoría antes de activar al usuario.','error');
+      return;
+    }
+    const data=await api('/api/admin/users/'+Number(userId)+'/categories',{
+      method:'PUT',
+      body:JSON.stringify({categories,activate:!!activate})
+    });
+    showMessage(data.message || 'Categorías actualizadas');
+    modal.remove();
+    if(typeof window.loadUsers==='function') await window.loadUsers();
+  }catch(e){
+    showMessage(e.message || 'No se pudieron guardar las categorías','error');
+  }
+}
+
+window.openUserCategoryPermissions=openUserCategoryPermissions;
+window.saveUserCategoryPermissions=saveUserCategoryPermissions;
+

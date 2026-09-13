@@ -878,6 +878,55 @@ function adminOwnedWhere(viewer, alias = "") {
   return { clause: `(${prefix}owner_admin_id IS NULL OR ${prefix}owner_admin_id = 0)`, params: [] };
 }
 
+function normalizeCategoryName(value) {
+  return String(value || "").trim();
+}
+
+async function getUserCategoryAccess(userId, client = pool) {
+  const id = Number(userId || 0);
+  if (!id) return { restricted: false, categories: [] };
+
+  const userResult = await client.query(
+    `SELECT u.id, u.role, COALESCE(u.is_subadmin, false) AS is_subadmin,
+            u.owner_user_id,
+            CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin
+     FROM users u
+     LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
+     WHERE u.id = $1
+     LIMIT 1`,
+    [id]
+  );
+  const user = userResult.rows[0];
+  if (!user) return { restricted: false, categories: [] };
+
+  // Administradores y propietarios de panel conservan acceso total.
+  if (String(user.role || "").toLowerCase() === "admin" || user.is_panel_admin === true) {
+    return { restricted: false, categories: [] };
+  }
+
+  const result = await client.query(
+    `SELECT category
+       FROM user_category_permissions
+      WHERE user_id = $1
+      ORDER BY category`,
+    [id]
+  );
+
+  // Compatibilidad: si un usuario existente no tiene filas de permisos,
+  // conserva el acceso completo que tenía antes de esta función.
+  const categories = result.rows
+    .map(row => normalizeCategoryName(row.category))
+    .filter(Boolean);
+
+  return { restricted: categories.length > 0, categories };
+}
+
+function categoryAccessAllows(access, category) {
+  if (!access || !access.restricted) return true;
+  const wanted = normalizeCategoryName(category).toLowerCase();
+  return access.categories.some(c => c.toLowerCase() === wanted);
+}
+
 function productAccountMatchCondition(productAlias = "products", accountAlias = "pa") {
   return `(
     lower(COALESCE(NULLIF(TRIM(${accountAlias}.product_name), ''), NULLIF(TRIM(${accountAlias}.platform), ''))) = lower(${productAlias}.name)
@@ -1356,9 +1405,24 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_subadmin BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS owner_user_id INTEGER`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT TRUE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS activation_pending BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`);
+
+  // Permisos de categorías por usuario. Un usuario puede conservar estos permisos
+  // aunque posteriormente cambie de cliente a distribuidor.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_category_permissions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, category)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_category_permissions_user ON user_category_permissions(user_id)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS balance_ledger (
@@ -2775,9 +2839,18 @@ app.post("/api/register", async (req, res) => {
       if (String(tenantPanel.status || "activo").toLowerCase() !== "activo") return res.status(403).json({ error: "Este panel se encuentra suspendido o inactivo." });
       const existing = await pool.query(`SELECT id FROM users WHERE lower(email) = lower($1)`, [cleanEmail]);
       if (existing.rows.length) return res.status(400).json({ error: "Este correo ya tiene una cuenta. Inicia sesión con el panel al que pertenece." });
-      const result = await pool.query(`INSERT INTO users (name,email,password,role,balance,is_subadmin,owner_user_id,is_enabled) VALUES ($1,$2,$3,'user',0,false,$4,true) RETURNING id,name,email,role,balance,owner_user_id`, [cleanName,cleanEmail,hashedPassword,ownerId]);
-      const token = generateToken(result.rows[0]);
-      return res.json({ token, message: "Cuenta creada y vinculada al panel correctamente" });
+      const result = await pool.query(
+        `INSERT INTO users
+           (name,email,password,role,balance,is_subadmin,owner_user_id,is_enabled,activation_pending)
+         VALUES ($1,$2,$3,'user',0,false,$4,false,true)
+         RETURNING id,name,email,role,balance,owner_user_id,is_enabled,activation_pending`,
+        [cleanName,cleanEmail,hashedPassword,ownerId]
+      );
+      return res.json({
+        pending: true,
+        user: result.rows[0],
+        message: "Registro recibido. Tu cuenta quedará pendiente hasta que el administrador autorice tus categorías y active tu acceso."
+      });
     }
 
     const result = await pool.query(`INSERT INTO users (name,email,password,role,balance) VALUES ($1,$2,$3,'user',0) RETURNING id,name,email,role,balance`, [cleanName,cleanEmail,hashedPassword]);
@@ -2929,8 +3002,10 @@ app.get("/api/products", authMiddleware, async (req, res) => {
       owner.params
     );
 
+    const categoryAccess = await getUserCategoryAccess(viewer.id);
+    const visibleRows = result.rows.filter(p => categoryAccessAllows(categoryAccess, p.category));
     const products = [];
-    const productIds = result.rows.map(p => Number(p.id)).filter(n => Number.isInteger(n) && n > 0);
+    const productIds = visibleRows.map(p => Number(p.id)).filter(n => Number.isInteger(n) && n > 0);
     const customPriceMap = new Map();
     const ownerPriceMap = new Map();
     const resellerPriceMap = new Map();
@@ -2972,7 +3047,7 @@ app.get("/api/products", authMiddleware, async (req, res) => {
       }
     }
 
-    for (const product of result.rows) {
+    for (const product of visibleRows) {
       const effectivePrice = String(product.product_type || '').toLowerCase() === 'combo_auto'
         ? await calculateComboPrice(pool, viewer, product)
         : (() => {
@@ -3284,6 +3359,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     console.log("Producto ID:", productId, "Usuario ID:", userId);
 
     const viewerContext = await getViewerContext(userId, client);
+    const categoryAccess = await getUserCategoryAccess(userId, client);
     const ownerFilter = adminOwnedWhere(viewerContext, "p");
     const productResult = await client.query(
       `SELECT p.*,
@@ -3300,6 +3376,11 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
     if (!product) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Producto no encontrado" });
+    }
+
+    if (!categoryAccessAllows(categoryAccess, product.category)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "No tienes autorización para comprar productos de esta categoría." });
     }
 
     const productType = normalizeProductType(product.product_type);
@@ -4720,6 +4801,7 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
                 COALESCE(u.is_enabled, TRUE) AS is_enabled,
+               COALESCE(u.activation_pending, false) AS activation_pending,
                 activity.last_activity_at,
                 COALESCE(activity.movements_2m, 0)::int AS movements_2m,
                 owner.name AS owner_name,
@@ -4758,6 +4840,7 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
       result = await pool.query(
         `SELECT u.id, u.name, u.email, u.role, u.balance, COALESCE(u.is_subadmin, false) AS is_subadmin, u.owner_user_id,
               COALESCE(u.is_enabled, TRUE) AS is_enabled,
+               COALESCE(u.activation_pending, false) AS activation_pending,
               activity.last_activity_at,
               COALESCE(activity.movements_2m, 0)::int AS movements_2m,
               owner.name AS owner_name,
@@ -4799,6 +4882,186 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
   }
 });
 
+// ADMIN: PERMISOS DE CATEGORÍAS POR USUARIO
+app.get("/api/admin/users/:userId/categories", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId || 0);
+    if (!userId) return res.status(400).json({ error: "ID de usuario inválido" });
+
+    const targetResult = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role, u.owner_user_id,
+              COALESCE(u.is_enabled, TRUE) AS is_enabled,
+              COALESCE(u.activation_pending, false) AS activation_pending,
+              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin
+         FROM users u
+         LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
+        WHERE u.id = $1
+        LIMIT 1`,
+      [userId]
+    );
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "Usuario no encontrado" });
+    if (target.role === "admin" || target.is_panel_admin === true) {
+      return res.status(403).json({ error: "Las cuentas administrativas no utilizan permisos de categorías." });
+    }
+    if (req.isPanelAdmin && Number(target.owner_user_id || 0) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "Solo puedes configurar usuarios de tu panel" });
+    }
+
+    const scopeOwnerId = Number(target.owner_user_id || 0) || null;
+    const availableResult = await pool.query(
+      scopeOwnerId
+        ? `SELECT DISTINCT category
+             FROM products
+            WHERE owner_admin_id = $1
+              AND NULLIF(TRIM(category), '') IS NOT NULL
+            ORDER BY category`
+        : `SELECT DISTINCT category
+             FROM products
+            WHERE (owner_admin_id IS NULL OR owner_admin_id = 0)
+              AND NULLIF(TRIM(category), '') IS NOT NULL
+            ORDER BY lower(category), category`,
+      scopeOwnerId ? [scopeOwnerId] : []
+    );
+
+    const selectedResult = await pool.query(
+      `SELECT category
+         FROM user_category_permissions
+        WHERE user_id = $1
+        ORDER BY lower(category), category`,
+      [userId]
+    );
+
+    res.json({
+      user: {
+        id: target.id,
+        name: target.name,
+        email: target.email,
+        is_enabled: target.is_enabled,
+        activation_pending: target.activation_pending
+      },
+      available_categories: availableResult.rows.map(r => normalizeCategoryName(r.category)).filter(Boolean),
+      selected_categories: selectedResult.rows.map(r => normalizeCategoryName(r.category)).filter(Boolean)
+    });
+  } catch (err) {
+    console.error("Error cargando permisos de categorías:", err.message);
+    res.status(500).json({ error: "Error cargando categorías del usuario" });
+  }
+});
+
+app.put("/api/admin/users/:userId/categories", authMiddleware, adminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = Number(req.params.userId || 0);
+    if (!userId) return res.status(400).json({ error: "ID de usuario inválido" });
+
+    const rawCategories = Array.isArray(req.body?.categories) ? req.body.categories : [];
+    const categories = [...new Map(
+      rawCategories
+        .map(normalizeCategoryName)
+        .filter(Boolean)
+        .map(category => [category.toLowerCase(), category])
+    ).values()].slice(0, 100);
+    const activate = req.body?.activate === true || req.body?.activate === "true" || req.body?.activate === 1 || req.body?.activate === "1";
+
+    await client.query("BEGIN");
+
+    const targetResult = await client.query(
+      `SELECT u.id, u.name, u.email, u.role, u.owner_user_id,
+              COALESCE(u.activation_pending, false) AS activation_pending,
+              CASE WHEN ap.id IS NULL THEN false ELSE true END AS is_panel_admin
+         FROM users u
+         LEFT JOIN admin_panels ap ON ap.owner_user_id = u.id
+        WHERE u.id = $1
+        LIMIT 1
+        FOR UPDATE OF u`,
+      [userId]
+    );
+    const target = targetResult.rows[0];
+    if (!target) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+    if (target.role === "admin" || target.is_panel_admin === true) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Las cuentas administrativas no utilizan permisos de categorías." });
+    }
+    if (req.isPanelAdmin && Number(target.owner_user_id || 0) !== Number(req.user.id)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Solo puedes configurar usuarios de tu panel" });
+    }
+
+    const scopeOwnerId = Number(target.owner_user_id || 0) || null;
+    const availableResult = await client.query(
+      scopeOwnerId
+        ? `SELECT DISTINCT category
+             FROM products
+            WHERE owner_admin_id = $1
+              AND NULLIF(TRIM(category), '') IS NOT NULL`
+        : `SELECT DISTINCT category
+             FROM products
+            WHERE (owner_admin_id IS NULL OR owner_admin_id = 0)
+              AND NULLIF(TRIM(category), '') IS NOT NULL`,
+      scopeOwnerId ? [scopeOwnerId] : []
+    );
+    const available = new Map(
+      availableResult.rows
+        .map(r => normalizeCategoryName(r.category))
+        .filter(Boolean)
+        .map(category => [category.toLowerCase(), category])
+    );
+
+    const invalid = categories.filter(category => !available.has(category.toLowerCase()));
+    if (invalid.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: `Categoría no disponible en el catálogo: ${invalid.join(", ")}` });
+    }
+
+    if (activate && categories.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Selecciona al menos una categoría antes de activar al usuario." });
+    }
+
+    await client.query(`DELETE FROM user_category_permissions WHERE user_id = $1`, [userId]);
+    for (const category of categories) {
+      await client.query(
+        `INSERT INTO user_category_permissions (user_id, category)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id, category) DO UPDATE
+           SET updated_at = NOW()`,
+        [userId, available.get(category.toLowerCase()) || category]
+      );
+    }
+
+    const updated = await client.query(
+      `UPDATE users
+          SET is_enabled = CASE WHEN $2 THEN true ELSE is_enabled END,
+              activation_pending = CASE WHEN $2 THEN false ELSE activation_pending END
+        WHERE id = $1
+        RETURNING id, name, email,
+                  COALESCE(is_enabled, TRUE) AS is_enabled,
+                  COALESCE(activation_pending, false) AS activation_pending`,
+      [userId, activate]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      message: activate
+        ? "Categorías autorizadas y usuario activado correctamente."
+        : "Categorías autorizadas correctamente.",
+      user: updated.rows[0],
+      selected_categories: categories.map(category => available.get(category.toLowerCase()) || category)
+    });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
+    console.error("Error guardando permisos de categorías:", err.message);
+    res.status(500).json({ error: "No fue posible guardar las categorías del usuario" });
+  } finally {
+    client.release();
+  }
+});
+
 app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -4819,7 +5082,8 @@ app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, as
     }
 
     const targetResult = await pool.query(
-      `SELECT id, role, owner_user_id
+      `SELECT id, role, owner_user_id,
+              COALESCE(activation_pending, false) AS activation_pending
        FROM users
        WHERE id = $1
        LIMIT 1`,
@@ -4834,11 +5098,20 @@ app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, as
       return res.status(403).json({ error: "Solo puedes modificar usuarios de tu panel" });
     }
 
+    if (enabled && target.activation_pending) {
+      const access = await getUserCategoryAccess(userId);
+      if (!access.restricted) {
+        return res.status(400).json({ error: "Antes de activar este usuario debes autorizar al menos una categoría." });
+      }
+    }
+
     const result = await pool.query(
       `UPDATE users
-       SET is_enabled = $1
+       SET is_enabled = $1,
+           activation_pending = CASE WHEN $1 THEN false ELSE activation_pending END
        WHERE id = $2
-       RETURNING id, name, email, COALESCE(is_enabled, TRUE) AS is_enabled`,
+       RETURNING id, name, email, COALESCE(is_enabled, TRUE) AS is_enabled,
+                 COALESCE(activation_pending, false) AS activation_pending`,
       [enabled, userId]
     );
 
@@ -8826,7 +9099,8 @@ app.get("/api/distributor/prices", authMiddleware, distributorMiddleware, async 
       [req.user.id]
     );
 
-    res.json(result.rows);
+    const categoryAccess = await getUserCategoryAccess(viewer.id);
+    res.json(result.rows.filter(p => categoryAccessAllows(categoryAccess, p.category)));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando precios para vendedores" });
