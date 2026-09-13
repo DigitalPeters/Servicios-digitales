@@ -4896,3 +4896,111 @@ function startDashboardRefreshScheduler(){
 registerLoadAppHook(function dashboardRefreshLoadAppHook(){
   startDashboardRefreshScheduler();
 }, { name:'dashboard-refresh-scheduler', order:740 });
+
+// ============================================================
+// NAVEGACION FINAL ROBUSTA - 2026-09-13
+// Cada acceso administrativo debe llevar exactamente al modulo
+// seleccionado, no simplemente al inicio de section-admin.
+// ============================================================
+(function installFinalAdminNavigation(){
+  function isAdminContext(){
+    return typeof isAnyAdminUserPanel === 'function' && isAnyAdminUserPanel();
+  }
+
+  function scrollToAdminExact(panelId){
+    if(!isAdminContext()) return showSection('dashboard');
+
+    // Primero mostramos la sección admin y esperamos a que el navegador
+    // recalcule el layout antes de medir la posición del panel.
+    showSection('admin');
+    applyRentedAdminLayout?.();
+
+    const go = () => {
+      const target = document.getElementById(panelId);
+      if(!target) return;
+
+      // scroll-margin-top ayuda con el topbar y este cálculo evita que
+      // scrollIntoView termine en una posición intermedia del panel anterior.
+      const topbar = document.querySelector('.topbar');
+      const offset = (topbar?.getBoundingClientRect().height || 78) + 18;
+      const absoluteTop = Math.max(0, target.getBoundingClientRect().top + window.scrollY - offset);
+      window.scrollTo({top:absoluteTop, left:0, behavior:'auto'});
+
+      // Segundo ajuste después del layout por si un módulo cargó contenido.
+      requestAnimationFrame(() => {
+        const rect = target.getBoundingClientRect();
+        const desired = Math.max(0, rect.top + window.scrollY - offset);
+        if(Math.abs(desired - window.scrollY) > 8){
+          window.scrollTo({top:desired, left:0, behavior:'auto'});
+        }
+      });
+    };
+
+    runAfterNextPaint(go);
+    return true;
+  }
+
+  window.scrollToAdmin = scrollToAdminExact;
+
+  window.openUsersFromDashboard = function(){
+    if(isAdminContext()) return scrollToAdminExact('adminUsersPanel');
+    return showSection('account');
+  };
+
+  window.openProductsFromDashboard = function(){
+    if(isAdminContext()) return scrollToAdminExact('adminProductsPanel');
+    return showSection('shop');
+  };
+
+  window.openInventoryFromDashboard = function(){
+    if(isAdminContext()) return scrollToAdminExact('adminPlatformAccountsPanel');
+    return showSection('shop');
+  };
+
+  window.openOrdersFromDashboard = function(){
+    if(isAdminContext()) return scrollToAdminExact('adminOrdersPanel');
+    return showSection('orders');
+  };
+
+  window.openAccountReportsFromDashboard = function(){
+    if(isAdminContext()) return scrollToAdminExact('adminAccountReportsPanel');
+    return showSection('reports');
+  };
+
+  window.openBalanceRequests = function(){
+    if(isAdminContext()) return scrollToAdminExact('adminBalanceRequestsPanel');
+    return showSection('balance');
+  };
+
+  window.openSalesReportFinal = function(){
+    if(!isAdminContext()) return;
+    showSection('admin');
+    if(typeof ensureAdvancedReportsPanelFinal === 'function') ensureAdvancedReportsPanelFinal();
+    const panel=document.getElementById('adminSalesReportPanel');
+    if(panel){ panel.classList.remove('hidden'); panel.style.display=''; }
+    if(typeof setTodaySalesDate === 'function') setTodaySalesDate();
+    if(typeof loadSalesReport === 'function') Promise.resolve(loadSalesReport(true)).catch(()=>{});
+    runAfterNextPaint(()=>{
+      const target=document.getElementById('adminSalesReportPanel');
+      if(!target) return;
+      const topbar=document.querySelector('.topbar');
+      const offset=(topbar?.getBoundingClientRect().height||78)+18;
+      window.scrollTo({top:Math.max(0,target.getBoundingClientRect().top+window.scrollY-offset),left:0,behavior:'auto'});
+    });
+  };
+
+  // Mantener el alias utilizado por tarjetas y módulos antiguos.
+  window.openSalesReport = window.openSalesReportFinal;
+
+  // Refuerzo visual: todos los módulos admin tienen separación suficiente
+  // para que el encabezado no tape el destino.
+  if(!document.getElementById('peters-final-admin-nav-style')){
+    const style=document.createElement('style');
+    style.id='peters-final-admin-nav-style';
+    style.textContent=`
+      #section-admin > .panel[id^="admin"] { scroll-margin-top: 110px; }
+      #section-admin > .grid-cards { scroll-margin-top: 110px; }
+    `;
+    document.head.appendChild(style);
+  }
+})();
