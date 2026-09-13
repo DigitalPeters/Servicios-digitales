@@ -98,10 +98,10 @@ async function register(){
       await loadApp();return;
     }
     const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});
-    if(data.pending){
-      token=null;
+    if (data.pending_activation) {
+      token = null;
       localStorage.removeItem('token');
-      showMessage(data.message||'Registro recibido. Tu cuenta queda pendiente de activación.','success');
+      showMessage(data.message || 'Cuenta creada. Espera autorización del administrador.');
       showAuth('login');
       return;
     }

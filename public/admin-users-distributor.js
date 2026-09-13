@@ -250,16 +250,22 @@ function renderAdminUsersWithTools(){
       const enabled = !(u.is_enabled === false || u.is_enabled === 0 || u.is_enabled === 'false');
       const statusChip = enabled
         ? '<span class="chip" style="background:#dcfce7;color:#166534">Activo</span>'
-        : '<span class="chip" style="background:#fee2e2;color:#991b1b">Deshabilitado</span>';
+        : '<span class="chip" style="background:#fee2e2;color:#991b1b">Pendiente / deshabilitado</span>';
+      const categoryConfigured = u.category_access_configured === true || u.category_access_configured === 1 || u.category_access_configured === 'true';
+      const authorizedCategories = Array.isArray(u.authorized_categories) ? u.authorized_categories : [];
+      const categoryText = categoryConfigured ? `${authorizedCategories.length} categoría${authorizedCategories.length === 1 ? '' : 's'} autorizada${authorizedCategories.length === 1 ? '' : 's'}` : 'Pendiente de autorización';
       const movementDate = formatAdminUserMovementDate(u.last_activity_at);
       const movements2m = Number(u.movements_2m || 0);
       const overviewButton = (!isPanelOwner && u.role !== 'admin' && typeof window.openMasterUser360 === 'function')
         ? `<button class="outline-btn" onclick="openMasterUser360(${u.id})">Ficha 360°</button>`
         : '';
+      const categoryButton = canManage && typeof window.openCategoryPermissions === 'function'
+        ? `<button class="outline-btn" onclick="openCategoryPermissions(${u.id})">${categoryConfigured ? 'Editar categorías' : 'Autorizar categorías'}</button>`
+        : '';
       const manageButtons = canManage
-        ? `${overviewButton}<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
+        ? `${overviewButton}${categoryButton}<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
         : overviewButton;
-      return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${roleText} ${chip}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Último movimiento:</b> ${movementDate}</p><p><b>Movimientos 2 meses:</b> ${movements2m}</p><div class="tools" style="margin-bottom:0">${action}${manageButtons}</div></div>`;
+      return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${roleText} ${chip}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Categorías:</b> ${safeText(categoryText)}</p><p><b>Último movimiento:</b> ${movementDate}</p><p><b>Movimientos 2 meses:</b> ${movements2m}</p><div class="tools" style="margin-bottom:0">${action}${manageButtons}</div></div>`;
     }).join('') || 'No hay usuarios.';
   }
 }
@@ -660,83 +666,3 @@ window.setDistributorEarningsCurrentMonth = setDistributorEarningsCurrentMonth;
 window.downloadDistributorEarningsCsv = downloadDistributorEarningsCsv;
 window.loadDistributorEarningsWallet = loadDistributorEarningsWallet;
 window.transferDistributorEarningsToBalance = transferDistributorEarningsToBalance;
-
-// Configuración de categorías por usuario.
-// Los permisos se guardan por usuario y no se pierden al convertirlo en distribuidor.
-async function openUserCategoryPermissions(userId){
-  try{
-    const data = await api('/api/admin/users/'+Number(userId)+'/categories');
-    const user = data.user || {};
-    const available = Array.isArray(data.available_categories) ? data.available_categories : [];
-    const selected = new Set((Array.isArray(data.selected_categories) ? data.selected_categories : []).map(c=>String(c).toLowerCase()));
-
-    if(!available.length){
-      showMessage('Este catálogo todavía no tiene categorías con productos para autorizar.','error');
-      return;
-    }
-
-    document.getElementById('userCategoryPermissionModal')?.remove();
-
-    const modal = document.createElement('div');
-    modal.id = 'userCategoryPermissionModal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px;';
-    modal.innerHTML = `
-      <div style="background:#fff;color:#111827;border-radius:16px;width:min(560px,100%);max-height:90vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.28);padding:22px;">
-        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:8px;">
-          <div>
-            <h3 style="margin:0 0 4px;">Categorías autorizadas</h3>
-            <div style="font-size:13px;color:#64748b;">${safeText(user.name||'Usuario')} · ${safeText(user.email||'')}</div>
-          </div>
-          <button type="button" class="outline-btn" style="width:auto" onclick="document.getElementById('userCategoryPermissionModal')?.remove()">Cerrar</button>
-        </div>
-        <p style="font-size:14px;color:#475569;margin:10px 0 16px;">
-          El usuario solo podrá ver y comprar productos de las categorías seleccionadas.
-          Estos permisos permanecen aunque después lo conviertas en distribuidor.
-        </p>
-        <div id="userCategoryPermissionList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
-          ${available.map(category=>{
-            const checked=selected.has(String(category).toLowerCase());
-            return `<label style="display:flex;align-items:center;gap:10px;border:1px solid #e2e8f0;border-radius:10px;padding:12px;cursor:pointer;">
-              <input type="checkbox" class="user-category-check" value="${safeText(category)}" ${checked?'checked':''}>
-              <span>${safeText(category)}</span>
-            </label>`;
-          }).join('')}
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px;">
-          <button type="button" class="outline-btn" style="width:auto" onclick="saveUserCategoryPermissions(${Number(userId)}, false)">Guardar sin activar</button>
-          <button type="button" class="primary-btn" style="width:auto" onclick="saveUserCategoryPermissions(${Number(userId)}, true)">${user.activation_pending ? 'Autorizar categorías y activar' : 'Guardar categorías'}</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-    modal.addEventListener('click', (event)=>{
-      if(event.target===modal) modal.remove();
-    });
-  }catch(e){
-    showMessage(e.message || 'No se pudieron cargar las categorías','error');
-  }
-}
-
-async function saveUserCategoryPermissions(userId, activate){
-  try{
-    const modal=document.getElementById('userCategoryPermissionModal');
-    if(!modal) return;
-    const categories=[...modal.querySelectorAll('.user-category-check:checked')].map(input=>input.value);
-    if(activate && !categories.length){
-      showMessage('Selecciona al menos una categoría antes de activar al usuario.','error');
-      return;
-    }
-    const data=await api('/api/admin/users/'+Number(userId)+'/categories',{
-      method:'PUT',
-      body:JSON.stringify({categories,activate:!!activate})
-    });
-    showMessage(data.message || 'Categorías actualizadas');
-    modal.remove();
-    if(typeof window.loadUsers==='function') await window.loadUsers();
-  }catch(e){
-    showMessage(e.message || 'No se pudieron guardar las categorías','error');
-  }
-}
-
-window.openUserCategoryPermissions=openUserCategoryPermissions;
-window.saveUserCategoryPermissions=saveUserCategoryPermissions;
-

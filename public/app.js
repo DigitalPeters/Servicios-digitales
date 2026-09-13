@@ -174,6 +174,7 @@ async function loadUsers(){
   try{
     const users = await api('/api/admin/users');
     allUsers = Array.isArray(users) ? users : [];
+    window.__petersAllUsers = allUsers;
     window.__adminUsersCacheOwnerId = Number(currentUser?.id || 0);
 
     const statUsersEl = document.getElementById('statUsers');
