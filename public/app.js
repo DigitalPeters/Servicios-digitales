@@ -174,7 +174,6 @@ async function loadUsers(){
   try{
     const users = await api('/api/admin/users');
     allUsers = Array.isArray(users) ? users : [];
-    window.__petersAllUsers = allUsers;
     window.__adminUsersCacheOwnerId = Number(currentUser?.id || 0);
 
     const statUsersEl = document.getElementById('statUsers');
@@ -1411,7 +1410,7 @@ function renderAdminReportCompactFinal(r){
   const info=calculateReportRefundInfo(r);
   const isDirect=Boolean(r.direct_customer_report);
   const reportStatus=String(r.status||'pendiente').toLowerCase();
-  const canAct=isDirect ? ['pendiente','proveedor_reportado'].includes(reportStatus) : reportStatus==='pendiente';
+  const canAct=['pendiente','proveedor_reportado'].includes(reportStatus);
   const itemId=`admin-report-compact-${r.id}`;
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
@@ -1420,8 +1419,15 @@ function renderAdminReportCompactFinal(r){
     <div class="compact-details" style="display:none">
       <p><b>Reporte:</b> #${r.id} <span class="status">${safeText(r.status||'pendiente')}</span></p>
       <p><b>Proveedor:</b> ${safeText(r.provider_name_snapshot||'Sin proveedor registrado')}</p>
-      <p><b>📅 Reportado al proveedor:</b> ${r.provider_reported_at ? safeText(new Date(r.provider_reported_at).toLocaleString('es-MX')) : 'Pendiente de enviar'}<br><b>📥 Respuesta del proveedor:</b> ${r.provider_responded_at ? safeText(new Date(r.provider_responded_at).toLocaleString('es-MX')) : 'Aún sin respuesta'}${r.provider_response_hours!=null ? ` · <b>⏱ Tiempo de respuesta:</b> ${Number(r.provider_response_hours).toFixed(1)} h` : ''}</p>
-      ${r.provider_responded_at ? `<p><b>Respuesta/nota del proveedor:</b> ${safeText(r.provider_response||'')}</p>` : ''}
+      <div class="provider-followup-box">
+        <p><b>📤 Reportado al proveedor:</b> ${r.provider_reported_at ? safeText(new Date(r.provider_reported_at).toLocaleString('es-MX')) : 'Pendiente de enviar'}<br><b>📥 Respuesta del proveedor:</b> ${r.provider_responded_at ? safeText(new Date(r.provider_responded_at).toLocaleString('es-MX')) : 'Aún sin respuesta'}${r.provider_response_hours!=null ? ` · <b>⏱ Tiempo de respuesta:</b> ${Number(r.provider_response_hours).toFixed(1)} h` : ''}</p>
+        ${r.provider_responded_at ? `<p><b>Resultado:</b> ${safeText(({cuenta_reemplazo:'Me dio otra cuenta',reembolso:'Me reembolsó',sin_solucion:'No me dio solución',otro:'Otro'}[String(r.provider_outcome||'')] || 'Sin registrar'))}${Number(r.provider_refund_amount||0)>0 ? ` · <b>Monto recibido:</b> $${formatMoney(r.provider_refund_amount)}` : ''}</p>` : ''}
+        ${r.provider_responded_at && r.provider_response ? `<p><b>Respuesta/nota:</b> ${safeText(r.provider_response)}</p>` : ''}
+        ${r.provider_responded_at && r.provider_outcome_note ? `<p><b>Detalle del resultado:</b> ${safeText(r.provider_outcome_note)}</p>` : ''}
+        ${r.provider_responded_at && r.provider_replacement_details ? `<p><b>Cuenta de reemplazo / detalle:</b> ${safeText(r.provider_replacement_details)}</p>` : ''}
+        ${r.provider_reported_at && !r.provider_responded_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="registerProviderResponse(${r.id},false)">📥 Registrar respuesta del proveedor</button>` : ''}
+        ${r.provider_responded_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="registerProviderResponse(${r.id},true)">✏️ Editar respuesta del proveedor</button>` : ''}
+      </div>
       <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} ${isDirect?'<span class="chip">Cliente directo</span>':''} <span class="small-text">${safeText(r.customer_email||'')}${r.direct_customer_phone?` · ${safeText(r.direct_customer_phone)}`:''}</span></p>
       <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
       ${isDirect ? `<p><b>Pedido directo:</b> #${Number(r.order_id||0)} · <b>Estado:</b> ${safeText(r.status||'pendiente')}</p>` : ''}
@@ -1432,9 +1438,8 @@ function renderAdminReportCompactFinal(r){
       ${Number(r.has_evidence || 0) === 1 ? `<div class="order-proof-row"><p style="margin:5px 0"><b>Evidencia adjunta:</b></p><button class="outline-btn" style="width:auto" onclick="openReportEvidenceModal(${r.id})">👁️ Ver evidencia</button></div>` : ''}
 <p><b>Monto:</b> $${formatMoney(r.order_amount)} &nbsp; <b>Días usados:</b> ${info.daysUsed} &nbsp; <b>Días restantes:</b> ${info.daysRemaining} &nbsp; <b>Reembolso sugerido:</b> $${formatMoney(info.refund)}</p>
       ${r.admin_response?`<div class="order-data response-text"><b>Respuesta admin:</b><br>${safeText(r.admin_response)}</div>`:''}
-      ${isDirect && reportStatus==='pendiente' ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="markDirectReportProvider(${r.id})">📤 Marcar reportado al proveedor</button>` : ''}
-      ${isDirect && reportStatus==='proveedor_reportado' ? `<div class="small-text" style="margin-bottom:10px">📤 Ya está marcado como reportado al proveedor. Puedes aplicar el reemplazo cuando tengas una cuenta nueva.</div>` : ''}
-      ${r.provider_reported_at && !r.provider_responded_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="registerProviderResponse(${r.id})">📥 Registrar respuesta del proveedor</button>` : ''}
+      ${!r.provider_reported_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="markDirectReportProvider(${r.id})">📤 Reportar al proveedor</button>` : `<div class="small-text" style="margin-bottom:10px">📤 Este reporte ya fue enviado al proveedor. Puedes editar su respuesta cuando te contesten.</div>`}
+      
       <div class="two-row">
         <button class="green-btn" onclick="replaceReportedAccountAuto(${r.id})" ${canAct?'':'disabled'}>🔁 Reemplazo (inventario)</button>
         <button class="outline-btn" onclick="replaceReportedAccountManual(${r.id})" ${canAct?'':'disabled'}>✍️ Reemplazo manual</button>
@@ -1461,12 +1466,18 @@ async function loadAccountReports(page = currentAdminAccountReportsPage) {
     const requestedPage = Math.max(1, Number(page || 1));
     const payload = await api(`/api/admin/account-reports?page=${requestedPage}&limit=${HISTORY_PAGE_LIMIT}`);
     const reports = Array.isArray(payload?.rows) ? payload.rows : [];
+    window.__lastAccountReports = reports;
     const totalPages = Math.max(1, Number(payload?.totalPages || 1));
     currentAdminAccountReportsPage = Math.max(1, Number(payload?.page || requestedPage));
     if(currentAdminAccountReportsPage > totalPages) return loadAccountReports(totalPages);
 
     const stat = document.getElementById('statReports');
     if (stat) stat.textContent = Number(payload?.pendingTotal || 0);
+    const ps = payload?.providerSummary || {};
+    const psBox = document.getElementById('providerFollowupSummary');
+    if(psBox){
+      psBox.innerHTML = `<div class="provider-followup-card"><b>📤 Reportados</b><strong>${Number(ps.reports||0)}</strong><small>al proveedor</small></div><div class="provider-followup-card"><b>⏳ Esperando</b><strong>${Number(ps.pending||0)}</strong><small>respuesta</small></div><div class="provider-followup-card"><b>🔁 Otra cuenta</b><strong>${Number(ps.replacements||0)}</strong><small>entregada</small></div><div class="provider-followup-card"><b>💰 Reembolsos</b><strong>${Number(ps.refunds||0)}</strong><small>recibidos</small></div><div class="provider-followup-card"><b>❌ Sin solución</b><strong>${Number(ps.no_solution||0)}</strong><small>del proveedor</small></div>`;
+    }
 
     const box = document.getElementById('adminAccountReportsList');
     if (box) {
@@ -1502,14 +1513,39 @@ async function markDirectReportProvider(reportId){
 }
 window.markDirectReportProvider=markDirectReportProvider;
 
-async function registerProviderResponse(reportId){
+async function registerProviderResponse(reportId, editing=false){
   try{
-    const note=(prompt('¿Qué respondió el proveedor? (opcional)')||'').trim();
-    const rawDate=prompt('Fecha y hora en que respondió el proveedor. Déjala vacía para usar ahora. Formato: 2026-09-12 12:30','')||'';
-    const data=await api('/api/admin/account-reports/'+reportId+'/provider-response',{method:'PATCH',body:JSON.stringify({provider_response:note,provider_responded_at:rawDate.trim()})});
-    showMessage(data.message||'Respuesta del proveedor registrada');
+    const report = (window.__lastAccountReports || []).find?.(x=>Number(x.id)===Number(reportId)) || null;
+    const currentOutcome = String(report?.provider_outcome||'');
+    const currentNote = String(report?.provider_response||'');
+    const currentOutcomeNote = String(report?.provider_outcome_note||'');
+    const currentRefund = Number(report?.provider_refund_amount||0);
+    const currentReplacement = String(report?.provider_replacement_details||'');
+    const currentDate = report?.provider_responded_at ? new Date(report.provider_responded_at).toISOString().slice(0,16).replace('T',' ') : '';
+    const outcomeOptions = [['cuenta_reemplazo','Me dio otra cuenta'],['reembolso','Me reembolsó'],['sin_solucion','No me dio nada / no solucionó'],['otro','Otro']];
+    const menu='Selecciona el resultado del proveedor:\n\n'+outcomeOptions.map((x,i)=>`${i+1}. ${x[1]}`).join('\n');
+    const choiceRaw = prompt(menu, currentOutcome ? String(outcomeOptions.findIndex(x=>x[0]===currentOutcome)+1) : '');
+    if(choiceRaw===null) return;
+    const idx=Number(choiceRaw)-1;
+    if(!Number.isInteger(idx) || !outcomeOptions[idx]) throw new Error('Selecciona una opción válida del 1 al 4.');
+    const outcome=outcomeOptions[idx][0];
+    const note=(prompt('¿Qué respondió el proveedor? Puedes escribir o corregir la respuesta:',currentNote)??'').trim();
+    const outcomeNote=(prompt('Detalle adicional del resultado (opcional):',currentOutcomeNote)??'').trim();
+    let refundAmount=currentRefund;
+    if(outcome==='reembolso'){
+      const raw=prompt('¿Cuánto dinero te reembolsó el proveedor?\n\nCaptura 0 si todavía no sabes el monto.',currentRefund>0?String(currentRefund):'0');
+      if(raw===null) return;
+      refundAmount=Math.max(0,Number(raw)||0);
+    }else refundAmount=0;
+    let replacementDetails=currentReplacement;
+    if(outcome==='cuenta_reemplazo') replacementDetails=(prompt('Indica el correo, perfil u otro dato de la nueva cuenta que te dio el proveedor (opcional):',currentReplacement)??'').trim();
+    else replacementDetails='';
+    const rawDate=prompt('Fecha y hora en que respondió el proveedor.\nFormato: 2026-09-16 15:30',currentDate);
+    if(rawDate===null) return;
+    const data=await api('/api/admin/account-reports/'+reportId+'/provider-response',{method:'PATCH',body:JSON.stringify({provider_response:note,provider_responded_at:rawDate.trim(),provider_outcome:outcome,provider_outcome_note:outcomeNote,provider_refund_amount:refundAmount,provider_replacement_details:replacementDetails})});
+    showMessage(data.message||'Respuesta del proveedor guardada');
     await Promise.allSettled([loadAccountReports(currentAdminAccountReportsPage),typeof actualizarConteosDashboard==='function'?actualizarConteosDashboard():Promise.resolve()]);
-  }catch(e){showMessage(e.message||'No se pudo registrar la respuesta del proveedor','error');}
+  }catch(e){showMessage(e.message||'No se pudo guardar la respuesta del proveedor','error');}
 }
 window.registerProviderResponse=registerProviderResponse;
 
@@ -4896,111 +4932,3 @@ function startDashboardRefreshScheduler(){
 registerLoadAppHook(function dashboardRefreshLoadAppHook(){
   startDashboardRefreshScheduler();
 }, { name:'dashboard-refresh-scheduler', order:740 });
-
-// ============================================================
-// NAVEGACION FINAL ROBUSTA - 2026-09-13
-// Cada acceso administrativo debe llevar exactamente al modulo
-// seleccionado, no simplemente al inicio de section-admin.
-// ============================================================
-(function installFinalAdminNavigation(){
-  function isAdminContext(){
-    return typeof isAnyAdminUserPanel === 'function' && isAnyAdminUserPanel();
-  }
-
-  function scrollToAdminExact(panelId){
-    if(!isAdminContext()) return showSection('dashboard');
-
-    // Primero mostramos la sección admin y esperamos a que el navegador
-    // recalcule el layout antes de medir la posición del panel.
-    showSection('admin');
-    applyRentedAdminLayout?.();
-
-    const go = () => {
-      const target = document.getElementById(panelId);
-      if(!target) return;
-
-      // scroll-margin-top ayuda con el topbar y este cálculo evita que
-      // scrollIntoView termine en una posición intermedia del panel anterior.
-      const topbar = document.querySelector('.topbar');
-      const offset = (topbar?.getBoundingClientRect().height || 78) + 18;
-      const absoluteTop = Math.max(0, target.getBoundingClientRect().top + window.scrollY - offset);
-      window.scrollTo({top:absoluteTop, left:0, behavior:'auto'});
-
-      // Segundo ajuste después del layout por si un módulo cargó contenido.
-      requestAnimationFrame(() => {
-        const rect = target.getBoundingClientRect();
-        const desired = Math.max(0, rect.top + window.scrollY - offset);
-        if(Math.abs(desired - window.scrollY) > 8){
-          window.scrollTo({top:desired, left:0, behavior:'auto'});
-        }
-      });
-    };
-
-    runAfterNextPaint(go);
-    return true;
-  }
-
-  window.scrollToAdmin = scrollToAdminExact;
-
-  window.openUsersFromDashboard = function(){
-    if(isAdminContext()) return scrollToAdminExact('adminUsersPanel');
-    return showSection('account');
-  };
-
-  window.openProductsFromDashboard = function(){
-    if(isAdminContext()) return scrollToAdminExact('adminProductsPanel');
-    return showSection('shop');
-  };
-
-  window.openInventoryFromDashboard = function(){
-    if(isAdminContext()) return scrollToAdminExact('adminPlatformAccountsPanel');
-    return showSection('shop');
-  };
-
-  window.openOrdersFromDashboard = function(){
-    if(isAdminContext()) return scrollToAdminExact('adminOrdersPanel');
-    return showSection('orders');
-  };
-
-  window.openAccountReportsFromDashboard = function(){
-    if(isAdminContext()) return scrollToAdminExact('adminAccountReportsPanel');
-    return showSection('reports');
-  };
-
-  window.openBalanceRequests = function(){
-    if(isAdminContext()) return scrollToAdminExact('adminBalanceRequestsPanel');
-    return showSection('balance');
-  };
-
-  window.openSalesReportFinal = function(){
-    if(!isAdminContext()) return;
-    showSection('admin');
-    if(typeof ensureAdvancedReportsPanelFinal === 'function') ensureAdvancedReportsPanelFinal();
-    const panel=document.getElementById('adminSalesReportPanel');
-    if(panel){ panel.classList.remove('hidden'); panel.style.display=''; }
-    if(typeof setTodaySalesDate === 'function') setTodaySalesDate();
-    if(typeof loadSalesReport === 'function') Promise.resolve(loadSalesReport(true)).catch(()=>{});
-    runAfterNextPaint(()=>{
-      const target=document.getElementById('adminSalesReportPanel');
-      if(!target) return;
-      const topbar=document.querySelector('.topbar');
-      const offset=(topbar?.getBoundingClientRect().height||78)+18;
-      window.scrollTo({top:Math.max(0,target.getBoundingClientRect().top+window.scrollY-offset),left:0,behavior:'auto'});
-    });
-  };
-
-  // Mantener el alias utilizado por tarjetas y módulos antiguos.
-  window.openSalesReport = window.openSalesReportFinal;
-
-  // Refuerzo visual: todos los módulos admin tienen separación suficiente
-  // para que el encabezado no tape el destino.
-  if(!document.getElementById('peters-final-admin-nav-style')){
-    const style=document.createElement('style');
-    style.id='peters-final-admin-nav-style';
-    style.textContent=`
-      #section-admin > .panel[id^="admin"] { scroll-margin-top: 110px; }
-      #section-admin > .grid-cards { scroll-margin-top: 110px; }
-    `;
-    document.head.appendChild(style);
-  }
-})();

@@ -34,6 +34,15 @@
     }
   </style>
   <link rel="stylesheet" href="styles.css?v=12">
+
+<style id="provider-followup-v20">
+.provider-followup-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:12px 0 16px}
+.provider-followup-card{border:1px solid #dbe3ee;border-radius:14px;padding:12px;background:#f8fafc;display:flex;flex-direction:column;gap:3px}
+.provider-followup-card b{font-size:13px;color:#334155}.provider-followup-card strong{font-size:24px;color:#0f172a}.provider-followup-card small{color:#64748b}
+.provider-followup-box{border:1px solid #dbe3ee;background:#f8fafc;border-radius:12px;padding:10px;margin:10px 0}
+@media(max-width:900px){.provider-followup-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.provider-followup-summary{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
   <div id="message" class="message"></div>
@@ -723,6 +732,7 @@
             </div>
             <button class="outline-btn" style="width:auto" onclick="loadAccountReports()">Actualizar</button>
           </div>
+          <div id="providerFollowupSummary" class="provider-followup-summary"></div>
           <div id="adminAccountReportsList">Sin reportes pendientes.</div>
         </div>
         <div id="adminSalesReportPanel" class="panel">
@@ -913,7 +923,6 @@
 <script src="app.js?v=26"></script>
 <script src="quarantine.js?v=2"></script>
 <script src="admin-users-distributor.js?v=11"></script>
-<script src="category-permissions.js?v=2"></script>
 <script src="admin-profit-quality.js?v=3"></script>
 <script src="master-admin.js?v=1.8.0"></script>
 <script src="master-ops-v14.js?v=1.8.1"></script>

@@ -98,13 +98,6 @@ async function register(){
       await loadApp();return;
     }
     const data=await api('/api/register',{method:'POST',body:JSON.stringify({name:registerName.value,email:registerEmail.value,password:registerPassword.value})});
-    if (data.pending_activation) {
-      token = null;
-      localStorage.removeItem('token');
-      showMessage(data.message || 'Cuenta creada. Espera autorización del administrador.');
-      showAuth('login');
-      return;
-    }
     token=data.token;localStorage.setItem('token',token);showMessage(data.message||'Cuenta creada');await loadApp();
   }catch(e){showMessage(e.message,'error');}
 }

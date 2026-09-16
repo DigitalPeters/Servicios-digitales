@@ -250,22 +250,16 @@ function renderAdminUsersWithTools(){
       const enabled = !(u.is_enabled === false || u.is_enabled === 0 || u.is_enabled === 'false');
       const statusChip = enabled
         ? '<span class="chip" style="background:#dcfce7;color:#166534">Activo</span>'
-        : '<span class="chip" style="background:#fee2e2;color:#991b1b">Pendiente / deshabilitado</span>';
-      const categoryConfigured = u.category_access_configured === true || u.category_access_configured === 1 || u.category_access_configured === 'true';
-      const authorizedCategories = Array.isArray(u.authorized_categories) ? u.authorized_categories : [];
-      const categoryText = categoryConfigured ? `${authorizedCategories.length} categoría${authorizedCategories.length === 1 ? '' : 's'} autorizada${authorizedCategories.length === 1 ? '' : 's'}` : 'Pendiente de autorización';
+        : '<span class="chip" style="background:#fee2e2;color:#991b1b">Deshabilitado</span>';
       const movementDate = formatAdminUserMovementDate(u.last_activity_at);
       const movements2m = Number(u.movements_2m || 0);
       const overviewButton = (!isPanelOwner && u.role !== 'admin' && typeof window.openMasterUser360 === 'function')
         ? `<button class="outline-btn" onclick="openMasterUser360(${u.id})">Ficha 360°</button>`
         : '';
-      const categoryButton = canManage && typeof window.openCategoryPermissions === 'function'
-        ? `<button class="outline-btn" onclick="openCategoryPermissions(${u.id})">${categoryConfigured ? 'Editar categorías' : 'Autorizar categorías'}</button>`
-        : '';
       const manageButtons = canManage
-        ? `${overviewButton}${categoryButton}<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
+        ? `${overviewButton}<button class="outline-btn" onclick="adminSetUserEnabled(${u.id}, ${enabled ? 'false' : 'true'})">${enabled ? 'Deshabilitar' : 'Habilitar'}</button><button class="danger-btn" onclick="adminDeleteUser(${u.id})">Eliminar</button>`
         : overviewButton;
-      return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${roleText} ${chip}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Categorías:</b> ${safeText(categoryText)}</p><p><b>Último movimiento:</b> ${movementDate}</p><p><b>Movimientos 2 meses:</b> ${movements2m}</p><div class="tools" style="margin-bottom:0">${action}${manageButtons}</div></div>`;
+      return `<div class="item"><p><b>ID:</b> ${u.id}</p><p><b>Nombre:</b> ${safeText(u.name)}</p><p><b>Correo:</b> ${safeText(u.email)}</p><p><b>Rol:</b> ${roleText} ${chip}</p><p><b>Saldo:</b> $${formatMoney(u.balance)}</p><p><b>Estado:</b> ${statusChip}</p><p><b>Último movimiento:</b> ${movementDate}</p><p><b>Movimientos 2 meses:</b> ${movements2m}</p><div class="tools" style="margin-bottom:0">${action}${manageButtons}</div></div>`;
     }).join('') || 'No hay usuarios.';
   }
 }

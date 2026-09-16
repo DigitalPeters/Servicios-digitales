@@ -1821,11 +1821,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_reported_at TIMESTAMP`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_responded_at TIMESTAMP`);
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_response TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_outcome TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_outcome_note TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_refund_amount NUMERIC DEFAULT 0`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_replacement_details TEXT DEFAULT ''`);
-  await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_response_updated_at TIMESTAMP`);
   await pool.query(`UPDATE account_reports ar SET owner_admin_id = o.owner_admin_id FROM orders o WHERE ar.direct_customer_report = TRUE AND ar.order_id = o.id AND o.admin_quick_sale = TRUE AND ar.owner_admin_id IS DISTINCT FROM o.owner_admin_id`);
   await pool.query(`UPDATE account_reports ar SET provider_name_snapshot = COALESCE(NULLIF(ma.provider_name,''),'') FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id WHERE ar.reported_account_id=pa.id AND COALESCE(ar.provider_name_snapshot,'')=''`);
   await pool.query(`UPDATE account_reports SET provider_reported_at = reviewed_at WHERE provider_reported_at IS NULL AND status='proveedor_reportado' AND reviewed_at IS NOT NULL`);
@@ -6008,27 +6003,13 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
 
     const totalsResult = await pool.query(
       `SELECT COUNT(*)::int AS total,
-              COUNT(*) FILTER (WHERE lower(COALESCE(account_reports.status, '')) = 'pendiente')::int AS pending_total,
-              COUNT(*) FILTER (WHERE account_reports.provider_reported_at IS NOT NULL)::int AS provider_reports_total,
-              COUNT(*) FILTER (WHERE account_reports.provider_responded_at IS NOT NULL)::int AS provider_responses_total,
-              COUNT(*) FILTER (WHERE account_reports.provider_reported_at IS NOT NULL AND account_reports.provider_responded_at IS NULL)::int AS provider_pending_total,
-              COUNT(*) FILTER (WHERE lower(COALESCE(account_reports.provider_outcome,'')) = 'cuenta_reemplazo')::int AS provider_replacements_total,
-              COUNT(*) FILTER (WHERE lower(COALESCE(account_reports.provider_outcome,'')) = 'reembolso')::int AS provider_refunds_total,
-              COUNT(*) FILTER (WHERE lower(COALESCE(account_reports.provider_outcome,'')) = 'sin_solucion')::int AS provider_no_solution_total
+              COUNT(*) FILTER (WHERE lower(COALESCE(account_reports.status, '')) = 'pendiente')::int AS pending_total
        FROM account_reports
        WHERE ${scopeSql}`,
       [ownerId]
     );
     const total = Number(totalsResult.rows[0]?.total || 0);
     const pendingTotal = Number(totalsResult.rows[0]?.pending_total || 0);
-    const providerSummary = {
-      reports: Number(totalsResult.rows[0]?.provider_reports_total || 0),
-      responses: Number(totalsResult.rows[0]?.provider_responses_total || 0),
-      pending: Number(totalsResult.rows[0]?.provider_pending_total || 0),
-      replacements: Number(totalsResult.rows[0]?.provider_replacements_total || 0),
-      refunds: Number(totalsResult.rows[0]?.provider_refunds_total || 0),
-      no_solution: Number(totalsResult.rows[0]?.provider_no_solution_total || 0)
-    };
 
     const result = await pool.query(
       `SELECT
@@ -6055,11 +6036,6 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         account_reports.provider_reported_at,
         account_reports.provider_responded_at,
         account_reports.provider_response,
-        account_reports.provider_outcome,
-        account_reports.provider_outcome_note,
-        account_reports.provider_refund_amount,
-        account_reports.provider_replacement_details,
-        account_reports.provider_response_updated_at,
         CASE WHEN account_reports.provider_reported_at IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (COALESCE(account_reports.provider_responded_at, NOW()) - account_reports.provider_reported_at))/3600.0)::numeric, 1) ELSE NULL END AS provider_response_hours,
         CASE WHEN account_reports.provider_reported_at IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (account_reports.provider_reported_at - account_reports.created_at))/3600.0)::numeric, 1) ELSE NULL END AS report_to_provider_hours,
         orders.amount AS order_amount,
@@ -6080,7 +6056,7 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
       [ownerId, limit, offset]
     );
 
-    res.json(buildPaginationPayload(result.rows, page, limit, total, { pendingTotal, providerSummary }));
+    res.json(buildPaginationPayload(result.rows, page, limit, total, { pendingTotal }));
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error cargando reportes de cuenta" });
@@ -6732,23 +6708,14 @@ app.post("/api/admin/account-reports/:reportId/refund-full", authMiddleware, adm
   }
 });
 
-// ADMIN: REGISTRAR / EDITAR RESPUESTA DEL PROVEEDOR
+// ADMIN: REGISTRAR RESPUESTA DEL PROVEEDOR
 app.patch("/api/admin/account-reports/:reportId/provider-response", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.reportId || 0);
     const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
     const note = String(req.body?.provider_response || '').trim().slice(0, 2000);
     const rawDate = String(req.body?.provider_responded_at || '').trim();
-    const outcome = String(req.body?.provider_outcome || '').trim().toLowerCase();
-    const outcomeNote = String(req.body?.provider_outcome_note || '').trim().slice(0, 2000);
-    const replacementDetails = String(req.body?.provider_replacement_details || '').trim().slice(0, 1000);
-    const refundAmount = Math.max(0, Number(req.body?.provider_refund_amount || 0));
-
-    const validOutcomes = ['', 'cuenta_reemplazo', 'reembolso', 'sin_solucion', 'otro'];
-    if (!validOutcomes.includes(outcome)) return res.status(400).json({ error: 'Resultado del proveedor inválido' });
-    if (!Number.isFinite(refundAmount)) return res.status(400).json({ error: 'Monto de reembolso inválido' });
     if (!reportId) return res.status(400).json({ error: 'Reporte inválido' });
-
     let respondedAt = null;
     if (rawDate) {
       const normalized = rawDate.includes('T') ? rawDate : rawDate.replace(' ', 'T');
@@ -6756,30 +6723,22 @@ app.patch("/api/admin/account-reports/:reportId/provider-response", authMiddlewa
       if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'Fecha de respuesta inválida' });
       respondedAt = parsed.toISOString();
     }
-
     const q = await pool.query(`
       UPDATE account_reports ar
-      SET provider_responded_at = COALESCE($1::timestamptz, ar.provider_responded_at, NOW()),
+      SET provider_responded_at = COALESCE($1::timestamptz, NOW()),
           provider_response = $2,
-          provider_outcome = $3,
-          provider_outcome_note = $4,
-          provider_refund_amount = $5,
-          provider_replacement_details = $6,
-          provider_response_updated_at = NOW(),
-          reviewed_at = COALESCE(ar.reviewed_at, NOW())
-      WHERE ar.id=$7
-        AND ($8::int IS NULL OR ar.owner_admin_id=$8 OR ar.user_id=$8 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id=$8)
-             OR (ar.direct_customer_report=TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$8)))
-      RETURNING id, provider_reported_at, provider_responded_at, provider_response,
-                provider_outcome, provider_outcome_note, provider_refund_amount,
-                provider_replacement_details, provider_response_updated_at`,
-      [respondedAt, note, outcome, outcomeNote, refundAmount, replacementDetails, reportId, ownerId]);
-
+          reviewed_at = COALESCE(ar.reviewed_at, NOW()),
+          status = CASE WHEN ar.status='proveedor_reportado' THEN 'proveedor_reportado' ELSE ar.status END
+      WHERE ar.id=$3
+        AND ($4::int IS NULL OR ar.owner_admin_id=$4 OR ar.user_id=$4 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id=$4)
+             OR (ar.direct_customer_report=TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$4)))
+      RETURNING id, provider_reported_at, provider_responded_at, provider_response`,
+      [respondedAt, note, reportId, ownerId]);
     if (!q.rows[0]) return res.status(404).json({ error: 'Reporte no encontrado' });
-    res.json({ message:'Respuesta del proveedor guardada', row:q.rows[0] });
+    res.json({ message:'Respuesta del proveedor registrada', row:q.rows[0] });
   } catch (err) {
-    console.error('Error guardando respuesta proveedor:', err.message);
-    res.status(500).json({ error:'No se pudo guardar la respuesta del proveedor' });
+    console.error('Error registrando respuesta proveedor:', err.message);
+    res.status(500).json({ error:'No se pudo registrar la respuesta del proveedor' });
   }
 });
 
@@ -11054,10 +11013,6 @@ async function loadSupplierPerformance(start, end) {
              COUNT(*) FILTER (WHERE ar.provider_reported_at IS NOT NULL)::int AS provider_reports,
              COUNT(*) FILTER (WHERE ar.provider_responded_at IS NOT NULL)::int AS provider_responses,
              COUNT(*) FILTER (WHERE ar.provider_reported_at IS NOT NULL AND ar.provider_responded_at IS NULL)::int AS pending_provider_reports,
-             COUNT(*) FILTER (WHERE lower(COALESCE(ar.provider_outcome,''))='cuenta_reemplazo')::int AS provider_replacements,
-             COUNT(*) FILTER (WHERE lower(COALESCE(ar.provider_outcome,''))='reembolso')::int AS provider_refunds,
-             COUNT(*) FILTER (WHERE lower(COALESCE(ar.provider_outcome,''))='sin_solucion')::int AS provider_no_solution,
-             COUNT(*) FILTER (WHERE lower(COALESCE(ar.provider_outcome,''))='otro')::int AS provider_other,
              COALESCE(AVG(EXTRACT(EPOCH FROM (ar.provider_reported_at - ar.created_at))/3600.0) FILTER (WHERE ar.provider_reported_at IS NOT NULL),0)::numeric AS avg_report_to_provider_hours,
              COALESCE(AVG(EXTRACT(EPOCH FROM (ar.provider_responded_at - ar.provider_reported_at))/3600.0) FILTER (WHERE ar.provider_reported_at IS NOT NULL AND ar.provider_responded_at IS NOT NULL),0)::numeric AS avg_provider_response_hours,
              COUNT(*) FILTER (WHERE ar.provider_responded_at IS NOT NULL AND ar.provider_reported_at IS NOT NULL AND ar.provider_responded_at <= ar.provider_reported_at + INTERVAL '24 hours')::int AS responses_under_24h,
@@ -11107,10 +11062,6 @@ async function loadSupplierPerformance(start, end) {
            COALESCE(f.provider_reports,0)::int AS provider_reports,
            COALESCE(f.provider_responses,0)::int AS provider_responses,
            COALESCE(f.pending_provider_reports,0)::int AS pending_provider_reports,
-           COALESCE(f.provider_replacements,0)::int AS provider_replacements,
-           COALESCE(f.provider_refunds,0)::int AS provider_refunds,
-           COALESCE(f.provider_no_solution,0)::int AS provider_no_solution,
-           COALESCE(f.provider_other,0)::int AS provider_other,
            COALESCE(f.avg_report_to_provider_hours,0)::numeric AS avg_report_to_provider_hours,
            COALESCE(f.avg_provider_response_hours,0)::numeric AS avg_provider_response_hours,
            COALESCE(f.responses_under_24h,0)::int AS responses_under_24h,
