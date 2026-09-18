@@ -3179,8 +3179,8 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
            renewal_days = $14
        WHERE id = $15
          AND (
-           ($14::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
-           OR ($14::int IS NOT NULL AND owner_admin_id = $14)
+           ($16::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
+           OR ($16::int IS NOT NULL AND owner_admin_id = $16)
          )`,
       [
         name.trim(),
