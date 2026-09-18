@@ -247,7 +247,9 @@ async function createProduct(){
         stock:manualStock,
         product_type:selectedType,
         combo_items:getSelectedComboItems('create'),
-        combo_discount:document.getElementById('productComboDiscount')?.value || 0
+        combo_discount:document.getElementById('productComboDiscount')?.value || 0,
+        renewal_enabled:document.getElementById('productRenewalEnabled')?.checked === true,
+        renewal_days:document.getElementById('productRenewalDays')?.value || 30
       })
     });
     showMessage(data.message||'Producto creado');
@@ -259,6 +261,9 @@ async function createProduct(){
     if(document.getElementById('productCostPrice'))document.getElementById('productCostPrice').value='0';
     if(document.getElementById('productType'))document.getElementById('productType').value='streaming_auto';
     if(document.getElementById('productComboDiscount'))document.getElementById('productComboDiscount').value='5';
+    if(document.getElementById('productRenewalEnabled'))document.getElementById('productRenewalEnabled').checked=false;
+    if(document.getElementById('productRenewalDays'))document.getElementById('productRenewalDays').value='30';
+    document.getElementById('productRenewalDaysBox')?.classList.add('hidden');
     toggleComboCreateBox();
     await loadProducts();
     await loadAdminProducts();
@@ -314,6 +319,7 @@ async function loadAdminProducts(){
         <label class="field-label">Datos requeridos</label><textarea id="editRequiredFields-${p.id}">${safeText(rf.join(', '))}</textarea>
         <label class="field-label">Tipo de producto</label><select id="editProductType-${p.id}" onchange="toggleComboEditBox(${p.id});syncEditProductStockControls(${p.id})"><option value="streaming_auto" ${type==='streaming_auto'?'selected':''}>Automático streaming</option><option value="manual" ${type==='manual'?'selected':''}>Manual</option><option value="combo_auto" ${type==='combo_auto'?'selected':''}>Combo automático</option></select>
         <div id="editComboBox-${p.id}" class="${type==='combo_auto'?'':'hidden'}"><label class="field-label">Descuento por plataforma incluida</label><input id="editComboDiscount-${p.id}" type="number" step="0.01" value="${Number(p.combo_discount||0)}" /><label class="field-label">Productos incluidos</label><div id="editComboItemsBox-${p.id}" class="order-data"></div><p class="small-text">El combo descuenta este monto a cada plataforma incluida.</p></div>
+        <div class="order-data renewal-config-box"><label class="checkbox-row"><input type="checkbox" id="editRenewalEnabled-${p.id}" ${Number(p.renewal_enabled||0)===1?'checked':''} onchange="document.getElementById('editRenewalDaysBox-${p.id}')?.classList.toggle('hidden', !this.checked)"/> 🔄 Permitir renovación</label><div id="editRenewalDaysBox-${p.id}" class="${Number(p.renewal_enabled||0)===1?'':'hidden'}"><label class="field-label">Días por renovación</label><input id="editRenewalDays-${p.id}" type="number" min="1" max="365" value="${Math.max(1,Number(p.renewal_days||30))}" /></div><p class="small-text">Los vendedores y distribuidores podrán renovar las cuentas entregadas de este producto.</p></div>
         <label class="field-label">Cobro</label><select id="editChargeMode-${p.id}"><option value="on_purchase" ${p.charge_mode==='on_purchase'?'selected':''}>Descontar al comprar</option><option value="on_success" ${p.charge_mode==='on_success'?'selected':''}>Descontar cuando el admin marque Éxito</option></select>
         <div class="order-data">
           <label id="editStockEnabledRow-${p.id}" class="checkbox-row ${type==='combo_auto'?'hidden':''}"><input type="checkbox" id="editStockEnabled-${p.id}" ${se?'checked':''} onchange="syncEditProductStockControls(${p.id})"/> Manejar stock limitado</label>
@@ -364,7 +370,9 @@ async function updateProduct(id){
       stock:stockValue,
       product_type:type,
       combo_items:getSelectedComboItems(`edit-${id}`),
-      combo_discount:document.getElementById(`editComboDiscount-${id}`)?.value || 0
+      combo_discount:document.getElementById(`editComboDiscount-${id}`)?.value || 0,
+      renewal_enabled:document.getElementById(`editRenewalEnabled-${id}`)?.checked === true,
+      renewal_days:document.getElementById(`editRenewalDays-${id}`)?.value || 30
     })});
     showMessage(data.message||'Producto actualizado');
     await loadProducts();
@@ -451,3 +459,11 @@ if(typeof document!=='undefined'){
     syncCreateProductStockControls();
   });
 }
+
+
+function syncCreateRenewalControls(){
+  const cb=document.getElementById('productRenewalEnabled');
+  const box=document.getElementById('productRenewalDaysBox');
+  if(box) box.classList.toggle('hidden', cb?.checked!==true);
+}
+if(typeof document!=='undefined') document.addEventListener('change',e=>{ if(e.target?.id==='productRenewalEnabled') syncCreateRenewalControls(); });

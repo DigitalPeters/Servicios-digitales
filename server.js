@@ -1440,6 +1440,29 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS combo_items TEXT DEFAULT '[]'`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS combo_discount NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS renewal_enabled INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS renewal_days INTEGER DEFAULT 30`);
+  await pool.query(`UPDATE products SET renewal_enabled = 0 WHERE renewal_enabled IS NULL`);
+  await pool.query(`UPDATE products SET renewal_days = 30 WHERE renewal_days IS NULL OR renewal_days < 1`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS account_renewals (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      order_id INTEGER REFERENCES orders(id),
+      account_id INTEGER REFERENCES platform_accounts(id),
+      product_id INTEGER REFERENCES products(id),
+      owner_admin_id INTEGER,
+      amount NUMERIC NOT NULL DEFAULT 0,
+      renewal_days INTEGER NOT NULL DEFAULT 30,
+      previous_expires_at TIMESTAMP,
+      new_expires_at TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'completed',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_renewals_user_created ON account_renewals(user_id, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_renewals_account_created ON account_renewals(account_id, created_at DESC)`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_data TEXT DEFAULT '{}'`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accion_en_espera'`);
@@ -2927,7 +2950,8 @@ app.get("/api/products", authMiddleware, async (req, res) => {
       `SELECT p.id, p.name, p.description, p.price, p.cost_price, p.category, p.required_fields, p.charge_mode, p.active, p.stock_enabled,
               ${effectiveStockExpression("p")} AS stock,
               ${reusableStockFlagExpression("p")} AS reusable_stock,
-              p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
+              p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id,
+              COALESCE(p.renewal_enabled,0) AS renewal_enabled, COALESCE(p.renewal_days,30) AS renewal_days
        FROM products p
        WHERE p.active = 1 AND ${owner.clause}
        ORDER BY p.category ASC, p.name ASC`,
@@ -3072,7 +3096,7 @@ app.get("/api/admin/products", authMiddleware, adminMiddleware, async (req, res)
 // ADMIN: CREAR PRODUCTO
 app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock, product_type, combo_items, combo_discount } = req.body;
+    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock, product_type, combo_items, combo_discount, renewal_enabled, renewal_days } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({ error: "Nombre y precio son obligatorios" });
@@ -3099,8 +3123,8 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 
     await pool.query(
       `INSERT INTO products
-       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $12, $13)`,
+       (name, description, price, cost_price, category, required_fields, charge_mode, active, stock_enabled, stock, product_type, combo_items, combo_discount, owner_admin_id, renewal_enabled, renewal_days)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         name.trim(),
         description || "",
@@ -3114,7 +3138,9 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
         normalizedType,
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
-        req.isPanelAdmin ? req.user.id : null
+        req.isPanelAdmin ? req.user.id : null,
+        (renewal_enabled === true || renewal_enabled === 1 || renewal_enabled === '1' || renewal_enabled === 'true') ? 1 : 0,
+        Math.max(1, Math.min(365, Number(renewal_days || 30)))
       ]
     );
 
@@ -3129,7 +3155,7 @@ app.post("/api/admin/create-product", authMiddleware, adminMiddleware, async (re
 app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const productId = req.params.productId;
-    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock, product_type, combo_items, combo_discount } = req.body;
+    const { name, description, price, cost_price, category, required_fields, charge_mode, stock_enabled, stock, product_type, combo_items, combo_discount, renewal_enabled, renewal_days } = req.body;
 
     if (!name || !price) {
       return res.status(400).json({ error: "Nombre y precio son obligatorios" });
@@ -3167,8 +3193,10 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
            stock = $9,
            product_type = $10,
            combo_items = $11,
-           combo_discount = $12
-       WHERE id = $13
+           combo_discount = $12,
+           renewal_enabled = $13,
+           renewal_days = $14
+       WHERE id = $15
          AND (
            ($14::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id = 0))
            OR ($14::int IS NOT NULL AND owner_admin_id = $14)
@@ -3186,6 +3214,8 @@ app.patch("/api/admin/products/:productId", authMiddleware, adminMiddleware, asy
         normalizedType,
         JSON.stringify(safeJsonArray(combo_items).map(Number).filter(n => Number.isInteger(n) && n > 0)),
         Math.max(0, Number(combo_discount || 0)),
+        (renewal_enabled === true || renewal_enabled === 1 || renewal_enabled === '1' || renewal_enabled === 'true') ? 1 : 0,
+        Math.max(1, Math.min(365, Number(renewal_days || 30))),
         productId,
         req.isPanelAdmin ? req.user.id : null
       ]
@@ -4510,6 +4540,117 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       errors: [...errors, err.message || "Error interno procesando la carga masiva."]
     });
   }
+});
+
+
+// ============================================================
+// RENOVACIONES DE CUENTAS PARA VENDEDORES / DISTRIBUIDORES
+// ============================================================
+app.get('/api/my-renewals', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT pa.id AS account_id, pa.assigned_order_id AS order_id,
+             pa.platform, pa.product_name, pa.account_email, pa.profile_name, pa.profile_pin,
+             pa.expires_at, pa.official_purchase_date, pa.delivered_at,
+             o.product_id, o.amount AS original_order_amount, o.created_at AS order_created_at,
+             p.name AS product_name_catalog, p.price AS base_price,
+             COALESCE(p.renewal_enabled,0) AS renewal_enabled,
+             COALESCE(p.renewal_days,30) AS renewal_days,
+             (EXTRACT(EPOCH FROM (pa.expires_at - NOW())) / 86400.0) AS days_remaining_exact,
+             GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (pa.expires_at - NOW())) / 86400.0))::int AS days_remaining,
+             CASE WHEN pa.expires_at > NOW() + INTERVAL '24 hours' THEN true ELSE false END AS can_renew
+      FROM platform_accounts pa
+      JOIN orders o ON o.id = pa.assigned_order_id
+      JOIN products p ON p.id = o.product_id
+      WHERE pa.assigned_user_id = $1
+        AND o.user_id = $1
+        AND o.status = 'exito'
+        AND COALESCE(o.refunded,0) = 0
+        AND pa.status = 'delivered'
+        AND COALESCE(p.renewal_enabled,0) = 1
+        AND pa.expires_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM account_reports ar
+          WHERE ar.user_id=$1 AND ar.order_id=o.id AND ar.reported_account_id=pa.id
+            AND NULLIF(ar.replacement_account_id,0) IS NOT NULL
+        )
+      ORDER BY pa.expires_at ASC, pa.id ASC`, [req.user.id]);
+
+    const rows=[];
+    for(const row of result.rows){
+      const product={id:row.product_id,price:row.base_price};
+      const price=await getEffectiveProductPrice(pool, req.user, product);
+      rows.push({...row, renewal_price:Number(price||0)});
+    }
+    res.json(rows);
+  } catch(err){
+    console.error('Error cargando renovaciones:',err.message);
+    res.status(500).json({error:'No se pudieron cargar tus renovaciones'});
+  }
+});
+
+app.post('/api/my-renewals/:accountId', authMiddleware, async (req, res) => {
+  const client=await pool.connect();
+  try{
+    const accountId=Number(req.params.accountId||0);
+    if(!accountId) return res.status(400).json({error:'Cuenta inválida'});
+    await client.query('BEGIN');
+    const q=await client.query(`
+      SELECT pa.*, o.id AS order_id, o.user_id, o.product_id, o.status AS order_status, o.refunded,
+             o.owner_admin_id AS order_owner_admin_id,
+             p.name AS catalog_product_name, p.price AS catalog_price, p.renewal_enabled, p.renewal_days,
+             p.product_type
+      FROM platform_accounts pa
+      JOIN orders o ON o.id=pa.assigned_order_id
+      JOIN products p ON p.id=o.product_id
+      WHERE pa.id=$1 AND pa.assigned_user_id=$2 AND o.user_id=$2
+      FOR UPDATE`,[accountId,req.user.id]);
+    const row=q.rows[0];
+    if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'No se encontró esa cuenta entre tus servicios activos.'});}
+    if(row.order_status!=='exito' || Number(row.refunded||0)===1){await client.query('ROLLBACK');return res.status(400).json({error:'Esta cuenta no tiene un pedido vigente para renovar.'});}
+    if(Number(row.renewal_enabled||0)!==1){await client.query('ROLLBACK');return res.status(400).json({error:'Esta cuenta no está habilitada por el administrador para renovaciones.'});}
+    if(row.status!=='delivered' || !row.expires_at){await client.query('ROLLBACK');return res.status(400).json({error:'Esta cuenta no está disponible para renovación.'});}
+    const expiration=new Date(row.expires_at);
+    if(!(expiration.getTime()>Date.now()+24*60*60*1000)){
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:'La renovación debe realizarse como mínimo 1 día antes del vencimiento para evitar cortes.'});
+    }
+    const renewalDays=Math.max(1,Math.min(365,Number(row.renewal_days||30)));
+    const product={id:row.product_id,price:row.catalog_price};
+    const price=Number(await getEffectiveProductPrice(client,req.user,product)||0);
+    if(price<=0){await client.query('ROLLBACK');return res.status(400).json({error:'El precio de renovación no está configurado.'});}
+    const bal=await client.query(`SELECT balance,owner_user_id,is_subadmin FROM users WHERE id=$1 FOR UPDATE`,[req.user.id]);
+    const before=Number(bal.rows[0]?.balance||0);
+    if(before<price){await client.query('ROLLBACK');return res.status(400).json({error:`Saldo insuficiente. Necesitas $${price.toFixed(2)} para renovar y tienes $${before.toFixed(2)}.`});}
+    const updated=await client.query(`
+      UPDATE platform_accounts
+      SET expires_at = expires_at + ($2::int * INTERVAL '1 day')
+      WHERE id=$1 AND expires_at > NOW() + INTERVAL '24 hours'
+      RETURNING expires_at`,[accountId,renewalDays]);
+    if(!updated.rows[0]){await client.query('ROLLBACK');return res.status(400).json({error:'La cuenta ya no cumple la condición mínima de 1 día antes del vencimiento.'});}
+    const newExpires=updated.rows[0].expires_at;
+    const after=Number((before-price).toFixed(2));
+    await client.query(`UPDATE users SET balance=$1 WHERE id=$2`,[after,req.user.id]);
+    const ownerAdminId=req.isPanelAdmin?req.user.id:(row.order_owner_admin_id||null);
+    const ins=await client.query(`INSERT INTO account_renewals(user_id,order_id,account_id,product_id,owner_admin_id,amount,renewal_days,previous_expires_at,new_expires_at,status)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed') RETURNING id,created_at`,[req.user.id,row.order_id,accountId,row.product_id,ownerAdminId,price,renewalDays,row.expires_at,newExpires]);
+    await recordBalanceLedger(client,{userId:req.user.id,ownerAdminId,actorUserId:req.user.id,movementType:'renovacion_cuenta',amount:-price,balanceBefore:before,balanceAfter:after,referenceType:'account_renewal',referenceId:ins.rows[0].id,note:`Renovación ${row.catalog_product_name||row.product_name||''} · cuenta #${accountId} · pedido #${row.order_id}`});
+    await recordAdminAudit(client,{user:req.user, isPanelAdmin:req.isPanelAdmin}, {action:'account_renewal',entityType:'platform_account',entityId:accountId,summary:`Renovación de cuenta #${accountId} · $${price.toFixed(2)}`,metadata:{order_id:row.order_id,renewal_days:renewalDays,previous_expires_at:row.expires_at,new_expires_at:newExpires}});
+    await client.query('COMMIT');
+    res.json({success:true,message:`Renovación realizada por ${renewalDays} días.`,account_id:accountId,order_id:row.order_id,amount:price,renewal_days:renewalDays,previous_expires_at:row.expires_at,new_expires_at:newExpires,balance:after});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){}console.error('Error renovando cuenta:',err.message);res.status(500).json({error:'No se pudo renovar la cuenta'});}finally{client.release();}
+});
+
+app.get('/api/my-renewals/history', authMiddleware, async (req,res)=>{
+  try{
+    const rows=await pool.query(`SELECT ar.id,ar.created_at,ar.order_id,ar.account_id,ar.amount,ar.renewal_days,ar.previous_expires_at,ar.new_expires_at,
+      pa.platform,pa.account_email,pa.profile_name,p.name AS product_name
+      FROM account_renewals ar
+      LEFT JOIN platform_accounts pa ON pa.id=ar.account_id
+      LEFT JOIN products p ON p.id=ar.product_id
+      WHERE ar.user_id=$1 ORDER BY ar.id DESC LIMIT 100`,[req.user.id]);
+    res.json(rows.rows);
+  }catch(err){res.status(500).json({error:'No se pudo cargar el historial de renovaciones'});}
 });
 
 // MIS PEDIDOS
