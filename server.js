@@ -3041,7 +3041,7 @@ app.get("/api/admin/products", authMiddleware, adminMiddleware, async (req, res)
               p.required_fields, p.charge_mode, p.active, p.stock_enabled,
               ${effectiveStockExpression("p")} AS stock,
               ${reusableStockFlagExpression("p")} AS reusable_stock,
-              p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id
+              p.product_type, p.combo_items, p.combo_discount, p.owner_admin_id, p.renewable, p.renewal_days
        FROM products p
        WHERE (
          ($1::int IS NULL AND (p.owner_admin_id IS NULL OR p.owner_admin_id = 0))
@@ -3666,6 +3666,165 @@ return res.json({
 }
 
 });
+
+// VENDEDOR/DISTRIBUIDOR: CUENTAS PROPIAS HABILITADAS PARA RENOVACIÓN
+app.get("/api/my-renewals", authMiddleware, async (req, res) => {
+  try {
+    const viewer = await getViewerContext(req.user.id);
+    if (!viewer || viewer.is_panel_admin || String(req.user.role || '').toLowerCase() === 'admin') {
+      return res.json([]);
+    }
+
+    const result = await pool.query(`
+      SELECT
+        pa.id AS account_id,
+        pa.platform,
+        pa.product_name AS account_product_name,
+        pa.account_email,
+        pa.profile_name,
+        pa.profile_pin,
+        pa.expires_at,
+        pa.assigned_order_id AS original_order_id,
+        pa.delivered_at,
+        p.id AS product_id,
+        p.name AS product_name,
+        p.renewable,
+        p.renewal_days,
+        o.created_at AS original_purchase_date
+      FROM platform_accounts pa
+      JOIN orders o ON o.id = pa.assigned_order_id
+      JOIN products p ON p.id = o.product_id
+      WHERE pa.assigned_user_id = $1
+        AND pa.status = 'delivered'
+        AND o.user_id = $1
+        AND o.status = 'exito'
+        AND COALESCE(o.refunded,0) = 0
+        AND COALESCE(p.renewable,0) = 1
+        AND pa.expires_at IS NOT NULL
+      ORDER BY pa.expires_at ASC, pa.id ASC
+    `, [req.user.id]);
+
+    const rows = [];
+    for (const row of result.rows) {
+      const product = { id: row.product_id, price: 0 };
+      const priceResult = await pool.query(`SELECT id, price, cost_price, owner_admin_id FROM products WHERE id = $1 LIMIT 1`, [row.product_id]);
+      if (!priceResult.rows[0]) continue;
+      const effectivePrice = await getEffectiveProductPrice(pool, req.user, priceResult.rows[0]);
+      const renewalDays = Math.max(1, Number(row.renewal_days || 30));
+      const expires = new Date(row.expires_at);
+      const now = new Date();
+      const msRemaining = expires.getTime() - now.getTime();
+      const daysRemaining = Math.floor(msRemaining / 86400000);
+      rows.push({ ...row, renewal_price: Number(effectivePrice || 0), renewal_days: renewalDays, days_remaining: daysRemaining });
+    }
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Error cargando renovaciones del usuario:', err.message);
+    res.status(500).json({ error: 'Error cargando renovaciones' });
+  }
+});
+
+// VENDEDOR/DISTRIBUIDOR: RENOVAR UNA CUENTA PROPIA
+app.post("/api/my-renewals/:accountId", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const accountId = Number(req.params.accountId || 0);
+    if (!accountId) return res.status(400).json({ error: 'Cuenta inválida' });
+
+    await client.query('BEGIN');
+
+    const result = await client.query(`
+      SELECT pa.*, o.id AS original_order_id, o.user_id AS order_user_id,
+             p.id AS product_id, p.name AS product_name, p.price, p.cost_price,
+             p.owner_admin_id AS product_owner_admin_id, p.renewable, p.renewal_days,
+             u.balance, u.owner_user_id, u.role
+      FROM platform_accounts pa
+      JOIN orders o ON o.id = pa.assigned_order_id
+      JOIN products p ON p.id = o.product_id
+      JOIN users u ON u.id = pa.assigned_user_id
+      WHERE pa.id = $1
+        AND pa.assigned_user_id = $2
+        AND o.user_id = $2
+        AND pa.status = 'delivered'
+        AND o.status = 'exito'
+        AND COALESCE(o.refunded,0) = 0
+      FOR UPDATE OF pa, u
+      LIMIT 1
+    `, [accountId, req.user.id]);
+
+    const account = result.rows[0];
+    if (!account) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'La cuenta no existe, ya no está asignada a ti o ya no puede renovarse.' });
+    }
+
+    if (!(account.renewable === true || account.renewable === 1 || account.renewable === '1')) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Este producto no está habilitado para renovaciones.' });
+    }
+
+    if (!account.expires_at) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esta cuenta no tiene una fecha de vencimiento registrada.' });
+    }
+
+    const renewalDays = Math.max(1, Math.floor(Number(account.renewal_days || 30)));
+    const effectivePrice = await getEffectiveProductPrice(client, req.user, account);
+    const price = Math.max(0, Number(effectivePrice || 0));
+    const balance = Number(account.balance || 0);
+
+    // Mínimo 1 día antes: si vence hoy o ya venció, no se permite.
+    const localDayCheck = await client.query(`SELECT ((($1::timestamp AT TIME ZONE 'America/Mexico_City')::date) - ((NOW() AT TIME ZONE 'America/Mexico_City')::date))::int AS days_remaining`, [account.expires_at]);
+    const daysRemaining = Number(localDayCheck.rows[0]?.days_remaining ?? -1);
+    if (daysRemaining < 1) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'La renovación debe realizarse como mínimo 1 día antes del vencimiento para evitar cortes.' });
+    }
+
+    if (balance < price) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Saldo insuficiente. Tu saldo es $${balance.toFixed(2)} y la renovación cuesta $${price.toFixed(2)}.` });
+    }
+
+    const newExpirationResult = await client.query(
+      `SELECT ($1::timestamp + ($2::int * INTERVAL '1 day')) AS new_expiration`,
+      [account.expires_at, renewalDays]
+    );
+    const newExpiration = newExpirationResult.rows[0]?.new_expiration;
+
+    await client.query(`UPDATE users SET balance = balance - $1 WHERE id = $2`, [price, req.user.id]);
+    const balanceAfter = balance - price;
+
+    await client.query(`UPDATE platform_accounts SET expires_at = $1 WHERE id = $2`, [newExpiration, accountId]);
+
+    await recordBalanceLedger(client, {
+      userId: req.user.id,
+      ownerAdminId: viewerOwnerAdminIdForRequest(req),
+      actorUserId: req.user.id,
+      movementType: 'renovacion',
+      amount: -price,
+      balanceBefore: balance,
+      balanceAfter,
+      referenceType: 'renewal',
+      referenceId: accountId,
+      note: `Renovación de ${account.product_name || account.platform || 'cuenta'} · pedido original #${account.original_order_id} · ${renewalDays} días`
+    });
+
+    await client.query('COMMIT');
+    res.json({ message: `Renovación realizada correctamente por ${renewalDays} días.`, account_id: accountId, renewal_days: renewalDays, renewal_price: price, previous_expiration: account.expires_at, new_expiration: newExpiration, balance_after: balanceAfter });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('Error renovando cuenta:', err.message);
+    res.status(500).json({ error: 'Error realizando la renovación' });
+  } finally {
+    client.release();
+  }
+});
+
+function viewerOwnerAdminIdForRequest(req) {
+  return req.isPanelAdmin ? Number(req.user.id) : null;
+}
 
 app.get("/api/alerts/expiring", authMiddleware, async (req, res) => {
   try {

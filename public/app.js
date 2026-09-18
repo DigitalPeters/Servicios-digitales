@@ -3792,6 +3792,43 @@ function activarHistorialCelular() {
     history.pushState({ panel: "abierto" }, '', '#opcion');
 }
 
+async function loadMyRenewals(){
+  const list=document.getElementById('myRenewalsList');
+  if(!list) return;
+  try{
+    list.innerHTML='<p class="small-text">Cargando tus cuentas renovables...</p>';
+    const rows=await api('/api/my-renewals');
+    const count=document.getElementById('actionRenewalsCount');
+    if(count) count.textContent=rows.length ? `${rows.length} cuenta${rows.length===1?'':'s'} disponible${rows.length===1?'':'s'}` : 'Sin cuentas renovables';
+    if(!rows.length){
+      list.innerHTML='<div style="padding:18px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;"><b>📭 No tienes cuentas disponibles para renovar.</b><p class="small-text">Solo aparecen cuentas de productos que el administrador habilitó para renovación.</p></div>';
+      return;
+    }
+    list.innerHTML=rows.map(acc=>{
+      const days=Number(acc.days_remaining ?? 0);
+      const canRenew=days>=1;
+      const expires=String(acc.expires_at||'').slice(0,10);
+      const expText=expires ? new Date(`${expires}T12:00:00`).toLocaleDateString('es-MX',{year:'numeric',month:'short',day:'numeric'}) : 'Sin fecha';
+      const status=days===0?'VENCE HOY':days<0?'VENCIDA':days===1?'Vence mañana':`Vence en ${days} días`;
+      return `<div class="item" style="border:1px solid ${canRenew?'#bfdbfe':'#fecaca'};background:${canRenew?'#f8fbff':'#fff7f7'};margin-bottom:12px;padding:15px;border-radius:12px;">\n        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">\n          <div style="min-width:250px;flex:1;">\n            <div style="font-size:17px;font-weight:800;">🔄 ${safeText(acc.product_name||acc.account_product_name||acc.platform||'Cuenta')}</div>\n            <div class="small-text" style="margin-top:5px;"><b>Correo:</b> ${safeText(acc.account_email||'')}</div>\n            <div class="small-text"><b>Perfil:</b> ${safeText(acc.profile_name||'Sin nombre')} ${acc.profile_pin?`· PIN: ${safeText(acc.profile_pin)}`:''}</div>\n            <div class="small-text"><b>Pedido original:</b> #${Number(acc.original_order_id||0)}</div>\n            <div class="small-text"><b>Vencimiento:</b> ${safeText(expText)}</div>\n            <div style="margin-top:7px;font-weight:800;color:${days<=1?'#c62828':'#1976d2'};">⏰ ${safeText(status)}</div>\n          </div>\n          <div style="min-width:180px;text-align:right;">\n            <div class="small-text">Renovación: <b>${Number(acc.renewal_days||30)} días</b></div>\n            <div style="font-size:20px;font-weight:900;margin:4px 0 10px;">$${formatMoney(acc.renewal_price||0)}</div>\n            ${canRenew?`<button class="primary-btn" style="width:auto;padding:10px 16px;" onclick="renewMyAccount(${Number(acc.account_id)})">🔄 Renovar ahora</button>`:`<button class="outline-btn" style="width:auto;padding:10px 16px;" disabled>⚠ No disponible</button>`}\n          </div>\n        </div>\n      </div>`;
+    }).join('');
+  }catch(e){
+    list.innerHTML=`<p style="color:red;">Error cargando renovaciones: ${safeText(e.message)}</p>`;
+  }
+}
+
+async function renewMyAccount(accountId){
+  try{
+    if(!confirm('¿Confirmas la renovación de esta cuenta? El costo se descontará de tu saldo y se agregarán los días configurados por el administrador.')) return;
+    const data=await api(`/api/my-renewals/${Number(accountId)}`,{method:'POST',body:JSON.stringify({})});
+    showMessage(data.message||'Renovación realizada correctamente');
+    if(typeof loadApp==='function') await loadApp();
+    await loadMyRenewals();
+  }catch(e){ showMessage(e.message||'No se pudo renovar la cuenta','error'); }
+}
+window.loadMyRenewals=loadMyRenewals;
+window.renewMyAccount=renewMyAccount;
+
 async function loadExpiringAlerts() {
   const list = document.getElementById('expiringAlertsList');
   if (!list) return;
@@ -4414,7 +4451,7 @@ function applyDashboardRoleVisibilityMatrix(){
   ];
 
   const distOnlyButtons=['btn-dist-usuarios','btn-dist-precios','btn-dist-ganancias'];
-  const actionButtons=['actionOrdersBtn','actionBalanceBtn','actionReportBtn','actionResponsesBtn'];
+  const actionButtons=['actionOrdersBtn','actionBalanceBtn','actionReportBtn','actionResponsesBtn','actionRenewalsBtn'];
   const vendorOnlyCards=['actionAccountCard','actionShopCard','actionLogoutCard'];
   const globalInfraIds=['adminPanelsCardPhase1','adminPanelsPanelPhase1','dashAdminPanelsCardMainFinal','panicResetMenuBtn'];
 
@@ -4448,6 +4485,7 @@ function applyDashboardRoleVisibilityMatrix(){
     hardHide('balanceMenuBtn', true);
     hardHide('reportsMenuBtn', true);
     hardHide('responsesMenuBtn', true);
+    hardHide('actionRenewalsBtn', true);
 
     actionButtons.forEach(id=>hardHide(id,true));
     distOnlyButtons.forEach(id=>hardHide(id,true));
@@ -4483,6 +4521,7 @@ function applyDashboardRoleVisibilityMatrix(){
     hardHide('balanceMenuBtn', true);
     hardHide('reportsMenuBtn', true);
     hardHide('responsesMenuBtn', true);
+    hardHide('actionRenewalsBtn', false);
 
     actionButtons.forEach(id=>hardHide(id,false));
     distOnlyButtons.forEach(id=>hardHide(id,false));
@@ -4502,6 +4541,7 @@ function applyDashboardRoleVisibilityMatrix(){
     hardHide('balanceMenuBtn', true);
     hardHide('reportsMenuBtn', true);
     hardHide('responsesMenuBtn', true);
+    hardHide('actionRenewalsBtn', false);
 
     actionButtons.forEach(id=>hardHide(id,false));
     vendorOnlyCards.forEach(id=>hardHide(id,false));
@@ -4578,6 +4618,10 @@ function actualizarConteosDashboard(){
 
   applyDashboardRoleVisibilityMatrix();
 }
+
+registerSectionHook(function userRenewalsSectionHook(name){
+  if(name === 'renewals') loadMyRenewals();
+});
 
 registerSectionHook(function roleMatrixSectionHook(name){
   applyDashboardRoleVisibilityMatrix();

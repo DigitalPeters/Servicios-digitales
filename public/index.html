@@ -230,6 +230,10 @@
       <div class="dash-icon">📬</div>
       <div><div class="dash-label">Respuestas</div><div class="small-text">Ver seguimiento de fallas</div></div>
     </div>
+    <div id="actionRenewalsBtn" onclick="showSection('renewals')" class="dash-card clickable hidden">
+      <div class="dash-icon">🔄</div>
+      <div><div class="dash-label">Renovaciones</div><div class="small-text">Renueva tus cuentas antes de que venzan</div><div id="actionRenewalsCount" class="small-text" style="font-weight:800;color:#1976d2"></div></div>
+    </div>
     <div id="btn-dist-usuarios" onclick="showSection('distributor')" class="dash-card clickable hidden">
       <div class="dash-icon">👥</div>
       <div><div class="dash-label">Crear usuarios</div><div class="small-text">Gestión de vendedores</div></div>
@@ -318,6 +322,25 @@
     <input type="password" id="pass-nueva" placeholder="Nueva contraseña (mínimo 6 caracteres)" style="width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; border: 1px solid #444; background: #2a2a40; color: white; box-sizing: border-box;">
     
     <button onclick="cambiarMiPassword()" style="width: 100%; padding: 12px; background: #6d5dfc; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">Actualizar mi seguridad</button>
+  </div>
+</section>
+
+<section id="section-renewals" class="section">
+  <div class="panel" style="margin-bottom:20px;border-left:4px solid #1976d2;">
+    <div class="panel-head">
+      <div>
+        <h2 style="color:#1976d2;margin:0;">🔄 Renovaciones</h2>
+        <p class="small-text">Aquí aparecen tus cuentas con productos que el administrador habilitó para renovación.</p>
+      </div>
+      <button class="outline-btn" style="width:auto;border-color:#1976d2;color:#1976d2;" onclick="loadMyRenewals()">🔄 Actualizar</button>
+    </div>
+    <div id="myRenewalsList" style="padding:16px;">Cargando renovaciones...</div>
+  </div>
+  <div class="panel" style="border-left:4px solid #f59e0b;">
+    <div style="padding:16px;">
+      <b>⏰ Regla de renovación</b>
+      <p class="small-text" style="margin-bottom:0;">Para evitar cortes, la renovación debe realizarse como mínimo <b>1 día antes del vencimiento</b>. El sistema bloqueará renovaciones que ya estén en el día de vencimiento.</p>
+    </div>
   </div>
 </section>
 
