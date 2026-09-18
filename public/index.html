@@ -164,7 +164,6 @@
           <button id="accountMenuBtn" class="menu-btn" data-section="account" onclick="showSection('account')">👤 Mi Perfil / Contraseña</button>
           <button id="shopMenuBtn" class="menu-btn" data-section="shop" onclick="showSection('shop')">🛒 Ir a Tienda SaaS</button>
           <button id="ordersMenuBtn" class="menu-btn hidden" data-section="orders" onclick="showSection('orders')">📦 Mis pedidos</button>
-          <button id="renewalsMenuBtn" class="menu-btn hidden" data-section="renewals" onclick="showSection('renewals')">🔄 Renovaciones</button>
           <button id="balanceMenuBtn" class="menu-btn hidden" data-section="balance" onclick="showSection('balance')">💳 Cargar saldo</button>
           <button id="reportsMenuBtn" class="menu-btn hidden" data-section="reports" onclick="showSection('reports')">🛟 Reportar falla</button>
           <button id="responsesMenuBtn" class="dashboard-utility-btn hidden" onclick="openFailureResponsesFinal()">📬 Respuestas</button>
@@ -211,9 +210,7 @@
       <div class="dash-label">Tienda</div>
           </div>
   </div>
-    <div id="actionRenewalsBtn" class="dash-card clickable hidden" onclick="showSection('renewals')"><div class="dash-icon">🔄</div><div><div class="dash-label">Renovaciones</div><div id="renewalsDashboardSummary" class="small-text">Revisar cuentas y días restantes</div></div></div>
-
-  <div id="actionOrdersBtn" onclick="showSection('orders')" class="dash-card clickable hidden">
+    <div id="actionOrdersBtn" onclick="showSection('orders')" class="dash-card clickable hidden">
       <div class="dash-icon">📦</div>
       <div><div class="dash-label">Mis pedidos</div><div class="small-text">Historial y seguimiento</div></div>
     </div>
@@ -386,18 +383,6 @@
             </select>
           </div>
           <div id="myOrdersList"></div>
-        </div>
-      </section>
-
-
-      <section id="section-renewals" class="section">
-        <div class="panel">
-          <div class="panel-head"><div><h2>🔄 Renovaciones</h2><p class="small-text">Renueva las cuentas que el administrador haya habilitado. Para evitar cortes, realiza la renovación como mínimo 1 día antes del vencimiento.</p></div><button class="outline-btn" style="width:auto" onclick="loadMyRenewals()">Actualizar</button></div>
-          <div id="renewalsNotice" class="order-data" style="margin-bottom:14px"></div>
-          <div id="myRenewalsList">Cargando cuentas renovables...</div>
-          <hr class="divider">
-          <h3>Historial de renovaciones</h3>
-          <div id="myRenewalsHistory">Cargando historial...</div>
         </div>
       </section>
 
@@ -903,13 +888,10 @@
       <div id="productComboItemsBox" class="order-data">Primero carga productos.</div>
       <p class="small-text">El precio del combo se calcula automáticamente: suma de productos incluidos menos el descuento por cada plataforma.</p>
     </div>
-    <div class="order-data renewal-config-box">
-      <label class="checkbox-row"><input type="checkbox" id="productRenewalEnabled" onchange="syncCreateRenewalControls()" /> 🔄 Permitir renovación de este producto</label>
-      <div id="productRenewalDaysBox" class="hidden">
-        <label class="field-label">Días por renovación</label>
-        <input id="productRenewalDays" type="number" min="1" max="365" value="30" />
-      </div>
-      <p class="small-text">Si lo habilitas, vendedores y distribuidores podrán renovar las cuentas entregadas de este producto desde “Renovaciones”.</p>
+    <div class="order-data" style="margin-top:12px">
+      <label class="checkbox-row"><input type="checkbox" id="productRenewable" /> 🔄 Permitir renovación de este producto</label>
+      <div id="productRenewalDaysBox" style="margin-top:8px"><label class="field-label">Días por renovación</label><input id="productRenewalDays" type="number" min="1" value="30" /></div>
+      <p class="small-text">Si está activado, los vendedores y distribuidores podrán renovar las cuentas entregadas de este producto.</p>
     </div>
     <label class="field-label">Cobro</label>
     <select id="productChargeMode">
@@ -994,7 +976,6 @@
     </div>
   </div>
 
-  <script src="/renewals.js"></script>
   <script src="/navigation-fix-v22.js"></script>
 </body>
 </html>

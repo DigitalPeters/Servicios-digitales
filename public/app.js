@@ -23,9 +23,7 @@ const SECTION_ALIASES = Object.freeze({
   failureResponses: 'failure-responses',
   accountResponses: 'failure-responses',
   reportResponses: 'failure-responses',
-  store: 'shop',
-  renew: 'renewals',
-  renovaciones: 'renewals'
+  store: 'shop'
 });
 
 const __sectionHooks = new Set();
@@ -139,14 +137,6 @@ function showSection(name) {
 
   if(normalizedName === 'shop' && typeof loadProducts === 'function'){
     runSectionLoadOnce('shop', () => loadProducts());
-  }
-
-  if(normalizedName === 'dashboard' && typeof loadMyRenewals === 'function' && currentUser && (isDistributorForDashboard() || isVendorForDashboard())){
-    runSectionLoadOnce('renewals-dashboard', () => loadMyRenewals());
-  }
-
-  if(normalizedName === 'renewals' && typeof loadMyRenewals === 'function'){
-    runSectionLoadOnce('renewals', () => loadMyRenewals());
   }
 
   if(normalizedName === 'orders' && typeof loadMyOrders === 'function'){
@@ -4424,7 +4414,7 @@ function applyDashboardRoleVisibilityMatrix(){
   ];
 
   const distOnlyButtons=['btn-dist-usuarios','btn-dist-precios','btn-dist-ganancias'];
-  const actionButtons=['actionOrdersBtn','actionBalanceBtn','actionReportBtn','actionResponsesBtn','actionRenewalsBtn'];
+  const actionButtons=['actionOrdersBtn','actionBalanceBtn','actionReportBtn','actionResponsesBtn'];
   const vendorOnlyCards=['actionAccountCard','actionShopCard','actionLogoutCard'];
   const globalInfraIds=['adminPanelsCardPhase1','adminPanelsPanelPhase1','dashAdminPanelsCardMainFinal','panicResetMenuBtn'];
 
@@ -4432,7 +4422,6 @@ function applyDashboardRoleVisibilityMatrix(){
   toggle('accountMenuBtn', false);
   toggle('shopMenuBtn', false);
   toggle('logoutMenuBtn', false);
-  toggle('renewalsMenuBtn', false);
 
   if(isAdminLike){
     hardHide('dashboardGlobalActionsBar', false);
@@ -4456,7 +4445,6 @@ function applyDashboardRoleVisibilityMatrix(){
 
     hardHide('alertsMenuBtn', true);
     hardHide('ordersMenuBtn', true);
-    hardHide('renewalsMenuBtn', true);
     hardHide('balanceMenuBtn', true);
     hardHide('reportsMenuBtn', true);
     hardHide('responsesMenuBtn', true);
@@ -4492,7 +4480,6 @@ function applyDashboardRoleVisibilityMatrix(){
 
     hardHide('alertsMenuBtn', true);
     hardHide('ordersMenuBtn', true);
-    hardHide('renewalsMenuBtn', false);
     hardHide('balanceMenuBtn', true);
     hardHide('reportsMenuBtn', true);
     hardHide('responsesMenuBtn', true);
@@ -4512,7 +4499,6 @@ function applyDashboardRoleVisibilityMatrix(){
 
     hardHide('alertsMenuBtn', true);
     hardHide('ordersMenuBtn', true);
-    hardHide('renewalsMenuBtn', false);
     hardHide('balanceMenuBtn', true);
     hardHide('reportsMenuBtn', true);
     hardHide('responsesMenuBtn', true);
