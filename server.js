@@ -6068,7 +6068,12 @@ app.get("/api/admin/account-reports", authMiddleware, adminMiddleware, async (re
         products.category AS product_category,
         platform_accounts.platform AS platform,
         platform_accounts.product_name AS account_product_name,
-        platform_accounts.status AS account_status
+        platform_accounts.account_email AS current_account_email,
+        platform_accounts.account_password AS current_account_password,
+        platform_accounts.profile_name AS account_profile_name,
+        platform_accounts.profile_pin AS account_profile_pin,
+        platform_accounts.status AS account_status,
+        platform_accounts.assigned_order_id AS account_original_order_id
        FROM account_reports
        JOIN users ON account_reports.user_id = users.id
        LEFT JOIN orders ON orders.id = account_reports.order_id

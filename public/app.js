@@ -1428,10 +1428,15 @@ function renderAdminReportCompactFinal(r){
         ${r.provider_reported_at && !r.provider_responded_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="registerProviderResponse(${r.id},false)">📥 Registrar respuesta del proveedor</button>` : ''}
         ${r.provider_responded_at ? `<button class="outline-btn" style="width:auto;margin-bottom:10px" onclick="registerProviderResponse(${r.id},true)">✏️ Editar respuesta del proveedor</button>` : ''}
       </div>
-      <p><b>Cliente:</b> ${safeText(r.customer_name||'Cliente')} ${isDirect?'<span class="chip">Cliente directo</span>':''} <span class="small-text">${safeText(r.customer_email||'')}${r.direct_customer_phone?` · ${safeText(r.direct_customer_phone)}`:''}</span></p>
-      <p><b>Correo reportado:</b> ${safeText(r.email||'')}</p>
+      <div class="report-account-access-box">
+        <p><b>👤 Vendedor que reporta:</b> ${safeText(r.customer_name||'Vendedor')} <span class="small-text">${safeText(r.customer_email||'')}${r.direct_customer_phone?` · ${safeText(r.direct_customer_phone)}`:''}</span></p>
+        <p><b>📧 Correo de la cuenta reportada:</b> ${safeText(r.current_account_email||r.email||'')}</p>
+        <p><b>🔐 Contraseña actual:</b> <code>${safeText(r.current_account_password||'No disponible')}</code></p>
+        <p><b>👤 Número de perfil:</b> ${Number(r.reported_account_id||0)>0 ? '#'+Number(r.reported_account_id) : 'No identificado'}${r.account_profile_name?` · <b>Nombre del perfil:</b> ${safeText(r.account_profile_name)}`:''}${r.account_profile_pin?` · <b>PIN:</b> ${safeText(r.account_profile_pin)}`:''}</p>
+        <p><b>🧾 Pedido original:</b> ${Number(r.account_original_order_id||r.order_id||0)>0 ? '#'+Number(r.account_original_order_id||r.order_id) : 'No identificado'}</p>
+      </div>
       ${isDirect ? `<p><b>Pedido directo:</b> #${Number(r.order_id||0)} · <b>Estado:</b> ${safeText(r.status||'pendiente')}</p>` : ''}
-      <p><b>Perfil original reportado:</b> ${Number(r.reported_account_id||0)>0 ? '#'+Number(r.reported_account_id) : 'No identificado'}${Number(r.replacement_account_id||0)>0 ? ` &nbsp; <b>Perfil de reemplazo:</b> #${Number(r.replacement_account_id)}` : ''}</p>
+      ${Number(r.replacement_account_id||0)>0 ? `<p><b>Perfil de reemplazo:</b> #${Number(r.replacement_account_id)}</p>` : ''}
       <p><b>Producto:</b> ${safeText(r.product_name||r.account_product_name||'')} ${r.platform?`<span class="chip">${safeText(r.platform)}</span>`:''}</p>
       <p><b>Falla:</b> ${safeText(r.issue_type||'otro')}</p>
       <p><b>Explicación:</b> ${safeText(r.description||'')}</p>
@@ -4932,3 +4937,22 @@ function startDashboardRefreshScheduler(){
 registerLoadAppHook(function dashboardRefreshLoadAppHook(){
   startDashboardRefreshScheduler();
 }, { name:'dashboard-refresh-scheduler', order:740 });
+
+
+/* REPORTES FALLA: DATOS DE ACCESO ADMIN */
+(function(){const st=document.createElement('style');st.textContent=`
+
+/* ==========================================================
+   REPORTES DE FALLA - DATOS DE ACCESO PARA ADMIN
+   ========================================================== */
+.report-account-access-box{
+  margin:12px 0; padding:12px 14px; border:1px solid #cbd5e1;
+  border-radius:10px; background:#f8fafc;
+}
+.report-account-access-box p{margin:7px 0;}
+.report-account-access-box code{
+  display:inline-block; padding:3px 7px; border-radius:6px;
+  background:#fff; border:1px solid #dbe3ec; font-family:monospace;
+  font-size:14px; color:#111827;
+}
+`;document.head.appendChild(st);})();
