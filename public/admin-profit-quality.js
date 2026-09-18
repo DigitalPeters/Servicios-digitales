@@ -190,6 +190,40 @@
       <div><span>Utilidad por unidad</span><b class="${unitProfit!==null&&unitProfit<0?'error':'success'}">${unitProfit===null?'—':money(unitProfit)}</b>${margin===null?'':`<small>${margin.toFixed(1)}% margen</small>`}</div>`;
   };
 
+  function renderMissingMotherAccounts(rows){
+    const box=document.getElementById('pqMissingMotherAccounts'); if(!box) return;
+    const list=Array.isArray(rows)?rows:[];
+    if(!list.length){
+      box.innerHTML='<div class="pq-inline-ok">✅ Todas las cuentas madre tienen proveedor y costos configurados.</div>';
+      return;
+    }
+    const counts={provider:0,full:0,profile:0};
+    list.forEach(r=>{if(r.provider_missing)counts.provider++;if(r.full_cost_missing)counts.full++;if(r.profile_cost_missing)counts.profile++;});
+    box.innerHTML=`
+      <div class="pq-missing-summary">
+        <div><b>${list.length}</b><span>cuentas con pendientes</span></div>
+        <div><b>${counts.provider}</b><span>sin proveedor</span></div>
+        <div><b>${counts.full}</b><span>sin costo completo</span></div>
+        <div><b>${counts.profile}</b><span>sin costo por perfil</span></div>
+      </div>
+      <div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Producto</th><th>Perfiles</th><th>Proveedor</th><th>Costo cuenta</th><th>Costo perfil</th><th>Pendiente</th></tr></thead><tbody>
+      ${list.map(r=>{
+        const pending=[];
+        if(r.provider_missing)pending.push('Proveedor');
+        if(r.full_cost_missing)pending.push('Costo cuenta completa');
+        if(r.profile_cost_missing)pending.push('Costo por perfil');
+        return `<tr>
+          <td><b>#${num(r.id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span></td>
+          <td>${esc(r.product_name||'Sin producto')}</td>
+          <td>${num(r.profile_count)}</td>
+          <td>${r.provider_missing?'<span class="chip error">Sin proveedor</span>':esc(r.provider_name)}</td>
+          <td>${r.full_cost_missing?'<span class="chip error">Falta</span>':money(r.purchase_cost_total)}</td>
+          <td>${r.profile_cost_missing?'<span class="chip error">Falta</span>':(r.effective_unit_cost===null?'—':money(r.effective_unit_cost))}</td>
+          <td><span class="chip error">${esc(pending.join(' · '))}</span></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
   function renderMothers(rows){
     const box=document.getElementById('pqMotherAccounts'); if(!box) return;
     const active=(rows||[]).filter(r=>r.id);
@@ -298,6 +332,7 @@
     cache=data;
     renderSummary(data.summary||{});
     renderProviders(data.profitability?.providers||[]);
+    renderMissingMotherAccounts(data.profitability?.missing_mother_accounts||[]);
     renderMothers(data.profitability?.mother_accounts||[]);
     renderQuality('pqQualityPlatform',data.quality?.by_platform||[]);
     renderQuality('pqQualityProvider',data.quality?.by_provider||[]);
@@ -311,7 +346,7 @@
     ensureDates();
     const start=document.getElementById('profitQualityStart')?.value||'';
     const end=document.getElementById('profitQualityEnd')?.value||'';
-    ['pqProviders','pqMotherAccounts','pqQualityPlatform','pqQualityProvider','pqQualitySeller','pqQualityProduct','pqRecentReports'].forEach(id=>{
+    ['pqProviders','pqMissingMotherAccounts','pqMotherAccounts','pqQualityPlatform','pqQualityProvider','pqQualitySeller','pqQualityProduct','pqRecentReports'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.innerHTML='<p class="small-text">Calculando...</p>';
     });
     try{

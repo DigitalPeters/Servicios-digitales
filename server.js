@@ -4530,6 +4530,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
     let successCount = 0;
     const bulkBatchId = `bulk-${Number(req.user?.id||0)}-${Date.now()}`;
     const newMotherCyclesInThisUpload = new Map();
+    const touchedMotherIds = new Set();
 
     for (const item of preparedRows) {
       const client = await pool.connect();
@@ -4634,6 +4635,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         );
 
         const accountId = insertResult.rows[0].id;
+        touchedMotherIds.add(Number(motherAccount.id));
         await addTraceEvent(client, {
           accountId,
           eventType: "ACCOUNT_CREATED",
@@ -4665,6 +4667,60 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       } finally {
         client.release();
       }
+    }
+
+    // V2.5: completa automáticamente la ficha financiera de las cuentas madre
+    // creadas/modificadas por una carga masiva. En CSV el costo de cada perfil
+    // suele venir en precio_compra (por ejemplo 5.83 x 6 perfiles), mientras que
+    // rentabilidad necesita además saber que la madre se vende por perfil para
+    // poder calcular el costo unitario. No se inventan datos: el total se deriva
+    // de los precios de los perfiles únicamente cuando el costo total está vacío.
+    if (touchedMotherIds.size) {
+      const ids = Array.from(touchedMotherIds).filter(Number.isInteger);
+      await pool.query(`
+        WITH profile_stats AS (
+          SELECT pa.mother_account_id,
+                 COUNT(*)::int AS profile_count,
+                 COALESCE(SUM(NULLIF(pa.purchase_price,0)),0)::numeric AS profile_cost_sum,
+                 COUNT(pa.purchase_price) FILTER (WHERE pa.purchase_price IS NOT NULL AND pa.purchase_price > 0)::int AS priced_profiles
+          FROM platform_accounts pa
+          WHERE pa.mother_account_id = ANY($1::int[])
+          GROUP BY pa.mother_account_id
+        )
+        UPDATE mother_accounts ma
+        SET purchase_cost_total = CASE
+              WHEN ma.purchase_cost_total IS NULL AND ps.profile_cost_sum > 0 AND ps.priced_profiles = ps.profile_count
+                THEN ROUND(ps.profile_cost_sum::numeric, 2)
+              ELSE ma.purchase_cost_total
+            END,
+            sell_by_profile = CASE
+              WHEN ps.profile_count > 1 OR lower(COALESCE(ma.product_name,'')) LIKE '%perfil%'
+                THEN TRUE
+              ELSE ma.sell_by_profile
+            END,
+            configured_profile_count = CASE
+              WHEN (ps.profile_count > 1 OR lower(COALESCE(ma.product_name,'')) LIKE '%perfil%')
+                THEN ps.profile_count
+              ELSE ma.configured_profile_count
+            END,
+            updated_at = NOW()
+        FROM profile_stats ps
+        WHERE ma.id = ps.mother_account_id
+      `, [ids]);
+
+      // Propaga el costo unitario calculado a cada perfil para que las ventas
+      // futuras e históricas puedan usar el mismo costo sin captura manual.
+      await pool.query(`
+        UPDATE platform_accounts pa
+        SET purchase_price = CASE
+          WHEN ma.sell_by_profile = TRUE AND ma.purchase_cost_total IS NOT NULL AND COALESCE(ma.configured_profile_count,0) > 0
+            THEN ROUND((ma.purchase_cost_total / ma.configured_profile_count)::numeric, 2)
+          ELSE pa.purchase_price
+        END
+        FROM mother_accounts ma
+        WHERE pa.mother_account_id = ma.id
+          AND pa.mother_account_id = ANY($1::int[])
+      `, [ids]);
     }
 
     return res.json({
@@ -9721,7 +9777,15 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
               COUNT(pa.id)::int AS profile_count,
               COUNT(pa.id) FILTER (WHERE pa.status = 'available')::int AS available_profiles,
               COUNT(pa.id) FILTER (WHERE pa.status = 'delivered')::int AS delivered_profiles,
-              COUNT(pa.id) FILTER (WHERE pa.status = 'failed')::int AS failed_profiles
+              COUNT(pa.id) FILTER (WHERE pa.status = 'failed')::int AS failed_profiles,
+              CASE WHEN NULLIF(TRIM(COALESCE(ma.provider_name,'')),'') IS NULL THEN TRUE ELSE FALSE END AS provider_missing,
+              CASE WHEN ma.purchase_cost_total IS NULL OR ma.purchase_cost_total <= 0 THEN TRUE ELSE FALSE END AS full_cost_missing,
+              CASE WHEN (ma.sell_by_profile = TRUE OR COUNT(pa.id) > 1 OR lower(COALESCE(ma.product_name,'')) LIKE '%perfil%')
+                         AND (CASE WHEN ma.profile_cost_override IS NOT NULL THEN ma.profile_cost_override
+                                   WHEN ma.purchase_cost_total IS NOT NULL AND COALESCE(NULLIF(ma.configured_profile_count,0),COUNT(pa.id)) > 0
+                                     THEN ma.purchase_cost_total / COALESCE(NULLIF(ma.configured_profile_count,0),COUNT(pa.id))
+                                   ELSE NULL END) IS NULL
+                   THEN TRUE ELSE FALSE END AS profile_cost_missing
        FROM mother_accounts ma
        LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
        WHERE COALESCE(ma.owner_admin_id, 0) = 0
@@ -9871,6 +9935,9 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         original_purchase_date: row.original_purchase_date, expiration_date: row.expiration_date, status: row.status || '',
         profile_count: actualProfileCount, available_profiles: Number(row.available_profiles || 0),
         delivered_profiles: Number(row.delivered_profiles || 0), failed_profiles: Number(row.failed_profiles || 0),
+        provider_missing: row.provider_missing === true || row.provider_missing === 'true',
+        full_cost_missing: row.full_cost_missing === true || row.full_cost_missing === 'true',
+        profile_cost_missing: row.profile_cost_missing === true || row.profile_cost_missing === 'true',
         orders: new Set(), admin_revenue: 0, sale_cost: 0, replacement_cost: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0,
         recovered_sales: recoveredSalesMap.get(Number(row.id)) || 0,
         lifetime_orders: new Set(), lifetime_linked_units: 0, lifetime_admin_revenue_actual: 0, lifetime_sale_cost_actual: 0
@@ -10050,7 +10117,8 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         lifetime_revenue: lifetimeRevenue,
         lifetime_sale_cost: lifetimeCost,
         lifetime_profit: lifetimeProfit,
-        lifetime_margin_percent: lifetimeRevenue > 0 ? Number(((lifetimeProfit / lifetimeRevenue) * 100).toFixed(2)) : 0
+        lifetime_margin_percent: lifetimeRevenue > 0 ? Number(((lifetimeProfit / lifetimeRevenue) * 100).toFixed(2)) : 0,
+        data_complete: !(row.provider_missing || row.full_cost_missing || row.profile_cost_missing)
       };
     }).sort((a, b) => a.profit - b.profit || b.failures - a.failures);
 
@@ -10083,6 +10151,21 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       })()
     })).sort((a,b) => a.profit - b.profit || b.failures - a.failures);
 
+    const missingAccounts = finalizedMothers.filter(r => r.id && (r.provider_missing || r.full_cost_missing || r.profile_cost_missing)).map(r => ({
+      id: r.id, product_name: r.product_name, account_email: r.account_email,
+      provider_name: r.provider_name || '', profile_count: Number(r.profile_count || 0),
+      provider_missing: !!r.provider_missing, full_cost_missing: !!r.full_cost_missing,
+      profile_cost_missing: !!r.profile_cost_missing,
+      purchase_cost_total: r.purchase_cost_total === null ? null : money(r.purchase_cost_total),
+      effective_unit_cost: r.effective_unit_cost === null ? null : money(r.effective_unit_cost)
+    }));
+    const missingSummary = {
+      total: missingAccounts.length,
+      provider_missing: missingAccounts.filter(r=>r.provider_missing).length,
+      full_cost_missing: missingAccounts.filter(r=>r.full_cost_missing).length,
+      profile_cost_missing: missingAccounts.filter(r=>r.profile_cost_missing).length
+    };
+
     const adjustedProfit = money(adminRevenue - saleCost - replacementCost);
     res.json({
       start_date: startDate, end_date: endDate, timezone: 'America/Mexico_City',
@@ -10091,9 +10174,10 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         admin_revenue: money(adminRevenue), sale_cost: money(saleCost), replacement_cost: money(replacementCost), replacement_cost_missing: replacementCostMissing,
         cost_sources: { snapshot_orders: snapshotCostOrders, inventory_orders: inventoryDerivedCostOrders, product_current_orders: productCostFallbackOrders, unlinked_inventory_orders: unlinkedInventoryOrders },
         profit: adjustedProfit, margin_percent: adminRevenue > 0 ? Number(((adjustedProfit / adminRevenue) * 100).toFixed(2)) : 0,
-        failures: reportsResult.rows.length, replacements: replacementCount, refund_reports: refundReportCount
+        failures: reportsResult.rows.length, replacements: replacementCount, refund_reports: refundReportCount,
+        missing_mother_accounts: missingSummary
       },
-      profitability: { providers, mother_accounts: finalizedMothers },
+      profitability: { providers, mother_accounts: finalizedMothers, missing_mother_accounts: missingAccounts },
       quality: {
         by_platform: finalizeQuality(qualityMaps.platform), by_provider: finalizeQuality(qualityMaps.provider),
         by_seller: finalizeQuality(qualityMaps.seller), by_product: finalizeQuality(qualityMaps.product),
