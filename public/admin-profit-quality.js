@@ -193,35 +193,66 @@
   function renderMissingMotherAccounts(rows){
     const box=document.getElementById('pqMissingMotherAccounts'); if(!box) return;
     const list=Array.isArray(rows)?rows:[];
-    if(!list.length){
-      box.innerHTML='<div class="pq-inline-ok">✅ Todas las cuentas madre tienen proveedor y costos configurados.</div>';
+    const manual=(cache?.profitability?.mother_accounts||[]).filter(r=>r.id && r.manual_profile_cost_configured);
+    if(!list.length && !manual.length){
+      box.innerHTML='<div class="pq-inline-ok">✅ No hay cuentas pendientes ni costos manuales por perfil para revisar.</div>';
       return;
     }
-    const counts={provider:0,full:0,profile:0};
-    list.forEach(r=>{if(r.provider_missing)counts.provider++;if(r.full_cost_missing)counts.full++;if(r.profile_cost_missing)counts.profile++;});
-    box.innerHTML=`
+    const counts={provider:0,full:0,fullSale:0,profiles:0,profileSale:0};
+    list.forEach(r=>{
+      if(r.provider_missing)counts.provider++;
+      if(r.full_cost_missing)counts.full++;
+      if(r.full_sale_missing)counts.fullSale++;
+      if(r.profile_count_missing)counts.profiles++;
+      if(r.profile_sale_missing)counts.profileSale++;
+    });
+    const missingHtml=list.length?`
       <div class="pq-missing-summary">
         <div><b>${list.length}</b><span>cuentas con pendientes</span></div>
         <div><b>${counts.provider}</b><span>sin proveedor</span></div>
-        <div><b>${counts.full}</b><span>sin costo completo</span></div>
-        <div><b>${counts.profile}</b><span>sin costo por perfil</span></div>
+        <div><b>${counts.full}</b><span>sin costo de compra</span></div>
+        <div><b>${counts.fullSale}</b><span>sin venta cuenta completa</span></div>
+        <div><b>${counts.profiles}</b><span>sin perfiles totales</span></div>
+        <div><b>${counts.profileSale}</b><span>sin venta por perfil</span></div>
       </div>
-      <div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Producto</th><th>Perfiles</th><th>Proveedor</th><th>Costo cuenta</th><th>Costo perfil</th><th>Pendiente</th></tr></thead><tbody>
+      <p class="small-text"><b>Regla:</b> la casilla “Esta cuenta también se controla y vende por perfiles” es la que define la modalidad. Si está desactivada se revisa venta de cuenta completa; si está activada se revisan perfiles y precio de venta por perfil. El costo de compra de la cuenta completa se mantiene como base para calcular automáticamente el costo por perfil.</p>
+      <div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Modalidad</th><th>Proveedor</th><th>Costo compra · cuenta</th><th>Dato de venta requerido</th><th>Perfiles</th><th>Acción</th></tr></thead><tbody>
       ${list.map(r=>{
+        const byProfile=!!r.sell_by_profile;
         const pending=[];
         if(r.provider_missing)pending.push('Proveedor');
-        if(r.full_cost_missing)pending.push('Costo cuenta completa');
-        if(r.profile_cost_missing)pending.push('Costo por perfil');
-        return `<tr class="pq-missing-row" data-mother-id="${num(r.id)}" data-sell-by-profile="${r.sell_by_profile?'true':'false'}">
-          <td><b>#${num(r.id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span></td>
-          <td>${esc(r.product_name||'Sin producto')}</td>
-          <td><span class="pq-mode-pill ${r.sell_by_profile?'pq-mode-profile':'pq-mode-single'}">${r.sell_by_profile?'👥 Por perfiles':'📱 1 dispositivo'}</span>${r.sell_by_profile?`<br><span class="small-text">${num(r.configured_profile_count||r.profile_count||0)} perfiles</span>`:''}</td>
+        if(r.full_cost_missing)pending.push('Costo compra · cuenta completa');
+        if(byProfile){
+          if(r.profile_count_missing)pending.push('Perfiles totales');
+          if(r.profile_sale_missing)pending.push('Precio venta · perfil');
+        }else if(r.full_sale_missing){
+          pending.push('Precio venta · cuenta completa');
+        }
+        return `<tr class="pq-missing-row" data-mother-id="${num(r.id)}">
+          <td><b>#${num(r.id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br><span class="small-text">${esc(r.product_name||'Sin producto')}</span></td>
+          <td>${byProfile?'👥 Por perfiles':'📱 1 dispositivo / cuenta completa'}</td>
           <td><input id="pq-missing-provider-${num(r.id)}" class="pq-inline-input" value="${esc(r.provider_name||'')}" placeholder="Proveedor"></td>
           <td><input id="pq-missing-full-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Costo cuenta"></td>
-          <td>${r.sell_by_profile ? `<input id="pq-missing-profile-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.profile_cost_override===null?'':num(r.profile_cost_override)}" placeholder="Costo por perfil">` : `<span class="small-text">No aplica</span>`}</td>
+          <td>${byProfile
+            ? `<input id="pq-missing-sale-profile-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.sale_price_profile===null?'':num(r.sale_price_profile)}" placeholder="Precio vendedor · perfil">`
+            : `<input id="pq-missing-sale-full-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.sale_price_full===null?'':num(r.sale_price_full)}" placeholder="Precio vendedor · cuenta">`}</td>
+          <td>${byProfile ? `<input id="pq-missing-count-${num(r.id)}" class="pq-inline-input pq-inline-count" type="number" min="1" max="500" step="1" value="${r.configured_profile_count===null?'':num(r.configured_profile_count)}" placeholder="Total">` : '<span class="small-text">No aplica</span>'}</td>
           <td><div class="pq-missing-actions"><span class="chip error">${esc(pending.join(' · '))}</span><button type="button" class="primary-btn pq-inline-save" onclick="saveMissingMotherAccount(${num(r.id)})">💾 Guardar</button></div></td>
         </tr>`;
-      }).join('')}</tbody></table></div>`;
+      }).join('')}</tbody></table></div>`:'<div class="pq-inline-ok">✅ No hay cuentas con datos obligatorios pendientes.</div>';
+
+    const manualHtml=manual.length?`
+      <div class="pq-manual-review" style="margin-top:18px">
+        <div class="pq-subhead"><div><span class="pq-mini-label">REVISIÓN</span><h4>⚠️ Cuentas con “Costo manual por perfil” configurado</h4></div></div>
+        <p class="small-text">Este campo ya no se necesita para el cálculo normal. El costo por perfil se calcula automáticamente con <b>Costo de compra de la cuenta completa ÷ Perfiles totales</b>. Aquí aparecen únicamente las cuentas que todavía tienen un costo manual guardado para que puedas quitarlo.</p>
+        <div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Proveedor</th><th>Perfiles</th><th>Costo cuenta</th><th>Costo manual guardado</th><th>Acción</th></tr></thead><tbody>
+        ${manual.map(r=>`<tr class="pq-missing-row" data-mother-id="${num(r.id)}">
+          <td><b>#${num(r.id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br>${esc(r.product_name||'Sin producto')}</td>
+          <td>${esc(r.provider_name||'Sin proveedor')}</td><td>${num(r.configured_profile_count||r.profile_count||0)}</td><td>${r.purchase_cost_total===null?'—':money(r.purchase_cost_total)}</td><td>${r.profile_cost_override===null?'—':money(r.profile_cost_override)}</td>
+          <td><button type="button" class="outline-btn" onclick="clearMotherProfileCostOverride(${num(r.id)})">🧹 Quitar costo manual</button></td>
+        </tr>`).join('')}</tbody></table></div>
+      </div>`:'';
+    box.innerHTML=missingHtml+manualHtml;
   }
 
   function renderMothers(rows){
@@ -363,27 +394,40 @@
       if(btn){btn.disabled=true;btn.textContent='Guardando...';}
       const provider=(document.getElementById(`pq-missing-provider-${id}`)?.value||'').trim();
       const fullRaw=(document.getElementById(`pq-missing-full-${id}`)?.value||'').trim();
-      const profileRaw=(document.getElementById(`pq-missing-profile-${id}`)?.value||'').trim();
-      const countRaw=(document.getElementById(`pq-missing-count-${id}`)?.value||'').trim();
-      const row=btn?.closest('.pq-missing-row');
-      const modeProfile = row?.dataset?.sellByProfile === 'true';
-      const count=modeProfile ? (countRaw===''?null:Number(countRaw)) : null;
+      const countEl=document.getElementById(`pq-missing-count-${id}`);
+      const saleProfileEl=document.getElementById(`pq-missing-sale-profile-${id}`);
+      const saleFullEl=document.getElementById(`pq-missing-sale-full-${id}`);
+      const row=cache?.profitability?.missing_mother_accounts?.find(x=>Number(x.id)===Number(id));
+      const byProfile=!!row?.sell_by_profile;
+      const countRaw=countEl?.value?.trim()||'';
+      const saleProfileRaw=saleProfileEl?.value?.trim()||'';
+      const saleFullRaw=saleFullEl?.value?.trim()||'';
       const body={
         provider_name:provider,
         purchase_cost_total:fullRaw===''?null:fullRaw,
-        sell_by_profile:modeProfile,
-        configured_profile_count:modeProfile ? count : null,
-        profile_cost_override:modeProfile && profileRaw!==''?profileRaw:null,
-        sale_price_full:null,
-        sale_price_profile:null
+        sell_by_profile:byProfile,
+        configured_profile_count:byProfile?(countRaw===''?null:countRaw):null,
+        profile_cost_override:null,
+        sale_price_full:byProfile?null:(saleFullRaw===''?null:saleFullRaw),
+        sale_price_profile:byProfile?(saleProfileRaw===''?null:saleProfileRaw):null,
+        partial_update:true
       };
-      // El endpoint admite actualización parcial de costos/proveedor; conservar precios existentes.
       const result=await api(`/api/admin/mother-accounts/${id}/analytics-meta`,{method:'PATCH',body:JSON.stringify(body)});
       if(typeof showMessage==='function') showMessage(result.message||'Cuenta madre actualizada');
       await loadProfitQuality();
     }catch(e){
       if(typeof showMessage==='function') showMessage(e.message||'Error guardando cuenta madre','error');
       if(btn){btn.disabled=false;btn.textContent='💾 Guardar';}
+    }
+  };
+
+  window.clearMotherProfileCostOverride=async function(id){
+    try{
+      const result=await api(`/api/admin/mother-accounts/${id}/analytics-meta`,{method:'PATCH',body:JSON.stringify({partial_update:true,clear_profile_cost_override:true})});
+      if(typeof showMessage==='function') showMessage(result.message||'Costo manual eliminado; ahora se calculará automáticamente.');
+      await loadProfitQuality();
+    }catch(e){
+      if(typeof showMessage==='function') showMessage(e.message||'Error eliminando costo manual','error');
     }
   };
 

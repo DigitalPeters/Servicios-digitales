@@ -9552,6 +9552,7 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
     const rawSalePriceProfile = req.body?.sale_price_profile;
     const salePriceProfile = rawSalePriceProfile === null || rawSalePriceProfile === undefined || String(rawSalePriceProfile).trim() === '' ? null : Number(rawSalePriceProfile);
     const partialUpdate = req.body?.partial_update === true || req.body?.partial_update === 1 || String(req.body?.partial_update || '').toLowerCase() === 'true';
+    const clearProfileCostOverride = req.body?.clear_profile_cost_override === true || req.body?.clear_profile_cost_override === 1 || String(req.body?.clear_profile_cost_override || '').toLowerCase() === 'true';
 
     if (purchaseCost !== null && (!Number.isFinite(purchaseCost) || purchaseCost < 0)) {
       return res.status(400).json({ error: 'El costo total debe ser mayor o igual a 0' });
@@ -9592,7 +9593,7 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
     const effectivePurchaseCost = partialUpdate && purchaseCost === null ? before.purchase_cost_total : purchaseCost;
     const effectiveSellByProfile = partialUpdate ? (configuredProfileCount !== null ? sellByProfile : !!before.sell_by_profile) : sellByProfile;
     const effectiveProfileCount = partialUpdate && configuredProfileCount === null ? before.configured_profile_count : (effectiveSellByProfile ? configuredProfileCount : null);
-    const effectiveProfileOverride = partialUpdate && profileCostOverride === null ? before.profile_cost_override : (effectiveSellByProfile ? profileCostOverride : null);
+    const effectiveProfileOverride = clearProfileCostOverride ? null : (partialUpdate && profileCostOverride === null ? before.profile_cost_override : (effectiveSellByProfile ? profileCostOverride : null));
     const effectiveSaleFull = partialUpdate && salePriceFull === null ? before.sale_price_full : salePriceFull;
     const effectiveSaleProfile = partialUpdate && salePriceProfile === null ? before.sale_price_profile : (effectiveSellByProfile ? salePriceProfile : null);
 
@@ -9670,6 +9671,7 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
         sell_by_profile: sellByProfile,
         configured_profile_count: sellByProfile ? configuredProfileCount : null,
         profile_cost_override: sellByProfile ? profileCostOverride : null,
+        clear_profile_cost_override: clearProfileCostOverride,
         sale_price_full: salePriceFull,
         sale_price_profile: sellByProfile ? salePriceProfile : null,
         effective_unit_cost: effectiveUnitCost
@@ -9792,11 +9794,17 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
               CASE WHEN NULLIF(TRIM(COALESCE(ma.provider_name,'')),'') IS NULL THEN TRUE ELSE FALSE END AS provider_missing,
               CASE WHEN ma.purchase_cost_total IS NULL OR ma.purchase_cost_total <= 0 THEN TRUE ELSE FALSE END AS full_cost_missing,
               CASE WHEN ma.sell_by_profile = TRUE
-                         AND (CASE WHEN ma.profile_cost_override IS NOT NULL THEN ma.profile_cost_override
-                                   WHEN ma.purchase_cost_total IS NOT NULL AND COALESCE(NULLIF(ma.configured_profile_count,0),COUNT(pa.id)) > 0
-                                     THEN ma.purchase_cost_total / COALESCE(NULLIF(ma.configured_profile_count,0),COUNT(pa.id))
-                                   ELSE NULL END) IS NULL
-                   THEN TRUE ELSE FALSE END AS profile_cost_missing
+                         AND (ma.configured_profile_count IS NULL OR ma.configured_profile_count <= 0)
+                   THEN TRUE ELSE FALSE END AS profile_count_missing,
+              CASE WHEN ma.sell_by_profile = TRUE
+                         AND (ma.sale_price_profile IS NULL OR ma.sale_price_profile < 0)
+                   THEN TRUE ELSE FALSE END AS profile_sale_missing,
+              CASE WHEN ma.sell_by_profile = FALSE
+                         AND (ma.sale_price_full IS NULL OR ma.sale_price_full < 0)
+                   THEN TRUE ELSE FALSE END AS full_sale_missing,
+              CASE WHEN ma.sell_by_profile = TRUE
+                         AND ma.profile_cost_override IS NOT NULL
+                   THEN TRUE ELSE FALSE END AS manual_profile_cost_configured
        FROM mother_accounts ma
        LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
        WHERE COALESCE(ma.owner_admin_id, 0) = 0
@@ -10129,7 +10137,11 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         lifetime_sale_cost: lifetimeCost,
         lifetime_profit: lifetimeProfit,
         lifetime_margin_percent: lifetimeRevenue > 0 ? Number(((lifetimeProfit / lifetimeRevenue) * 100).toFixed(2)) : 0,
-        data_complete: !(row.provider_missing || row.full_cost_missing || row.profile_cost_missing)
+        data_complete: !(row.provider_missing || row.full_cost_missing || row.profile_count_missing || row.profile_sale_missing || row.full_sale_missing),
+        profile_count_missing: !!row.profile_count_missing,
+        profile_sale_missing: !!row.profile_sale_missing,
+        full_sale_missing: !!row.full_sale_missing,
+        manual_profile_cost_configured: !!row.manual_profile_cost_configured
       };
     }).sort((a, b) => a.profit - b.profit || b.failures - a.failures);
 
@@ -10162,11 +10174,13 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       })()
     })).sort((a,b) => a.profit - b.profit || b.failures - a.failures);
 
-    const missingAccounts = finalizedMothers.filter(r => r.id && (r.provider_missing || r.full_cost_missing || r.profile_cost_missing)).map(r => ({
+    const missingAccounts = finalizedMothers.filter(r => r.id && (r.provider_missing || r.full_cost_missing || r.profile_count_missing || r.profile_sale_missing || r.full_sale_missing)).map(r => ({
       id: r.id, product_name: r.product_name, account_email: r.account_email,
       provider_name: r.provider_name || '', profile_count: Number(r.profile_count || 0),
       provider_missing: !!r.provider_missing, full_cost_missing: !!r.full_cost_missing,
-      profile_cost_missing: !!r.profile_cost_missing,
+      profile_count_missing: !!r.profile_count_missing, profile_sale_missing: !!r.profile_sale_missing,
+      full_sale_missing: !!r.full_sale_missing,
+      manual_profile_cost_configured: !!r.manual_profile_cost_configured,
       purchase_cost_total: r.purchase_cost_total === null ? null : money(r.purchase_cost_total),
       effective_unit_cost: r.effective_unit_cost === null ? null : money(r.effective_unit_cost),
       configured_profile_count: r.configured_profile_count === null ? null : Number(r.configured_profile_count),
@@ -10179,7 +10193,10 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       total: missingAccounts.length,
       provider_missing: missingAccounts.filter(r=>r.provider_missing).length,
       full_cost_missing: missingAccounts.filter(r=>r.full_cost_missing).length,
-      profile_cost_missing: missingAccounts.filter(r=>r.profile_cost_missing).length
+      profile_count_missing: missingAccounts.filter(r=>r.profile_count_missing).length,
+      profile_sale_missing: missingAccounts.filter(r=>r.profile_sale_missing).length,
+      full_sale_missing: missingAccounts.filter(r=>r.full_sale_missing).length,
+      manual_profile_cost_configured: finalizedMothers.filter(r=>r.id && r.manual_profile_cost_configured).length
     };
 
     const adjustedProfit = money(adminRevenue - saleCost - replacementCost);
