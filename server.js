@@ -9792,10 +9792,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
               CASE WHEN NULLIF(TRIM(COALESCE(ma.provider_name,'')),'') IS NULL THEN TRUE ELSE FALSE END AS provider_missing,
               CASE WHEN ma.purchase_cost_total IS NULL OR ma.purchase_cost_total <= 0 THEN TRUE ELSE FALSE END AS full_cost_missing,
               CASE WHEN (ma.sell_by_profile = TRUE OR COUNT(pa.id) > 1 OR lower(COALESCE(ma.product_name,'')) LIKE '%perfil%')
-                         AND (CASE WHEN ma.profile_cost_override IS NOT NULL THEN ma.profile_cost_override
-                                   WHEN ma.purchase_cost_total IS NOT NULL AND COALESCE(NULLIF(ma.configured_profile_count,0),COUNT(pa.id)) > 0
-                                     THEN ma.purchase_cost_total / COALESCE(NULLIF(ma.configured_profile_count,0),COUNT(pa.id))
-                                   ELSE NULL END) IS NULL
+                         AND (ma.sale_price_profile IS NULL OR ma.sale_price_profile <= 0)
                    THEN TRUE ELSE FALSE END AS profile_cost_missing
        FROM mother_accounts ma
        LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id

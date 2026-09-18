@@ -204,21 +204,21 @@
         <div><b>${list.length}</b><span>cuentas con pendientes</span></div>
         <div><b>${counts.provider}</b><span>sin proveedor</span></div>
         <div><b>${counts.full}</b><span>sin costo completo</span></div>
-        <div><b>${counts.profile}</b><span>sin costo por perfil</span></div>
+        <div><b>${counts.profile}</b><span>sin costo para vendedor · perfil</span></div>
       </div>
-      <div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Producto</th><th>Perfiles</th><th>Proveedor</th><th>Costo cuenta</th><th>Costo perfil</th><th>Pendiente</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="mini-table"><thead><tr><th>Cuenta madre</th><th>Producto</th><th>Perfiles</th><th>Proveedor</th><th>Costo cuenta</th><th>Costo para vendedor · perfil</th><th>Pendiente</th></tr></thead><tbody>
       ${list.map(r=>{
         const pending=[];
         if(r.provider_missing)pending.push('Proveedor');
         if(r.full_cost_missing)pending.push('Costo cuenta completa');
-        if(r.profile_cost_missing)pending.push('Costo por perfil');
+        if(r.profile_cost_missing)pending.push('Costo para vendedor · perfil');
         return `<tr class="pq-missing-row" data-mother-id="${num(r.id)}">
           <td><b>#${num(r.id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span></td>
           <td>${esc(r.product_name||'Sin producto')}</td>
           <td><input id="pq-missing-count-${num(r.id)}" class="pq-inline-input pq-inline-count" type="number" min="1" max="500" step="1" value="${num(r.configured_profile_count||r.profile_count||1)}" title="Cantidad de perfiles"></td>
           <td><input id="pq-missing-provider-${num(r.id)}" class="pq-inline-input" value="${esc(r.provider_name||'')}" placeholder="Proveedor"></td>
           <td><input id="pq-missing-full-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Costo cuenta"></td>
-          <td><input id="pq-missing-profile-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.profile_cost_override===null?'':num(r.profile_cost_override)}" placeholder="Costo perfil"></td>
+          <td><input id="pq-missing-profile-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.sale_price_profile===null?'':num(r.sale_price_profile)}" placeholder="Costo para vendedor"></td>
           <td><div class="pq-missing-actions"><span class="chip error">${esc(pending.join(' · '))}</span><button type="button" class="primary-btn pq-inline-save" onclick="saveMissingMotherAccount(${num(r.id)})">💾 Guardar</button></div></td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
@@ -371,9 +371,12 @@
         purchase_cost_total:fullRaw===''?null:fullRaw,
         sell_by_profile:!!(count && count>1),
         configured_profile_count:count,
-        profile_cost_override:profileRaw===''?null:profileRaw,
+        // En esta bandeja el segundo importe es el precio/costo que paga el vendedor por perfil.
+        // El costo real de compra por perfil se sigue calculando internamente desde la cuenta madre.
+        profile_cost_override:null,
         sale_price_full:null,
-        sale_price_profile:null
+        sale_price_profile:profileRaw===''?null:profileRaw,
+        partial_update:true
       };
       // El endpoint admite actualización parcial de costos/proveedor; conservar precios existentes.
       const result=await api(`/api/admin/mother-accounts/${id}/analytics-meta`,{method:'PATCH',body:JSON.stringify(body)});
