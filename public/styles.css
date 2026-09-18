@@ -2939,3 +2939,11 @@ body.modal-open{
 .pq-inline-ok{border:1px solid #b7ebc6;background:#f0fff4;border-radius:10px;padding:14px;font-weight:600}
 @media(max-width:900px){.pq-missing-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.pq-missing-summary{grid-template-columns:1fr}}
+
+/* Rentabilidad: edición rápida de cuentas madre pendientes */
+.pq-missing-row .pq-inline-input{width:100%;min-width:110px;box-sizing:border-box;padding:9px 10px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#111827;font:inherit;}
+.pq-missing-row .pq-inline-count{min-width:72px;}
+.pq-missing-row .pq-inline-input:focus{outline:2px solid rgba(37,99,235,.18);border-color:#2563eb;}
+.pq-missing-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:180px;}
+.pq-missing-actions .pq-inline-save{padding:8px 12px;white-space:nowrap;}
+@media(max-width:900px){.pq-missing-row td{min-width:150px}.pq-missing-actions{min-width:150px}}

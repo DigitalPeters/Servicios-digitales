@@ -9551,6 +9551,7 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
     const salePriceFull = rawSalePriceFull === null || rawSalePriceFull === undefined || String(rawSalePriceFull).trim() === '' ? null : Number(rawSalePriceFull);
     const rawSalePriceProfile = req.body?.sale_price_profile;
     const salePriceProfile = rawSalePriceProfile === null || rawSalePriceProfile === undefined || String(rawSalePriceProfile).trim() === '' ? null : Number(rawSalePriceProfile);
+    const partialUpdate = req.body?.partial_update === true || req.body?.partial_update === 1 || String(req.body?.partial_update || '').toLowerCase() === 'true';
 
     if (purchaseCost !== null && (!Number.isFinite(purchaseCost) || purchaseCost < 0)) {
       return res.status(400).json({ error: 'El costo total debe ser mayor o igual a 0' });
@@ -9585,6 +9586,16 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
       return res.status(404).json({ error: 'Cuenta madre no encontrada' });
     }
 
+    // En edición rápida desde 'Cuentas pendientes' solo se corrigen los campos
+    // financieros/proveedor capturados; nunca se borran precios de venta existentes.
+    const effectiveProvider = partialUpdate && !providerName ? before.provider_name : providerName;
+    const effectivePurchaseCost = partialUpdate && purchaseCost === null ? before.purchase_cost_total : purchaseCost;
+    const effectiveSellByProfile = partialUpdate ? (configuredProfileCount !== null ? sellByProfile : !!before.sell_by_profile) : sellByProfile;
+    const effectiveProfileCount = partialUpdate && configuredProfileCount === null ? before.configured_profile_count : (effectiveSellByProfile ? configuredProfileCount : null);
+    const effectiveProfileOverride = partialUpdate && profileCostOverride === null ? before.profile_cost_override : (effectiveSellByProfile ? profileCostOverride : null);
+    const effectiveSaleFull = partialUpdate && salePriceFull === null ? before.sale_price_full : salePriceFull;
+    const effectiveSaleProfile = partialUpdate && salePriceProfile === null ? before.sale_price_profile : (effectiveSellByProfile ? salePriceProfile : null);
+
     const result = await client.query(
       `UPDATE mother_accounts
        SET provider_name = $2,
@@ -9597,7 +9608,7 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
            updated_at = NOW()
        WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0
        RETURNING id, provider_name, purchase_cost_total, sell_by_profile, configured_profile_count, profile_cost_override, sale_price_full, sale_price_profile`,
-      [id, providerName, purchaseCost, sellByProfile, sellByProfile ? configuredProfileCount : null, sellByProfile ? profileCostOverride : null, salePriceFull, sellByProfile ? salePriceProfile : null]
+      [id, effectiveProvider, effectivePurchaseCost, effectiveSellByProfile, effectiveSellByProfile ? effectiveProfileCount : null, effectiveSellByProfile ? effectiveProfileOverride : null, effectiveSaleFull, effectiveSellByProfile ? effectiveSaleProfile : null]
     );
 
     const actualProfilesResult = await client.query(
@@ -10157,7 +10168,12 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       provider_missing: !!r.provider_missing, full_cost_missing: !!r.full_cost_missing,
       profile_cost_missing: !!r.profile_cost_missing,
       purchase_cost_total: r.purchase_cost_total === null ? null : money(r.purchase_cost_total),
-      effective_unit_cost: r.effective_unit_cost === null ? null : money(r.effective_unit_cost)
+      effective_unit_cost: r.effective_unit_cost === null ? null : money(r.effective_unit_cost),
+      configured_profile_count: r.configured_profile_count === null ? null : Number(r.configured_profile_count),
+      profile_cost_override: r.profile_cost_override === null ? null : money(r.profile_cost_override),
+      sell_by_profile: !!r.sell_by_profile,
+      sale_price_full: r.sale_price_full === null ? null : money(r.sale_price_full),
+      sale_price_profile: r.sale_price_profile === null ? null : money(r.sale_price_profile)
     }));
     const missingSummary = {
       total: missingAccounts.length,

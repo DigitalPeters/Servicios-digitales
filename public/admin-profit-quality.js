@@ -212,14 +212,14 @@
         if(r.provider_missing)pending.push('Proveedor');
         if(r.full_cost_missing)pending.push('Costo cuenta completa');
         if(r.profile_cost_missing)pending.push('Costo por perfil');
-        return `<tr>
+        return `<tr class="pq-missing-row" data-mother-id="${num(r.id)}">
           <td><b>#${num(r.id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span></td>
           <td>${esc(r.product_name||'Sin producto')}</td>
-          <td>${num(r.profile_count)}</td>
-          <td>${r.provider_missing?'<span class="chip error">Sin proveedor</span>':esc(r.provider_name)}</td>
-          <td>${r.full_cost_missing?'<span class="chip error">Falta</span>':money(r.purchase_cost_total)}</td>
-          <td>${r.profile_cost_missing?'<span class="chip error">Falta</span>':(r.effective_unit_cost===null?'—':money(r.effective_unit_cost))}</td>
-          <td><span class="chip error">${esc(pending.join(' · '))}</span></td>
+          <td><input id="pq-missing-count-${num(r.id)}" class="pq-inline-input pq-inline-count" type="number" min="1" max="500" step="1" value="${num(r.configured_profile_count||r.profile_count||1)}" title="Cantidad de perfiles"></td>
+          <td><input id="pq-missing-provider-${num(r.id)}" class="pq-inline-input" value="${esc(r.provider_name||'')}" placeholder="Proveedor"></td>
+          <td><input id="pq-missing-full-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.purchase_cost_total===null?'':num(r.purchase_cost_total)}" placeholder="Costo cuenta"></td>
+          <td><input id="pq-missing-profile-${num(r.id)}" class="pq-inline-input" type="number" min="0" step="0.01" value="${r.profile_cost_override===null?'':num(r.profile_cost_override)}" placeholder="Costo perfil"></td>
+          <td><div class="pq-missing-actions"><span class="chip error">${esc(pending.join(' · '))}</span><button type="button" class="primary-btn pq-inline-save" onclick="saveMissingMotherAccount(${num(r.id)})">💾 Guardar</button></div></td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   }
@@ -354,6 +354,34 @@
       render(data);
     }catch(e){
       if(typeof showMessage==='function') showMessage(e.message||'Error cargando rentabilidad y calidad','error');
+    }
+  };
+
+  window.saveMissingMotherAccount=async function(id){
+    const btn=document.querySelector(`.pq-missing-row[data-mother-id="${id}"] .pq-inline-save`);
+    try{
+      if(btn){btn.disabled=true;btn.textContent='Guardando...';}
+      const provider=(document.getElementById(`pq-missing-provider-${id}`)?.value||'').trim();
+      const fullRaw=(document.getElementById(`pq-missing-full-${id}`)?.value||'').trim();
+      const profileRaw=(document.getElementById(`pq-missing-profile-${id}`)?.value||'').trim();
+      const countRaw=(document.getElementById(`pq-missing-count-${id}`)?.value||'').trim();
+      const count=countRaw===''?null:Number(countRaw);
+      const body={
+        provider_name:provider,
+        purchase_cost_total:fullRaw===''?null:fullRaw,
+        sell_by_profile:!!(count && count>1),
+        configured_profile_count:count,
+        profile_cost_override:profileRaw===''?null:profileRaw,
+        sale_price_full:null,
+        sale_price_profile:null
+      };
+      // El endpoint admite actualización parcial de costos/proveedor; conservar precios existentes.
+      const result=await api(`/api/admin/mother-accounts/${id}/analytics-meta`,{method:'PATCH',body:JSON.stringify(body)});
+      if(typeof showMessage==='function') showMessage(result.message||'Cuenta madre actualizada');
+      await loadProfitQuality();
+    }catch(e){
+      if(typeof showMessage==='function') showMessage(e.message||'Error guardando cuenta madre','error');
+      if(btn){btn.disabled=false;btn.textContent='💾 Guardar';}
     }
   };
 
