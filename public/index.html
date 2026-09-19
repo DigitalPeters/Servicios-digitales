@@ -752,7 +752,7 @@
           <div class="panel-head">
             <div>
               <h2>Precios para admin distribuidor</h2>
-              <p class="small-text">Aquí defines el precio que tú le cobras a cada distribuidor. La tabla muestra por separado: <b>precio de compra</b> (tu costo real), <b>precio vendedor</b> y <b>precio distribuidor</b>. La ganancia del admin se calcula como precio distribuidor − precio de compra.</p>
+              <p class="small-text">Aquí defines el precio que tú le cobras a cada distribuidor. La tabla muestra por separado: <b>precio de compra</b> (último costo real cargado al inventario), <b>precio vendedor</b> y <b>precio distribuidor</b>. La ganancia del admin se calcula como precio distribuidor − precio de compra. El costo se actualiza con la carga masiva de inventario y no depende del costo fijo del producto.</p>
             </div>
             <button class="outline-btn" style="width:auto" onclick="loadAdminSubadminPrices()">Cargar precios</button>
           </div>
@@ -964,7 +964,7 @@
 <script src="app.js?v=26"></script>
 <script src="quarantine.js?v=2"></script>
 <script src="admin-users-distributor.js?v=11"></script>
-<script src="admin-profit-quality.js?v=4"></script>
+<script src="admin-profit-quality.js?v=5"></script>
 <script src="master-admin.js?v=1.8.2"></script>
 <script src="master-ops-v14.js?v=1.8.2"></script>
 <script src="master-intelligence-v16.js?v=1.8.0"></script>

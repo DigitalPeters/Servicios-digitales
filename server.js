@@ -997,6 +997,29 @@ function effectivePlatformAccountCostSql(accountAlias = 'pa', motherAlias = 'ma'
   return `COALESCE(NULLIF(${accountAlias}.purchase_price, 0), ${effectiveMotherUnitCostSql(motherAlias)}, 0)`;
 }
 
+// Costo real de compra de una unidad. Prioridad:
+// 1) precio capturado en la cuenta al cargar inventario;
+// 2) precio capturado en la traza ACCOUNT_CREATED (sirve para recuperar cuentas
+//    antiguas cuyo purchase_price fue alterado por una lógica anterior);
+// 3) costo de la cuenta madre como respaldo;
+// 4) cero. Nunca usa products.cost_price como costo real si existe inventario.
+function effectivePlatformAccountPurchaseCostSql(accountAlias = 'pa', motherAlias = 'ma') {
+  return `COALESCE(
+    NULLIF(${accountAlias}.purchase_price, 0),
+    NULLIF((
+      SELECT NULLIF(tr.metadata->>'purchase_price','')::numeric
+      FROM account_traceability tr
+      WHERE tr.platform_account_id = ${accountAlias}.id
+        AND tr.event_type = 'ACCOUNT_CREATED'
+        AND NULLIF(tr.metadata->>'purchase_price','') IS NOT NULL
+      ORDER BY tr.created_at DESC, tr.id DESC
+      LIMIT 1
+    ), 0),
+    ${effectiveMotherUnitCostSql(motherAlias)},
+    0
+  )`;
+}
+
 function deriveMotherUnitCost(row = {}, actualProfileCount = 0) {
   const total = row.purchase_cost_total === null || row.purchase_cost_total === undefined || String(row.purchase_cost_total).trim() === ''
     ? null : Number(row.purchase_cost_total);
@@ -4672,12 +4695,10 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
       }
     }
 
-    // V2.5: completa automáticamente la ficha financiera de las cuentas madre
-    // creadas/modificadas por una carga masiva. En CSV el costo de cada perfil
-    // suele venir en precio_compra (por ejemplo 5.83 x 6 perfiles), mientras que
-    // rentabilidad necesita además saber que la madre se vende por perfil para
-    // poder calcular el costo unitario. No se inventan datos: el total se deriva
-    // de los precios de los perfiles únicamente cuando el costo total está vacío.
+    // V2.6: el precio_compra de cada fila del CSV es el costo real de esa unidad
+    // y es la fuente de verdad para rentabilidad. NO se reemplaza por products.cost_price
+    // ni por un costo manual anterior de la cuenta madre.
+    // Cada platform_accounts.purchase_price conserva el valor exacto cargado en el CSV.
     if (touchedMotherIds.size) {
       const ids = Array.from(touchedMotherIds).filter(Number.isInteger);
       await pool.query(`
@@ -4692,7 +4713,7 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
         )
         UPDATE mother_accounts ma
         SET purchase_cost_total = CASE
-              WHEN ma.purchase_cost_total IS NULL AND ps.profile_cost_sum > 0 AND ps.priced_profiles = ps.profile_count
+              WHEN ps.profile_cost_sum > 0 AND ps.priced_profiles = ps.profile_count
                 THEN ROUND(ps.profile_cost_sum::numeric, 2)
               ELSE ma.purchase_cost_total
             END,
@@ -4706,24 +4727,13 @@ app.post(["/api/admin/inventario/bulk-upload", "/api/admin/inventory/bulk-upload
                 THEN ps.profile_count
               ELSE ma.configured_profile_count
             END,
+            profile_cost_override = NULL,
             updated_at = NOW()
         FROM profile_stats ps
         WHERE ma.id = ps.mother_account_id
       `, [ids]);
-
-      // Propaga el costo unitario calculado a cada perfil para que las ventas
-      // futuras e históricas puedan usar el mismo costo sin captura manual.
-      await pool.query(`
-        UPDATE platform_accounts pa
-        SET purchase_price = CASE
-          WHEN ma.sell_by_profile = TRUE AND ma.purchase_cost_total IS NOT NULL AND COALESCE(ma.configured_profile_count,0) > 0
-            THEN ROUND((ma.purchase_cost_total / ma.configured_profile_count)::numeric, 2)
-          ELSE pa.purchase_price
-        END
-        FROM mother_accounts ma
-        WHERE pa.mother_account_id = ma.id
-          AND pa.mother_account_id = ANY($1::int[])
-      `, [ids]);
+      // NO propagamos el total de la madre a platform_accounts.purchase_price.
+      // El costo de cada unidad debe permanecer como snapshot de la carga masiva.
     }
 
     return res.json({
@@ -8732,7 +8742,7 @@ app.patch("/api/admin/users/:userId/subadmin", authMiddleware, adminMiddleware, 
   }
 });
 
-// ADMIN: precios que tú le das a un admin independiente
+// V1.4.7: costo de compra dinámico desde inventario cargado por CSV.
 // ADMIN: precios que tú le das a un admin independiente
 app.get("/api/admin/subadmin-prices/:userId", authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -8744,9 +8754,19 @@ app.get("/api/admin/subadmin-prices/:userId", authMiddleware, adminMiddleware, a
          products.name,
          products.category,
          products.price AS general_price,
-         COALESCE(products.cost_price, 0) AS cost_price,
+         COALESCE(latest_inventory.purchase_price, products.cost_price, 0) AS cost_price,
          COALESCE(user_product_prices.sale_price, products.price) AS sale_price
        FROM products
+       LEFT JOIN LATERAL (
+         SELECT ${effectivePlatformAccountPurchaseCostSql('pa','ma')} AS purchase_price
+         FROM platform_accounts pa
+         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+         WHERE lower(trim(COALESCE(pa.product_name,''))) = lower(trim(products.name))
+           AND COALESCE(pa.owner_admin_id,0)=0
+           AND (${effectivePlatformAccountPurchaseCostSql('pa','ma')}) > 0
+         ORDER BY pa.created_at DESC, pa.id DESC
+         LIMIT 1
+       ) latest_inventory ON TRUE
        LEFT JOIN user_product_prices
          ON user_product_prices.product_id = products.id
         AND user_product_prices.user_id = $1
@@ -9865,18 +9885,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        LEFT JOIN users distributor ON distributor.id = u.owner_user_id
        LEFT JOIN products p ON p.id = o.product_id
        LEFT JOIN LATERAL (
-         SELECT COALESCE(SUM(COALESCE(NULLIF(
-           CASE
-             WHEN COALESCE(ma.sell_by_profile, FALSE) = TRUE THEN
-               COALESCE(ma.profile_cost_override,
-                 CASE
-                   WHEN COALESCE(ma.configured_profile_count, 0) > 0 AND ma.purchase_cost_total IS NOT NULL
-                     THEN ma.purchase_cost_total / ma.configured_profile_count
-                   ELSE NULL
-                 END
-               )
-             ELSE ma.purchase_cost_total
-           END, 0), NULLIF(pa.purchase_price, 0), 0)), 0)::numeric AS inventory_cost
+         SELECT COALESCE(SUM(${effectivePlatformAccountPurchaseCostSql('pa','ma')}), 0)::numeric AS inventory_cost
          FROM platform_accounts pa
          LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
          WHERE pa.assigned_order_id = o.id
@@ -10010,6 +10019,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
            pa.platform AS account_platform, pa.product_name AS account_product_name,
            ma.product_name AS mother_product_name, ma.provider_name,
            ma.purchase_cost_total, ma.sell_by_profile, ma.configured_profile_count,
+           pa.purchase_price AS account_purchase_price,
            ${effectivePlatformAccountCostSql('pa','ma')} AS effective_unit_cost
          FROM platform_accounts pa
          LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
@@ -10070,6 +10080,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        )
        SELECT l.account_id, l.mother_account_id, l.order_id,
               o.user_id, o.product_id, o.amount, o.product_cost_snapshot, o.distributor_cost_snapshot,
+              pa.purchase_price AS account_purchase_price,
               u.owner_user_id AS distributor_id,
               COALESCE(p.price, 0) AS admin_list_price,
               COALESCE(p.cost_price, 0) AS current_product_cost,
@@ -10286,7 +10297,11 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       const adminRev = money(adminSalePrice * (1 - refundRatio));
       const snapshotCost = Math.max(0, money(base.product_cost_snapshot));
       const currentProductCost = Math.max(0, money(base.current_product_cost));
-      const unitCosts = links.map(link => Math.max(0, Number(motherStats.get(Number(link.mother_account_id))?.effective_unit_cost || 0)));
+      const unitCosts = links.map(link => {
+        const accountCost = Number(link.account_purchase_price);
+        if (Number.isFinite(accountCost) && accountCost > 0) return accountCost;
+        return Math.max(0, Number(motherStats.get(Number(link.mother_account_id))?.effective_unit_cost || 0));
+      });
       const derivedTotal = unitCosts.reduce((a,b)=>a+b,0);
       const fallbackPerLink = links.length ? currentProductCost / links.length : 0;
       const revenuePerLink = links.length ? adminRev / links.length : 0;
@@ -10476,6 +10491,8 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
 
     const missingProviderSales = missingProviderSalesResult.rows.map(row => {
       const snapshotCost = Math.max(0, money(row.product_cost_snapshot));
+      const accountCost = row.account_purchase_price === null || row.account_purchase_price === undefined
+        ? null : money(row.account_purchase_price);
       const unitCost = row.effective_unit_cost === null || row.effective_unit_cost === undefined
         ? null : money(row.effective_unit_cost);
       const productName = String(row.product_name_snapshot || row.account_product_name || row.mother_product_name || 'Sin producto').trim();
@@ -10494,8 +10511,8 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         sell_by_profile: row.sell_by_profile === true,
         purchase_cost_total: row.purchase_cost_total === null ? null : money(row.purchase_cost_total),
         configured_profile_count: row.configured_profile_count === null ? null : Number(row.configured_profile_count),
-        sale_cost: snapshotCost > 0 ? snapshotCost : (unitCost === null ? 0 : unitCost),
-        cost_source: snapshotCost > 0 ? 'Costo guardado en la venta' : (unitCost !== null && unitCost > 0 ? 'Costo actual de la cuenta madre' : 'Sin costo'),
+        sale_cost: accountCost !== null && accountCost > 0 ? accountCost : (snapshotCost > 0 ? snapshotCost : (unitCost === null ? 0 : unitCost)),
+        cost_source: accountCost !== null && accountCost > 0 ? 'Costo de compra de la cuenta (carga masiva)' : (snapshotCost > 0 ? 'Costo guardado en la venta' : (unitCost !== null && unitCost > 0 ? 'Costo actual de la cuenta madre' : 'Sin costo')),
         assignment_type: Number(row.mother_account_id || 0) > 0 ? 'mother' : 'order',
         has_mother_account: Number(row.mother_account_id || 0) > 0,
         delivered_account_data: row.delivered_account_data || '',
@@ -10583,18 +10600,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     // Solo si no existe vínculo con inventario se usan los snapshots/fallbacks.
     const inventoryCostJoin = `
       LEFT JOIN LATERAL (
-        SELECT COALESCE(SUM(COALESCE(NULLIF(
-          CASE
-            WHEN COALESCE(ma.sell_by_profile, FALSE) = TRUE THEN
-              COALESCE(ma.profile_cost_override,
-                CASE
-                  WHEN COALESCE(ma.configured_profile_count, 0) > 0 AND ma.purchase_cost_total IS NOT NULL
-                    THEN ma.purchase_cost_total / ma.configured_profile_count
-                  ELSE NULL
-                END
-              )
-            ELSE ma.purchase_cost_total
-          END, 0), NULLIF(pa.purchase_price, 0), 0)), 0)::numeric AS inventory_cost
+        SELECT COALESCE(SUM(${effectivePlatformAccountPurchaseCostSql('pa','ma')}), 0)::numeric AS inventory_cost
         FROM platform_accounts pa
         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
         WHERE pa.assigned_order_id = orders.id
@@ -11670,9 +11676,7 @@ async function loadSupplierPerformance(start, end) {
       SELECT lower(trim(COALESCE(ma.provider_name,''))) AS skey,
              COUNT(*)::int AS sales,
              COALESCE(SUM(mo.amount),0)::numeric AS revenue,
-             COALESCE(SUM(COALESCE(NULLIF(mo.product_cost_snapshot,0),
-               CASE WHEN ma.sell_by_profile THEN COALESCE(NULLIF(ma.profile_cost_override,0), ma.purchase_cost_total / NULLIF(ma.configured_profile_count,0))
-                    ELSE NULLIF(ma.purchase_cost_total,0) END,
+             COALESCE(SUM(COALESCE(NULLIF((${effectivePlatformAccountPurchaseCostSql('pa','ma')}),0), NULLIF(mo.product_cost_snapshot,0),
                NULLIF(p.cost_price,0),0)),0)::numeric AS sold_cost
         FROM mapped_orders mo
         LEFT JOIN platform_accounts pa ON pa.id=mo.account_id
