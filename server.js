@@ -7998,17 +7998,21 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
       motherExpiringList, urgentOrders, urgentReports, urgentBalance, lowStock
     ] = await Promise.all([
       pool.query(`WITH todays AS (
-                    SELECT o.*, COALESCE(p.cost_price, 0) AS current_product_cost
+                    SELECT o.*, COALESCE(p.price, 0) AS admin_list_price, COALESCE(p.cost_price, 0) AS current_product_cost,
+                           p.category AS current_product_category, p.name AS current_product_name
                     FROM orders o
                     LEFT JOIN products p ON p.id = o.product_id
                     WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id = 0)
                       AND o.status='exito'
+                      AND NOT (
+                        translate(lower(COALESCE(NULLIF(TRIM(o.product_category_snapshot), ''), NULLIF(TRIM(p.category), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+                        OR translate(lower(COALESCE(NULLIF(TRIM(o.product_name_snapshot), ''), NULLIF(TRIM(p.name), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+                      )
                       AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date
                           = (NOW() AT TIME ZONE 'America/Mexico_City')::date
                   ), costs AS (
                     SELECT o.id,
                            COALESCE(
-                             NULLIF(o.product_cost_snapshot, 0),
                              NULLIF((
                                SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
                                FROM platform_accounts pa
@@ -8023,6 +8027,7 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                                    )
                                  )
                              ), 0),
+                             NULLIF(o.product_cost_snapshot, 0),
                              NULLIF(o.current_product_cost, 0),
                              0
                            ) AS effective_cost
@@ -8030,7 +8035,13 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                   )
                   SELECT COUNT(*)::int AS orders,
                          COALESCE(SUM(o.amount),0)::numeric AS revenue,
-                         COALESCE(SUM(o.amount - COALESCE(c.effective_cost,0)),0)::numeric AS gross_profit
+                         COALESCE(SUM(
+                           (CASE
+                              WHEN o.distributor_cost_snapshot IS NOT NULL AND o.distributor_cost_snapshot > 0
+                                THEN o.distributor_cost_snapshot
+                              ELSE o.amount
+                           END) - COALESCE(c.effective_cost,0)
+                         ),0)::numeric AS gross_profit
                   FROM todays o
                   LEFT JOIN costs c ON c.id=o.id`),
       pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE ${ownScope} AND status IN ('accion_en_espera','en_proceso','pendiente')`),
@@ -9844,6 +9855,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
          u.name AS seller_name, u.email AS seller_email, u.owner_user_id AS distributor_id,
          distributor.name AS distributor_name,
          p.name AS current_product_name,
+         COALESCE(p.price, 0) AS admin_list_price,
          COALESCE(p.cost_price, 0) AS current_product_cost,
          COALESCE(refunds.refund_amount, 0) AS refund_amount,
          COALESCE(earnings.final_earning, 0) AS distributor_final_earning,
@@ -10041,6 +10053,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        SELECT l.account_id, l.mother_account_id, l.order_id,
               o.user_id, o.product_id, o.amount, o.product_cost_snapshot, o.distributor_cost_snapshot,
               u.owner_user_id AS distributor_id,
+              COALESCE(p.price, 0) AS admin_list_price,
               COALESCE(p.cost_price, 0) AS current_product_cost,
               COALESCE(refunds.refund_amount, 0) AS refund_amount,
               COALESCE(earnings.final_earning, 0) AS distributor_final_earning,
@@ -10093,7 +10106,25 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
         distEarn = money(originalMargin * (1 - refundRatio));
       }
-      const revenue = money(gross - refund - distEarn);
+      // Rentabilidad REAL del administrador:
+      // el ingreso base siempre es lo que el administrador cobra por esa venta,
+      // no el precio de lista del producto.
+      //
+      // Ejemplo:
+      //   costo proveedor Disney perfil = $11
+      //   venta a vendedor = $30  -> utilidad admin = $19
+      //   venta a distribuidor = $20 -> utilidad admin = $9
+      // Si el pedido pertenece a un vendedor de un distribuidor,
+      // distributor_cost_snapshot conserva el precio que ese distribuidor paga
+      // al administrador (por ejemplo $20), aunque el vendedor final haya pagado $30.
+      const adminSalePrice = Math.max(0, money(
+        row.distributor_cost_snapshot !== null && row.distributor_cost_snapshot !== undefined
+          && Number(row.distributor_cost_snapshot) > 0
+          ? row.distributor_cost_snapshot
+          : gross
+      ));
+      const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
+      const revenue = money(adminSalePrice * (1 - refundRatio));
       const snapshotCost = Math.max(0, money(row.product_cost_snapshot));
       const currentProductCost = Math.max(0, money(row.current_product_cost));
       const productName = String(row.product_name_snapshot || row.current_product_name || 'Sin producto').trim();
@@ -10223,7 +10254,18 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
         distEarn = money(originalMargin * (1 - refundRatio));
       }
-      const adminRev = money(gross - refund - distEarn);
+      // Histórico: usa el ingreso REAL del administrador.
+      // Para una venta a vendedor directo es el importe del pedido.
+      // Para una venta de un vendedor perteneciente a un distribuidor,
+      // es distributor_cost_snapshot (el precio que el distribuidor paga al admin).
+      const adminSalePrice = Math.max(0, money(
+        base.distributor_cost_snapshot !== null && base.distributor_cost_snapshot !== undefined
+          && Number(base.distributor_cost_snapshot) > 0
+          ? base.distributor_cost_snapshot
+          : gross
+      ));
+      const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
+      const adminRev = money(adminSalePrice * (1 - refundRatio));
       const snapshotCost = Math.max(0, money(base.product_cost_snapshot));
       const currentProductCost = Math.max(0, money(base.current_product_cost));
       const unitCosts = links.map(link => Math.max(0, Number(motherStats.get(Number(link.mother_account_id))?.effective_unit_cost || 0)));
