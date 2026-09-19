@@ -109,18 +109,10 @@
 
         <div id="masterOpsKpis" class="master-kpi-grid"><div class="master-loading">Cargando resumen de operación…</div></div>
 
-        <div class="master-workspace-grid">
-          <section class="master-focus-card">
-            <div class="master-section-heading">
-              <div><span class="master-eyebrow">OPERACIÓN</span><h2>Atención prioritaria</h2></div>
-              <span class="master-section-badge">HOY</span>
-            </div>
-            <div id="masterUrgentList" class="master-urgent-list"><div class="master-loading">Revisando pendientes…</div></div>
-          </section>
-
+        <div class="master-workspace-grid master-workspace-grid-single">
           <section class="master-focus-card master-quick-card">
             <div class="master-section-heading">
-              <div><span class="master-eyebrow">ACCESOS</span><h2>Acciones del dueño</h2></div>
+              <div><span class="master-eyebrow">ACCESOS</span><h2>Acciones del dueño</h2><p>Accesos administrativos y trazabilidad del negocio.</p></div>
             </div>
             <div class="master-actions master-actions-owner-only">
               <button onclick="openMasterLedger()"><span>💰</span><b>Libro de saldo</b><small>Movimientos y trazabilidad</small></button>

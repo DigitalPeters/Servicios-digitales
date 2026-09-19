@@ -63,12 +63,16 @@
         <div class="panel-head"><div><div class="master-kicker">COMPRAS E INVENTARIO</div><h2>Proveedores</h2><p class="small-text">Registra a quién compras, cuánto inviertes y conserva un historial independiente de las cuentas madre.</p></div><button class="outline-btn" style="width:auto" onclick="loadMasterSuppliers()">Actualizar</button></div>
         <div class="master-supplier-forms">
           <form id="masterSupplierForm" class="master-v14-form-card">
-            <h3>Guardar proveedor</h3>
+            <h3 id="masterSupplierFormTitle">Registrar proveedor</h3>
+            <input type="hidden" id="masterSupplierId" value="" />
             <input id="masterSupplierName" placeholder="Nombre del proveedor" required />
             <div class="two-row"><input id="masterSupplierContact" placeholder="Contacto"/><input id="masterSupplierPhone" placeholder="WhatsApp / teléfono"/></div>
             <input id="masterSupplierEmail" type="email" placeholder="Correo (opcional)"/>
             <textarea id="masterSupplierNotes" placeholder="Notas, condiciones, plataformas, horarios…"></textarea>
-            <button class="primary-btn" type="submit">Guardar proveedor</button>
+            <div class="master-v14-footer" style="justify-content:flex-start">
+              <button id="masterSupplierSaveBtn" class="primary-btn" type="submit">Guardar proveedor</button>
+              <button id="masterSupplierCancelBtn" class="outline-btn hidden" type="button" onclick="cancelMasterSupplierEdit()">Cancelar edición</button>
+            </div>
           </form>
           <form id="masterPurchaseForm" class="master-v14-form-card">
             <h3>Registrar compra de inventario</h3>
@@ -431,12 +435,66 @@
       const d=await api('/api/admin/master/suppliers');
       const suppliers=d.suppliers||[];const select=document.getElementById('masterPurchaseSupplier');
       if(select)select.innerHTML='<option value="">Selecciona proveedor</option>'+suppliers.filter(s=>s.id).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
-      if(list)list.innerHTML=suppliers.length?suppliers.map(s=>`<article class="master-supplier-card"><div><span class="master-supplier-icon">🚚</span><div><h3>${esc(s.name)}</h3><p>${esc(s.contact_name||s.phone||s.email||'Sin contacto registrado')}</p></div></div><div class="master-supplier-metrics"><span><small>Cuentas madre</small><b>${Number(s.mother_accounts||0)}</b></span><span><small>Inversión cuentas</small><b>$${money(s.invested)}</b></span><span><small>Compras registradas</small><b>$${money(s.purchases_total)}</b></span></div></article>`).join(''):'<div class="master-v14-empty">Aún no hay proveedores registrados.</div>';
+      if(list)list.innerHTML=suppliers.length?suppliers.map(s=>{
+        const refs=Number(s.mother_accounts||0)+Number(s.purchase_records||0)+Number(s.service_cases||0)+Number(s.renewals||0)+Number(s.cash_movements||0);
+        return `<article class="master-supplier-card">
+          <div class="master-supplier-main"><div><span class="master-supplier-icon">🚚</span><div><h3>${esc(s.name)}</h3><p>${esc(s.contact_name||s.phone||s.email||'Sin contacto registrado')}</p></div></div>
+            <div class="master-supplier-actions"><button type="button" class="outline-btn" onclick="editMasterSupplierFromCard('${encodeURIComponent(JSON.stringify(s))}')">✏️ Editar</button><button type="button" class="danger-btn" onclick="deleteMasterSupplier(${Number(s.id)})">🗑️ Borrar</button></div>
+          </div>
+          <div class="master-supplier-metrics"><span><small>Cuentas madre</small><b>${Number(s.mother_accounts||0)}</b></span><span><small>Inversión cuentas</small><b>$${money(s.invested)}</b></span><span><small>Compras registradas</small><b>$${money(s.purchases_total)}</b></span></div>
+          ${refs?`<div class="master-supplier-refnote">En uso: ${refs} registro(s). Si está mal escrito, usa <b>Editar</b> para conservar la trazabilidad.</div>`:'<div class="master-supplier-refnote muted">Sin registros vinculados · se puede borrar.</div>'}
+        </article>`;
+      }).join(''):'<div class="master-v14-empty">Aún no hay proveedores registrados.</div>';
       if(purchases)purchases.innerHTML=miniTable((d.purchases||[]).map(x=>[String(x.purchase_date||'').slice(0,10),x.supplier_name_snapshot,x.description||'',x.item_count,`$${money(x.total_amount)}`]),['Fecha','Proveedor','Compra','Unidades','Total']);
     }catch(e){if(list)list.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudo cargar proveedores')}</div>`;}
   }
   window.loadMasterSuppliers=loadMasterSuppliers;
-  async function saveMasterSupplier(ev){ev.preventDefault();try{await api('/api/admin/master/suppliers',{method:'POST',body:JSON.stringify({name:document.getElementById('masterSupplierName').value,contact_name:document.getElementById('masterSupplierContact').value,phone:document.getElementById('masterSupplierPhone').value,email:document.getElementById('masterSupplierEmail').value,notes:document.getElementById('masterSupplierNotes').value})});ev.target.reset();await loadMasterSuppliers();if(typeof showMessage==='function')showMessage('Proveedor guardado');}catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo guardar proveedor',true);}}
+  function resetMasterSupplierForm(){
+    const form=document.getElementById('masterSupplierForm'); if(form)form.reset();
+    const id=document.getElementById('masterSupplierId');if(id)id.value='';
+    const title=document.getElementById('masterSupplierFormTitle');if(title)title.textContent='Registrar proveedor';
+    const save=document.getElementById('masterSupplierSaveBtn');if(save)save.textContent='Guardar proveedor';
+    const cancel=document.getElementById('masterSupplierCancelBtn');if(cancel)cancel.classList.add('hidden');
+  }
+  function editMasterSupplierFromCard(encoded){
+    try{editMasterSupplier(JSON.parse(decodeURIComponent(encoded)));}catch(e){if(typeof showMessage==='function')showMessage('No se pudo abrir el proveedor',true);}
+  }
+  window.editMasterSupplierFromCard=editMasterSupplierFromCard;
+  function editMasterSupplier(s){
+    if(!s||!s.id)return;
+    document.getElementById('masterSupplierId').value=String(s.id);
+    document.getElementById('masterSupplierName').value=s.name||'';
+    document.getElementById('masterSupplierContact').value=s.contact_name||'';
+    document.getElementById('masterSupplierPhone').value=s.phone||'';
+    document.getElementById('masterSupplierEmail').value=s.email||'';
+    document.getElementById('masterSupplierNotes').value=s.notes||'';
+    document.getElementById('masterSupplierFormTitle').textContent='Editar proveedor';
+    document.getElementById('masterSupplierSaveBtn').textContent='Guardar cambios';
+    document.getElementById('masterSupplierCancelBtn').classList.remove('hidden');
+    document.getElementById('masterSupplierName')?.focus();
+    document.getElementById('masterSuppliersPanel')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  window.editMasterSupplier=editMasterSupplier;
+  window.cancelMasterSupplierEdit=resetMasterSupplierForm;
+  async function saveMasterSupplier(ev){
+    ev.preventDefault();
+    try{
+      const id=Number(document.getElementById('masterSupplierId').value||0)||null;
+      const payload={name:document.getElementById('masterSupplierName').value,contact_name:document.getElementById('masterSupplierContact').value,phone:document.getElementById('masterSupplierPhone').value,email:document.getElementById('masterSupplierEmail').value,notes:document.getElementById('masterSupplierNotes').value};
+      const url=id?`/api/admin/master/suppliers/${id}`:'/api/admin/master/suppliers';
+      await api(url,{method:id?'PUT':'POST',body:JSON.stringify(payload)});
+      resetMasterSupplierForm();await loadMasterSuppliers();
+      if(typeof showMessage==='function')showMessage(id?'Proveedor actualizado':'Proveedor guardado');
+    }catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo guardar el proveedor',true);}
+  }
+  async function deleteMasterSupplier(id){
+    if(!Number(id))return;
+    const ok=window.confirm('¿Borrar este proveedor? Si tiene cuentas, compras, renovaciones o reportes vinculados, el sistema no permitirá borrarlo para no perder trazabilidad.');
+    if(!ok)return;
+    try{await api(`/api/admin/master/suppliers/${Number(id)}`,{method:'DELETE'});await loadMasterSuppliers();if(typeof showMessage==='function')showMessage('Proveedor borrado');}
+    catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo borrar el proveedor',true);}
+  }
+  window.deleteMasterSupplier=deleteMasterSupplier;
   async function saveMasterPurchase(ev){ev.preventDefault();try{await api('/api/admin/master/inventory-purchases',{method:'POST',body:JSON.stringify({supplier_id:document.getElementById('masterPurchaseSupplier').value||null,supplier_name:document.getElementById('masterPurchaseSupplierText').value,purchase_date:document.getElementById('masterPurchaseDate').value||null,item_count:document.getElementById('masterPurchaseCount').value,total_amount:document.getElementById('masterPurchaseTotal').value,description:document.getElementById('masterPurchaseDescription').value,notes:document.getElementById('masterPurchaseNotes').value})});ev.target.reset();document.getElementById('masterPurchaseCount').value='1';document.getElementById('masterPurchaseDate').value=new Date().toISOString().slice(0,10);await loadMasterSuppliers();if(typeof showMessage==='function')showMessage('Compra registrada');}catch(e){if(typeof showMessage==='function')showMessage(e.message||'No se pudo registrar compra',true);}}
 
   function init(){ensureV14UI();const date=document.getElementById('masterPurchaseDate');if(date&&!date.value)date.value=new Date().toISOString().slice(0,10);loadMasterManualDeliveries().catch(()=>{});}

@@ -2958,3 +2958,7 @@ body.modal-open{
 .pq-provider-pending-table .pq-inline-input{min-width:160px}
 .pq-provider-pending-note{margin-top:10px}
 @media(max-width:900px){.pq-missing-provider-summary{grid-template-columns:1fr}.pq-provider-pending-table td{min-width:155px}}
+
+/* MASTER V1.4.1 - gestión editable de proveedores */
+.master-supplier-main{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.master-supplier-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.master-supplier-actions button{width:auto!important}.master-supplier-refnote{margin-top:10px;padding:8px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e8edf4;color:#64748b;font-size:12px}.master-supplier-refnote.muted{color:#7b8797}.danger-btn{border:1px solid #f1b4b4;background:#fff5f5;color:#b42318;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer}.master-workspace-grid-single{grid-template-columns:1fr!important}
+@media(max-width:700px){.master-supplier-main{flex-direction:column}.master-supplier-actions{justify-content:flex-start}}

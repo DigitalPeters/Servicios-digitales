@@ -7549,22 +7549,28 @@ app.get('/api/admin/master/users/:userId/overview', authMiddleware, adminMiddlew
 app.get('/api/admin/master/suppliers', authMiddleware, adminMiddleware, async (req,res)=>{
   try{
     const ownerId=adminOwnerId(req);
-    const result=await pool.query(`WITH names AS (
-        SELECT lower(trim(name)) key,trim(name) name FROM suppliers WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1)
-        UNION
-        SELECT lower(trim(provider_name)) key,trim(provider_name) name FROM mother_accounts WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) AND trim(COALESCE(provider_name,''))<>''
-      ), agg AS (
+    const result=await pool.query(`WITH agg AS (
         SELECT lower(trim(COALESCE(provider_name,''))) key,COUNT(*)::int mother_accounts,COALESCE(SUM(purchase_cost_total),0)::numeric invested
         FROM mother_accounts WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) AND trim(COALESCE(provider_name,''))<>'' GROUP BY 1
       ), purchases AS (
         SELECT lower(trim(COALESCE(supplier_name_snapshot,''))) key,COUNT(*)::int purchase_records,COALESCE(SUM(total_amount),0)::numeric purchases_total
         FROM inventory_purchases WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) GROUP BY 1
+      ), service_cases AS (
+        SELECT supplier_id,COUNT(*)::int service_cases FROM supplier_service_cases WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) GROUP BY supplier_id
+      ), renewals AS (
+        SELECT supplier_id,COUNT(*)::int renewals FROM mother_account_renewals WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) GROUP BY supplier_id
+      ), cash AS (
+        SELECT supplier_id,COUNT(*)::int cash_movements FROM admin_cash_movements WHERE (($1::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$1) GROUP BY supplier_id
       )
-      SELECT s.id,n.name,s.contact_name,s.phone,s.email,s.notes,COALESCE(s.status,'activo') status,
+      SELECT s.id,trim(s.name) name,s.contact_name,s.phone,s.email,s.notes,COALESCE(s.status,'activo') status,
              COALESCE(a.mother_accounts,0)::int mother_accounts,COALESCE(a.invested,0)::numeric invested,
-             COALESCE(p.purchase_records,0)::int purchase_records,COALESCE(p.purchases_total,0)::numeric purchases_total
-      FROM names n LEFT JOIN suppliers s ON lower(trim(s.name))=n.key AND (($1::int IS NULL AND (s.owner_admin_id IS NULL OR s.owner_admin_id=0)) OR s.owner_admin_id=$1)
-      LEFT JOIN agg a ON a.key=n.key LEFT JOIN purchases p ON p.key=n.key ORDER BY lower(n.name)`,[ownerId]);
+             COALESCE(p.purchase_records,0)::int purchase_records,COALESCE(p.purchases_total,0)::numeric purchases_total,
+             COALESCE(sc.service_cases,0)::int service_cases,COALESCE(r.renewals,0)::int renewals,COALESCE(c.cash_movements,0)::int cash_movements
+      FROM suppliers s
+      LEFT JOIN agg a ON a.key=lower(trim(s.name)) LEFT JOIN purchases p ON p.key=lower(trim(s.name))
+      LEFT JOIN service_cases sc ON sc.supplier_id=s.id LEFT JOIN renewals r ON r.supplier_id=s.id LEFT JOIN cash c ON c.supplier_id=s.id
+      WHERE (($1::int IS NULL AND (s.owner_admin_id IS NULL OR s.owner_admin_id=0)) OR s.owner_admin_id=$1)
+      ORDER BY lower(trim(s.name))`,[ownerId]);
     const purchases=await pool.query(`SELECT ip.id,ip.purchase_date,ip.supplier_name_snapshot,ip.description,ip.item_count,ip.total_amount,ip.notes,ip.created_at
       FROM inventory_purchases ip WHERE (($1::int IS NULL AND (ip.owner_admin_id IS NULL OR ip.owner_admin_id=0)) OR ip.owner_admin_id=$1)
       ORDER BY ip.purchase_date DESC,ip.id DESC LIMIT 60`,[ownerId]);
@@ -7588,6 +7594,55 @@ app.post('/api/admin/master/suppliers', authMiddleware, adminMiddleware, async (
     await client.query('COMMIT');
     res.json({message:'Proveedor guardado',supplier:result.rows[0]});
   }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error guardando proveedor:',err.message);if(String(err.code)==='23505')return res.status(400).json({error:'Ese proveedor ya existe'});res.status(500).json({error:'No se pudo guardar el proveedor'});}finally{client.release();}
+});
+
+app.put('/api/admin/master/suppliers/:id', authMiddleware, adminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const id=Number(req.params.id||0); if(!id)return res.status(400).json({error:'Proveedor inválido'});
+    const ownerId=adminOwnerId(req);
+    const name=String(req.body?.name||'').trim().slice(0,160); if(!name)return res.status(400).json({error:'Nombre del proveedor obligatorio'});
+    const values=[name,String(req.body?.contact_name||'').trim().slice(0,160),String(req.body?.phone||'').trim().slice(0,80),String(req.body?.email||'').trim().slice(0,200),String(req.body?.notes||'').trim().slice(0,1000)];
+    await client.query('BEGIN');
+    const current=await client.query(`SELECT id,name FROM suppliers WHERE id=$1 AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2) FOR UPDATE`,[id,ownerId]);
+    if(!current.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Proveedor no encontrado'});}
+    const oldName=current.rows[0].name;
+    const duplicate=await client.query(`SELECT id FROM suppliers WHERE id<>$1 AND COALESCE(owner_admin_id,0)=COALESCE($2::int,0) AND lower(trim(name))=lower(trim($3)) LIMIT 1`,[id,ownerId,name]);
+    if(duplicate.rows[0]){await client.query('ROLLBACK');return res.status(400).json({error:'Ya existe otro proveedor con ese nombre. Puedes borrar el duplicado si no tiene registros o usar otro nombre.'});}
+    const updated=await client.query(`UPDATE suppliers SET name=$2,contact_name=$3,phone=$4,email=$5,notes=$6,updated_at=NOW() WHERE id=$1 RETURNING *`,[id,...values]);
+    // Corregir el nombre canónico también en los registros que guardan el proveedor como texto.
+    await client.query(`UPDATE mother_accounts SET provider_name=$2 WHERE (($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$3) AND lower(trim(COALESCE(provider_name,'')))=lower(trim($1))`,[oldName,name,ownerId]);
+    await client.query(`UPDATE inventory_purchases SET supplier_name_snapshot=$2 WHERE (($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$3) AND lower(trim(COALESCE(supplier_name_snapshot,'')))=lower(trim($1))`,[oldName,name,ownerId]);
+    await client.query(`UPDATE admin_cash_movements SET supplier_name_snapshot=$2 WHERE (($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$3) AND lower(trim(COALESCE(supplier_name_snapshot,'')))=lower(trim($1))`,[oldName,name,ownerId]);
+    await client.query(`UPDATE supplier_service_cases SET supplier_name_snapshot=$2 WHERE (($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$3) AND lower(trim(COALESCE(supplier_name_snapshot,'')))=lower(trim($1))`,[oldName,name,ownerId]);
+    await client.query(`UPDATE mother_account_renewals SET supplier_name_snapshot=$2 WHERE (($3::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$3) AND lower(trim(COALESCE(supplier_name_snapshot,'')))=lower(trim($1))`,[oldName,name,ownerId]);
+    await recordAdminAudit(client,req,{action:'supplier_update',entityType:'supplier',entityId:id,summary:`Proveedor corregido: ${oldName} → ${name}`});
+    await client.query('COMMIT');
+    res.json({message:'Proveedor actualizado',supplier:updated.rows[0]});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error actualizando proveedor:',err.message);if(String(err.code)==='23505')return res.status(400).json({error:'Ese proveedor ya existe'});res.status(500).json({error:'No se pudo actualizar el proveedor'});}finally{client.release();}
+});
+
+app.delete('/api/admin/master/suppliers/:id', authMiddleware, adminMiddleware, async (req,res)=>{
+  const client=await pool.connect();
+  try{
+    const id=Number(req.params.id||0); if(!id)return res.status(400).json({error:'Proveedor inválido'});
+    const ownerId=adminOwnerId(req);
+    await client.query('BEGIN');
+    const supplier=await client.query(`SELECT id,name FROM suppliers WHERE id=$1 AND (($2::int IS NULL AND (owner_admin_id IS NULL OR owner_admin_id=0)) OR owner_admin_id=$2) FOR UPDATE`,[id,ownerId]);
+    if(!supplier.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Proveedor no encontrado'});}
+    const [ma,pur,cash,cases,ren]=await Promise.all([
+      client.query(`SELECT COUNT(*)::int n FROM mother_accounts WHERE supplier_id=$1 OR lower(trim(COALESCE(provider_name,'')))=lower(trim($2))`,[id,supplier.rows[0].name]),
+      client.query(`SELECT COUNT(*)::int n FROM inventory_purchases WHERE supplier_id=$1`,[id]),
+      client.query(`SELECT COUNT(*)::int n FROM admin_cash_movements WHERE supplier_id=$1`,[id]),
+      client.query(`SELECT COUNT(*)::int n FROM supplier_service_cases WHERE supplier_id=$1`,[id]),
+      client.query(`SELECT COUNT(*)::int n FROM mother_account_renewals WHERE supplier_id=$1`,[id])
+    ]);
+    const refs=Number(ma.rows[0].n)+Number(pur.rows[0].n)+Number(cash.rows[0].n)+Number(cases.rows[0].n)+Number(ren.rows[0].n);
+    if(refs){await client.query('ROLLBACK');return res.status(409).json({error:`No se puede borrar “${supplier.rows[0].name}” porque tiene ${refs} registro(s) vinculados. Si solo está mal escrito, usa Editar para corregirlo sin perder la trazabilidad.`});}
+    await client.query(`DELETE FROM suppliers WHERE id=$1`,[id]);
+    await recordAdminAudit(client,req,{action:'supplier_delete',entityType:'supplier',entityId:id,summary:`Proveedor eliminado: ${supplier.rows[0].name}`});
+    await client.query('COMMIT');res.json({message:'Proveedor borrado'});
+  }catch(err){try{await client.query('ROLLBACK')}catch(_){};console.error('Error borrando proveedor:',err.message);res.status(500).json({error:'No se pudo borrar el proveedor'});}finally{client.release();}
 });
 
 app.post('/api/admin/master/inventory-purchases', authMiddleware, adminMiddleware, async (req,res)=>{
