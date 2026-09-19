@@ -10581,13 +10581,20 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
         FROM (
           SELECT DISTINCT pa0.id
           FROM platform_accounts pa0
-          WHERE pa0.assigned_order_id = orders.id
-             OR pa0.id = orders.assigned_platform_account_id
-             OR pa0.id IN (
-               SELECT arl.account_id
-               FROM account_recovery_log arl
-               WHERE arl.order_id = orders.id
-             )
+          WHERE (
+            pa0.assigned_order_id = orders.id
+            OR pa0.id = orders.assigned_platform_account_id
+            OR pa0.id IN (
+              SELECT arl.account_id
+              FROM account_recovery_log arl
+              WHERE arl.order_id = orders.id
+            )
+          )
+          -- MUY IMPORTANTE: el costo debe pertenecer al MISMO producto real vendido.
+          -- No basta con que sea de la misma plataforma/categoría:
+          -- "Disney perfil" y "Disney Premium + 7 ESPN Perfil" son productos distintos.
+          AND lower(trim(COALESCE(NULLIF(pa0.product_name, ''), NULLIF(pa0.platform, ''), ''))) =
+              lower(trim(${saleProductNameExpr}))
         ) picked
         JOIN platform_accounts pa ON pa.id = picked.id
         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
