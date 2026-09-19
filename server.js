@@ -994,7 +994,9 @@ function effectiveMotherUnitCostSql(motherAlias = 'ma') {
 }
 
 function effectivePlatformAccountCostSql(accountAlias = 'pa', motherAlias = 'ma') {
-  return `COALESCE(NULLIF(${accountAlias}.purchase_price, 0), ${effectiveMotherUnitCostSql(motherAlias)}, 0)`;
+  // Para inventario real usamos exactamente el mismo criterio que Rentabilidad:
+  // costo capturado al cargar la unidad > costo actual de la unidad > madre legacy.
+  return effectivePlatformAccountPurchaseCostSql(accountAlias, motherAlias);
 }
 
 // Costo real de compra de una unidad. Prioridad:
@@ -1004,17 +1006,26 @@ function effectivePlatformAccountCostSql(accountAlias = 'pa', motherAlias = 'ma'
 // 3) costo de la cuenta madre como respaldo;
 // 4) cero. Nunca usa products.cost_price como costo real si existe inventario.
 function effectivePlatformAccountPurchaseCostSql(accountAlias = 'pa', motherAlias = 'ma') {
+  // FUENTE DE VERDAD DEL COSTO DE COMPRA:
+  // 1) El precio_compra que quedó registrado en la traza ACCOUNT_CREATED de la
+  //    carga de inventario. Esto protege el costo histórico frente a cambios
+  //    posteriores de la configuración de la cuenta madre/producto.
+  // 2) El purchase_price actual de la cuenta, para inventario nuevo que aún no
+  //    tenga traza histórica.
+  // 3) Costo unitario de la cuenta madre únicamente como respaldo para registros
+  //    legacy sin costo por unidad.
   return `COALESCE(
-    NULLIF(${accountAlias}.purchase_price, 0),
     NULLIF((
       SELECT NULLIF(tr.metadata->>'purchase_price','')::numeric
       FROM account_traceability tr
       WHERE tr.platform_account_id = ${accountAlias}.id
         AND tr.event_type = 'ACCOUNT_CREATED'
         AND NULLIF(tr.metadata->>'purchase_price','') IS NOT NULL
-      ORDER BY tr.created_at DESC, tr.id DESC
+        AND NULLIF(tr.metadata->>'purchase_price','')::numeric > 0
+      ORDER BY tr.created_at ASC, tr.id ASC
       LIMIT 1
     ), 0),
+    NULLIF(${accountAlias}.purchase_price, 0),
     ${effectiveMotherUnitCostSql(motherAlias)},
     0
   )`;
@@ -9708,44 +9719,10 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
     const actualProfiles = Number(actualProfilesResult.rows[0]?.total || 0);
     const effectiveUnitCost = deriveMotherUnitCost(result.rows[0], actualProfiles);
 
-    // Si ya conocemos el costo por unidad, lo propagamos al inventario de esta cuenta madre.
-    // Así las ventas futuras guardan un snapshot de costo correcto.
-    if (effectiveUnitCost !== null) {
-      await client.query(
-        `UPDATE platform_accounts
-         SET purchase_price = $2
-         WHERE mother_account_id = $1 AND COALESCE(owner_admin_id, 0) = 0`,
-        [id, effectiveUnitCost]
-      );
-
-      // Para ventas históricas que quedaron en $0, solo hacemos backfill cuando TODAS
-      // las cuentas ligadas al pedido ya tienen costo conocido. Esto evita costos parciales en combos.
-      await client.query(
-        `WITH affected_orders AS (
-           SELECT DISTINCT assigned_order_id AS order_id
-           FROM platform_accounts
-           WHERE mother_account_id = $1
-             AND COALESCE(owner_admin_id, 0) = 0
-             AND assigned_order_id IS NOT NULL
-         ), recalculated AS (
-           SELECT pa.assigned_order_id AS order_id,
-                  SUM(COALESCE(pa.purchase_price, 0))::numeric AS total_cost,
-                  COUNT(*)::int AS account_count,
-                  COUNT(pa.purchase_price)::int AS priced_count
-           FROM platform_accounts pa
-           WHERE pa.assigned_order_id IN (SELECT order_id FROM affected_orders)
-             AND COALESCE(pa.owner_admin_id, 0) = 0
-           GROUP BY pa.assigned_order_id
-         )
-         UPDATE orders o
-         SET product_cost_snapshot = r.total_cost
-         FROM recalculated r
-         WHERE o.id = r.order_id
-           AND COALESCE(o.owner_admin_id, 0) = 0
-           AND r.account_count = r.priced_count`,
-        [id]
-      );
-    }
+    // IMPORTANTE: nunca propagamos el costo de la cuenta madre a
+    // platform_accounts.purchase_price. Cada unidad conserva el precio_compra
+    // que llegó en su propia carga masiva. La cuenta madre solo sirve como
+    // respaldo para inventario legacy sin costo unitario.
 
     await recordAdminAudit(client, req, {
       action: 'mother_account_cost_config',
@@ -10601,13 +10578,33 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
     const inventoryCostJoin = `
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(${effectivePlatformAccountPurchaseCostSql('pa','ma')}), 0)::numeric AS inventory_cost
-        FROM platform_accounts pa
+        FROM (
+          SELECT DISTINCT pa0.id
+          FROM platform_accounts pa0
+          WHERE pa0.assigned_order_id = orders.id
+             OR pa0.id = orders.assigned_platform_account_id
+             OR pa0.id IN (
+               SELECT arl.account_id
+               FROM account_recovery_log arl
+               WHERE arl.order_id = orders.id
+             )
+        ) picked
+        JOIN platform_accounts pa ON pa.id = picked.id
         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
-        WHERE pa.assigned_order_id = orders.id
-           OR pa.id = orders.assigned_platform_account_id
       ) sale_inventory_cost ON TRUE
     `;
-    const costExpr = `COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)`;
+    // Para streaming/perfiles, jamás usamos products.cost_price como costo real si
+    // existe una venta de inventario. El snapshot de la orden queda como respaldo
+    // porque fue calculado al entregar la cuenta. products.cost_price solo se usa
+    // para productos manuales sin inventario.
+    const costExpr = `CASE
+      WHEN lower(COALESCE(products.category, '')) LIKE '%tramite%'
+        OR lower(COALESCE(products.category, '')) LIKE '%trámite%'
+        THEN 0
+      WHEN lower(COALESCE(products.product_type, '')) IN ('streaming_auto','combo_auto')
+        THEN COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(orders.product_cost_snapshot, 0), 0)
+      ELSE COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)
+    END`;
     // Si la venta es de un vendedor perteneciente a un distribuidor, el ingreso
     // real del admin es el precio del distribuidor; la diferencia es del distribuidor.
     const adminSaleExpr = `CASE
@@ -10683,6 +10680,15 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductCategoryExpr} AS product_category,
          ${adminSaleExpr} AS amount,
          ${costExpr} AS cost_price,
+         CASE
+           WHEN lower(COALESCE(products.product_type, '')) IN ('streaming_auto','combo_auto')
+                AND NULLIF(sale_inventory_cost.inventory_cost, 0) IS NOT NULL THEN 'inventario:precio_compra'
+           WHEN lower(COALESCE(products.product_type, '')) IN ('streaming_auto','combo_auto')
+                AND NULLIF(orders.product_cost_snapshot, 0) IS NOT NULL THEN 'snapshot_de_entrega'
+           WHEN lower(COALESCE(products.category, '')) LIKE '%tramite%'
+                OR lower(COALESCE(products.category, '')) LIKE '%trámite%' THEN 'tramite_excluido'
+           ELSE 'producto'
+         END AS cost_source,
          (${adminSaleExpr} - ${costExpr}) AS profit,
          orders.status,
          orders.created_at,
