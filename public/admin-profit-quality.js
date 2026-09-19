@@ -261,30 +261,38 @@
     const count=document.getElementById('pqMissingProviderSalesCount');
     if(count) count.textContent=String(list.length);
     if(!list.length){
-      box.innerHTML='<div class="pq-inline-ok">✅ No hay ventas con cuenta madre vinculada que estén sin proveedor.</div>';
+      box.innerHTML='<div class="pq-inline-ok">✅ No hay ventas pendientes de asignar proveedor.</div>';
       return;
     }
+    const linkedCount=list.filter(r=>r.has_mother_account).length;
+    const unlinkedCount=list.length-linkedCount;
     box.innerHTML=`
       <div class="pq-missing-provider-summary">
         <div><b>${list.length}</b><span>venta(s) pendientes de proveedor</span></div>
-        <p>Estas ventas ya están vinculadas a una <b>cuenta madre</b>, pero esa cuenta no tiene proveedor. Al guardar un proveedor, se actualiza la cuenta madre y el cambio se refleja en sus ventas históricas y en la rentabilidad.</p>
+        <p>Esta lista debe coincidir con las ventas que aparecen como <b>“Sin proveedor”</b> en la rentabilidad. ${linkedCount?`<b>${linkedCount}</b> tienen cuenta madre vinculada y se corregirán en la cuenta madre.`:''} ${unlinkedCount?`<b>${unlinkedCount}</b> no conservaron cuenta madre vinculada; en esas ventas el proveedor se guardará directamente en el histórico de la venta.`:''}</p>
       </div>
       <div class="table-wrap"><table class="mini-table pq-provider-pending-table"><thead><tr>
-        <th>Fecha</th><th>Venta</th><th>Cuenta madre</th><th>Vendedor</th><th>Importe</th><th>Costo</th><th>Proveedor</th><th>Acción</th>
+        <th>Fecha</th><th>Venta</th><th>Cuenta / origen</th><th>Vendedor</th><th>Importe</th><th>Costo real</th><th>Proveedor</th><th>Acción</th>
       </tr></thead><tbody>
-      ${list.map(r=>`<tr class="pq-missing-provider-row" data-mother-id="${num(r.mother_account_id)}">
-        <td>${esc(formatDate(r.created_at))}</td>
-        <td><b>#${num(r.order_id)}</b><br><span class="small-text">${esc(r.product_name||'Sin producto')}</span></td>
-        <td><b>#${num(r.mother_account_id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br><span class="small-text">${esc(r.mother_product_name||'')}</span></td>
-        <td>${esc(r.seller_name||r.seller_email||'Usuario')}</td>
-        <td><b>${money(r.amount)}</b></td>
-        <td>${money(r.sale_cost)}<br><span class="small-text">${esc(r.cost_source||'')}</span></td>
-        <td><input id="pq-sale-provider-${num(r.mother_account_id)}-${num(r.order_id)}" class="pq-inline-input" list="pqProviderSuggestions" value="" placeholder="Ej. Digitalvnhe" autocomplete="off"></td>
-        <td><button type="button" class="primary-btn pq-inline-save" onclick="saveMissingProviderSale(${num(r.mother_account_id)},${num(r.order_id)})">💾 Asignar proveedor</button></td>
-      </tr>`).join('')}
+      ${list.map(r=>{
+        const rowKey=`${num(r.mother_account_id||0)}-${num(r.order_id)}`;
+        const origin=r.has_mother_account
+          ? `<b>Cuenta madre #${num(r.mother_account_id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br><span class="small-text">${esc(r.mother_product_name||'')}</span>`
+          : `<b>⚠ Sin cuenta madre</b><br><span class="small-text">La venta conserva su entrega, pero no el vínculo con inventario.</span>`;
+        return `<tr class="pq-missing-provider-row" data-mother-id="${num(r.mother_account_id)}" data-order-id="${num(r.order_id)}">
+          <td>${esc(formatDate(r.created_at))}</td>
+          <td><b>#${num(r.order_id)}</b><br><span class="small-text">${esc(r.product_name||'Sin producto')}</span></td>
+          <td>${origin}</td>
+          <td>${esc(r.seller_name||r.seller_email||'Usuario')}</td>
+          <td><b>${money(r.amount)}</b></td>
+          <td>${money(r.sale_cost)}<br><span class="small-text">${esc(r.cost_source||'')}</span></td>
+          <td><input id="pq-sale-provider-${rowKey}" class="pq-inline-input" list="pqProviderSuggestions" value="" placeholder="Ej. Digitalvnhe" autocomplete="off"></td>
+          <td><button type="button" class="primary-btn pq-inline-save" onclick="saveMissingProviderSale(${num(r.mother_account_id)},${num(r.order_id)})">💾 Asignar proveedor</button></td>
+        </tr>`;
+      }).join('')}
       </tbody></table></div>
       <datalist id="pqProviderSuggestions">${(cache?.profitability?.providers||[]).filter(p=>p.provider_name && p.provider_name!=='Sin proveedor').map(p=>`<option value="${esc(p.provider_name)}"></option>`).join('')}</datalist>
-      <p class="small-text pq-provider-pending-note">La asignación se hace por <b>cuenta madre</b>, no crea una venta nueva ni modifica el importe de la venta. Si la cuenta ya tiene costo de compra, el sistema también puede completar costos históricos que estuvieran en $0.</p>`;
+      <p class="small-text pq-provider-pending-note"><b>Importante:</b> si la venta tiene cuenta madre, se corrige el proveedor de esa cuenta y el histórico. Si no tiene cuenta madre, se guarda un proveedor histórico directamente en la venta para que deje de aparecer como “Sin proveedor” y sí se atribuya al proveedor correcto en Rentabilidad.</p>`;
   }
 
   function renderMothers(rows){
@@ -422,8 +430,10 @@
   };
 
   window.saveMissingProviderSale=async function(motherId,orderId){
-    const input=document.getElementById(`pq-sale-provider-${motherId}-${orderId}`);
-    const btn=input?.closest('.pq-missing-provider-row')?.querySelector('.pq-inline-save');
+    const row=document.querySelector(`.pq-missing-provider-row[data-order-id="${Number(orderId)}"]`);
+    const key=`${Number(motherId||0)}-${Number(orderId)}`;
+    const input=document.getElementById(`pq-sale-provider-${key}`);
+    const btn=row?.querySelector('.pq-inline-save');
     const provider=String(input?.value||'').trim();
     if(!provider){
       if(typeof showMessage==='function') showMessage('Escribe o selecciona el proveedor antes de guardar','error');
@@ -432,11 +442,11 @@
     }
     try{
       if(btn){btn.disabled=true;btn.textContent='Guardando...';}
-      const result=await api(`/api/admin/mother-accounts/${motherId}/analytics-meta`,{
+      const result=await api(`/api/admin/profit-quality/orders/${Number(orderId)}/provider`,{
         method:'PATCH',
-        body:JSON.stringify({partial_update:true,provider_name:provider})
+        body:JSON.stringify({provider_name:provider,mother_account_id:Number(motherId||0)})
       });
-      if(typeof showMessage==='function') showMessage(result.message||'Proveedor asignado a la cuenta madre');
+      if(typeof showMessage==='function') showMessage(result.message||'Proveedor asignado correctamente');
       await loadProfitQuality();
     }catch(e){
       if(typeof showMessage==='function') showMessage(e.message||'Error asignando proveedor','error');

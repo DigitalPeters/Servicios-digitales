@@ -1463,6 +1463,9 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_cost_snapshot NUMERIC DEFAULT 0`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS distributor_cost_snapshot NUMERIC`);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_admin_id INTEGER`);
+  // Rentabilidad: permite conservar la asignación manual de proveedor para ventas históricas
+  // que no conservaron vínculo con una cuenta madre. No reemplaza el proveedor de la cuenta madre.
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS profitability_provider_override TEXT DEFAULT ''`);
 
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
   await pool.query(`UPDATE orders SET quantity = 1 WHERE quantity IS NULL OR quantity < 1`);
@@ -9692,13 +9695,85 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
   }
 });
 
+
+app.patch('/api/admin/profit-quality/orders/:id/provider', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const orderId = Number(req.params.id || 0);
+    const providerName = String(req.body?.provider_name || '').trim().slice(0, 160);
+    const motherAccountId = Number(req.body?.mother_account_id || 0);
+    if (!Number.isInteger(orderId) || orderId <= 0) return res.status(400).json({ error: 'Venta inválida' });
+    if (!providerName) return res.status(400).json({ error: 'Selecciona o escribe un proveedor' });
+
+    await client.query('BEGIN');
+    const orderResult = await client.query(
+      `SELECT id, assigned_platform_account_id, delivered_account_data, profitability_provider_override
+       FROM orders WHERE id = $1 AND status = 'exito' AND COALESCE(owner_admin_id, 0) = 0 FOR UPDATE`,
+      [orderId]
+    );
+    const order = orderResult.rows[0];
+    if (!order) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Venta no encontrada' }); }
+
+    let linkedMotherId = motherAccountId > 0 ? motherAccountId : 0;
+    if (!linkedMotherId) {
+      const linkResult = await client.query(
+        `SELECT pa.mother_account_id
+         FROM platform_accounts pa
+         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+         WHERE pa.mother_account_id IS NOT NULL
+           AND COALESCE(pa.owner_admin_id, 0) = 0
+           AND COALESCE(ma.owner_admin_id, 0) = 0
+           AND (
+             pa.assigned_order_id = $1
+             OR pa.id = $2
+             OR EXISTS (SELECT 1 FROM account_recovery_log arl WHERE arl.order_id = $1 AND arl.account_id = pa.id)
+           )
+         ORDER BY CASE WHEN pa.id = $2 THEN 0 ELSE 1 END, CASE WHEN pa.assigned_order_id = $1 THEN 0 ELSE 1 END, pa.id DESC
+         LIMIT 1`,
+        [orderId, Number(order.assigned_platform_account_id || 0)]
+      );
+      linkedMotherId = Number(linkResult.rows[0]?.mother_account_id || 0);
+    }
+
+    if (linkedMotherId > 0) {
+      const mother = await client.query(
+        `SELECT id, provider_name FROM mother_accounts WHERE id = $1 AND COALESCE(owner_admin_id, 0) = 0 FOR UPDATE`,
+        [linkedMotherId]
+      );
+      if (!mother.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Cuenta madre no encontrada' }); }
+      await client.query(`UPDATE mother_accounts SET provider_name = $2, updated_at = NOW() WHERE id = $1`, [linkedMotherId, providerName]);
+      await client.query(`UPDATE orders SET profitability_provider_override = '' WHERE id = $1`, [orderId]);
+      await recordAdminAudit(client, req, {
+        action: 'profitability_provider_assign', entityType: 'mother_account', entityId: linkedMotherId,
+        summary: `Proveedor asignado desde Rentabilidad a cuenta madre #${linkedMotherId}: ${providerName}`,
+        metadata: { order_id: orderId, provider_name: providerName, mode: 'mother_account' }
+      });
+      await client.query('COMMIT');
+      return res.json({ message: `Proveedor asignado a la cuenta madre #${linkedMotherId}`, mode: 'mother_account', mother_account_id: linkedMotherId, provider_name: providerName });
+    }
+
+    await client.query(`UPDATE orders SET profitability_provider_override = $2 WHERE id = $1`, [orderId, providerName]);
+    await recordAdminAudit(client, req, {
+      action: 'profitability_provider_assign', entityType: 'order', entityId: orderId,
+      summary: `Proveedor asignado desde Rentabilidad a venta #${orderId}: ${providerName}`,
+      metadata: { order_id: orderId, provider_name: providerName, mode: 'order_override' }
+    });
+    await client.query('COMMIT');
+    res.json({ message: `Proveedor asignado a la venta #${orderId}`, mode: 'order_override', order_id: orderId, provider_name: providerName });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error asignando proveedor desde rentabilidad:', err.message);
+    res.status(500).json({ error: err.message || 'No se pudo asignar el proveedor' });
+  } finally { client.release(); }
+});
+
 app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const { startDate, endDate } = normalizeAnalyticsDateRange(req.query.start_date, req.query.end_date);
     const salesResult = await pool.query(
       `SELECT
          o.id, o.user_id, o.product_id, o.amount, o.product_cost_snapshot, o.distributor_cost_snapshot,
-         o.product_name_snapshot, o.product_category_snapshot, o.created_at,
+         o.product_name_snapshot, o.product_category_snapshot, o.created_at, o.profitability_provider_override,
          u.name AS seller_name, u.email AS seller_email, u.owner_user_id AS distributor_id,
          distributor.name AS distributor_name,
          p.name AS current_product_name,
@@ -9818,31 +9893,46 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
     // permitir corregir también ventas antiguas y que el proveedor quede bien asignado en todo
     // el histórico de la cuenta.
     const missingProviderSalesResult = await pool.query(
-      `SELECT DISTINCT ON (o.id, ma.id)
+      `SELECT
          o.id AS order_id, o.created_at, o.amount, o.product_cost_snapshot,
-         o.product_name_snapshot,
+         o.product_name_snapshot, o.delivered_account_data, o.profitability_provider_override,
          u.name AS seller_name, u.email AS seller_email,
-         pa.id AS account_id, pa.platform AS account_platform, pa.product_name AS account_product_name,
-         ma.id AS mother_account_id, ma.product_name AS mother_product_name, ma.account_email,
-         ma.sell_by_profile, ma.purchase_cost_total, ma.configured_profile_count,
-         ${effectivePlatformAccountCostSql('pa','ma')} AS effective_unit_cost
+         link.account_id, link.mother_account_id, link.account_email,
+         link.account_platform, link.account_product_name, link.mother_product_name,
+         link.provider_name, link.purchase_cost_total, link.sell_by_profile,
+         link.configured_profile_count, link.effective_unit_cost
        FROM orders o
        JOIN users u ON u.id = o.user_id
-       JOIN platform_accounts pa ON (
-         pa.assigned_order_id = o.id
-         OR pa.id = o.assigned_platform_account_id
-         OR EXISTS (
-           SELECT 1 FROM account_recovery_log arl
-           WHERE arl.order_id = o.id AND arl.account_id = pa.id
-         )
-       )
-       JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+       LEFT JOIN LATERAL (
+         SELECT
+           pa.id AS account_id, pa.mother_account_id, pa.account_email,
+           pa.platform AS account_platform, pa.product_name AS account_product_name,
+           ma.product_name AS mother_product_name, ma.provider_name,
+           ma.purchase_cost_total, ma.sell_by_profile, ma.configured_profile_count,
+           ${effectivePlatformAccountCostSql('pa','ma')} AS effective_unit_cost
+         FROM platform_accounts pa
+         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+         WHERE pa.mother_account_id IS NOT NULL
+           AND COALESCE(pa.owner_admin_id, 0) = 0
+           AND COALESCE(ma.owner_admin_id, 0) = 0
+           AND (
+             pa.assigned_order_id = o.id
+             OR pa.id = o.assigned_platform_account_id
+             OR EXISTS (
+               SELECT 1 FROM account_recovery_log arl
+               WHERE arl.order_id = o.id AND arl.account_id = pa.id
+             )
+           )
+         ORDER BY CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END,
+                  CASE WHEN pa.assigned_order_id = o.id THEN 0 ELSE 1 END,
+                  pa.id DESC
+         LIMIT 1
+       ) link ON TRUE
        WHERE o.status = 'exito'
          AND COALESCE(o.owner_admin_id, 0) = 0
-         AND COALESCE(pa.owner_admin_id, 0) = 0
-         AND COALESCE(ma.owner_admin_id, 0) = 0
-         AND NULLIF(TRIM(COALESCE(ma.provider_name, '')), '') IS NULL
-       ORDER BY o.id DESC, ma.id, pa.id`,
+         AND NULLIF(TRIM(COALESCE(o.profitability_provider_override, '')), '') IS NULL
+         AND NULLIF(TRIM(COALESCE(link.provider_name, '')), '') IS NULL
+       ORDER BY o.created_at DESC, o.id DESC`,
       []
     );
 
@@ -10194,6 +10284,21 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       if (row.purchase_cost_total === null) p.mother_cost_missing += row.id ? 1 : 0; else p.registered_mother_cost += Number(row.purchase_cost_total || 0);
       providerMap.set(key, p);
     }
+    // Las ventas históricas sin vínculo a cuenta madre también deben aparecer en Rentabilidad.
+    // Si el administrador asigna un proveedor manualmente, se conserva a nivel de la venta.
+    for (const order of orderMap.values()) {
+      const hasLinkedMother = (orderLinks.get(Number(order.id))?.size || 0) > 0;
+      if (hasLinkedMother) continue;
+      const label = String(order.profitability_provider_override || 'Sin proveedor').trim() || 'Sin proveedor';
+      const key = label.toLowerCase();
+      const p = providerMap.get(key) || { provider_name: label, mother_accounts: 0, orders: 0, admin_revenue: 0, sale_cost: 0, replacement_cost: 0, profit: 0, failures: 0, replacements: 0, refunds: 0, refund_amount: 0, registered_mother_cost: 0, mother_cost_missing: 0, lifetime_units: 0, lifetime_revenue: 0, lifetime_sale_cost: 0, lifetime_profit: 0, inferred_units: 0 };
+      p.orders += 1;
+      p.admin_revenue += Number(order.admin_revenue || 0);
+      p.sale_cost += Number(order.sale_cost || 0);
+      p.profit += Number(order.admin_revenue || 0) - Number(order.sale_cost || 0);
+      providerMap.set(key, p);
+    }
+
     const providers = Array.from(providerMap.values()).map(p => ({
       ...p, admin_revenue: money(p.admin_revenue), sale_cost: money(p.sale_cost), replacement_cost: money(p.replacement_cost), profit: money(p.profit), refund_amount: money(p.refund_amount), registered_mother_cost: money(p.registered_mother_cost),
       lifetime_revenue: money(p.lifetime_revenue), lifetime_sale_cost: money(p.lifetime_sale_cost), lifetime_profit: money(p.lifetime_profit),
@@ -10201,7 +10306,9 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       margin_percent: p.admin_revenue > 0 ? Number(((p.profit / p.admin_revenue) * 100).toFixed(2)) : 0,
       failure_rate: (() => {
         const key = String(p.provider_name).toLowerCase();
-        const sold = providerSales.get(key)?.size || 0;
+        const linkedSold = providerSales.get(key)?.size || 0;
+        const overrideSold = Array.from(orderMap.values()).filter(o => !orderLinks.has(Number(o.id)) && String(o.profitability_provider_override || '').trim().toLowerCase() === key).length;
+        const sold = linkedSold + overrideSold;
         const affected = qualityMaps.provider.get(key)?.affected_orders?.size || 0;
         return sold > 0 ? Number(((affected / sold) * 100).toFixed(2)) : null;
       })()
@@ -10254,7 +10361,11 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         purchase_cost_total: row.purchase_cost_total === null ? null : money(row.purchase_cost_total),
         configured_profile_count: row.configured_profile_count === null ? null : Number(row.configured_profile_count),
         sale_cost: snapshotCost > 0 ? snapshotCost : (unitCost === null ? 0 : unitCost),
-        cost_source: snapshotCost > 0 ? 'Costo guardado en la venta' : (unitCost !== null && unitCost > 0 ? 'Costo actual de la cuenta madre' : 'Sin costo')
+        cost_source: snapshotCost > 0 ? 'Costo guardado en la venta' : (unitCost !== null && unitCost > 0 ? 'Costo actual de la cuenta madre' : 'Sin costo'),
+        assignment_type: Number(row.mother_account_id || 0) > 0 ? 'mother' : 'order',
+        has_mother_account: Number(row.mother_account_id || 0) > 0,
+        delivered_account_data: row.delivered_account_data || '',
+        current_provider: String(row.provider_name || '').trim()
       };
     });
 
