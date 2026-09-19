@@ -255,6 +255,38 @@
     box.innerHTML=missingHtml+manualHtml;
   }
 
+  function renderMissingProviderSales(rows){
+    const box=document.getElementById('pqMissingProviderSales'); if(!box) return;
+    const list=Array.isArray(rows)?rows:[];
+    const count=document.getElementById('pqMissingProviderSalesCount');
+    if(count) count.textContent=String(list.length);
+    if(!list.length){
+      box.innerHTML='<div class="pq-inline-ok">✅ No hay ventas con cuenta madre vinculada que estén sin proveedor.</div>';
+      return;
+    }
+    box.innerHTML=`
+      <div class="pq-missing-provider-summary">
+        <div><b>${list.length}</b><span>venta(s) pendientes de proveedor</span></div>
+        <p>Estas ventas ya están vinculadas a una <b>cuenta madre</b>, pero esa cuenta no tiene proveedor. Al guardar un proveedor, se actualiza la cuenta madre y el cambio se refleja en sus ventas históricas y en la rentabilidad.</p>
+      </div>
+      <div class="table-wrap"><table class="mini-table pq-provider-pending-table"><thead><tr>
+        <th>Fecha</th><th>Venta</th><th>Cuenta madre</th><th>Vendedor</th><th>Importe</th><th>Costo</th><th>Proveedor</th><th>Acción</th>
+      </tr></thead><tbody>
+      ${list.map(r=>`<tr class="pq-missing-provider-row" data-mother-id="${num(r.mother_account_id)}">
+        <td>${esc(formatDate(r.created_at))}</td>
+        <td><b>#${num(r.order_id)}</b><br><span class="small-text">${esc(r.product_name||'Sin producto')}</span></td>
+        <td><b>#${num(r.mother_account_id)}</b><br><span class="small-text">${esc(r.account_email||'')}</span><br><span class="small-text">${esc(r.mother_product_name||'')}</span></td>
+        <td>${esc(r.seller_name||r.seller_email||'Usuario')}</td>
+        <td><b>${money(r.amount)}</b></td>
+        <td>${money(r.sale_cost)}<br><span class="small-text">${esc(r.cost_source||'')}</span></td>
+        <td><input id="pq-sale-provider-${num(r.mother_account_id)}-${num(r.order_id)}" class="pq-inline-input" list="pqProviderSuggestions" value="" placeholder="Ej. Digitalvnhe" autocomplete="off"></td>
+        <td><button type="button" class="primary-btn pq-inline-save" onclick="saveMissingProviderSale(${num(r.mother_account_id)},${num(r.order_id)})">💾 Asignar proveedor</button></td>
+      </tr>`).join('')}
+      </tbody></table></div>
+      <datalist id="pqProviderSuggestions">${(cache?.profitability?.providers||[]).filter(p=>p.provider_name && p.provider_name!=='Sin proveedor').map(p=>`<option value="${esc(p.provider_name)}"></option>`).join('')}</datalist>
+      <p class="small-text pq-provider-pending-note">La asignación se hace por <b>cuenta madre</b>, no crea una venta nueva ni modifica el importe de la venta. Si la cuenta ya tiene costo de compra, el sistema también puede completar costos históricos que estuvieran en $0.</p>`;
+  }
+
   function renderMothers(rows){
     const box=document.getElementById('pqMotherAccounts'); if(!box) return;
     const active=(rows||[]).filter(r=>r.id);
@@ -364,6 +396,7 @@
     renderSummary(data.summary||{});
     renderProviders(data.profitability?.providers||[]);
     renderMissingMotherAccounts(data.profitability?.missing_mother_accounts||[]);
+    renderMissingProviderSales(data.profitability?.missing_provider_sales||[]);
     renderMothers(data.profitability?.mother_accounts||[]);
     renderQuality('pqQualityPlatform',data.quality?.by_platform||[]);
     renderQuality('pqQualityProvider',data.quality?.by_provider||[]);
@@ -377,7 +410,7 @@
     ensureDates();
     const start=document.getElementById('profitQualityStart')?.value||'';
     const end=document.getElementById('profitQualityEnd')?.value||'';
-    ['pqProviders','pqMissingMotherAccounts','pqMotherAccounts','pqQualityPlatform','pqQualityProvider','pqQualitySeller','pqQualityProduct','pqRecentReports'].forEach(id=>{
+    ['pqProviders','pqMissingMotherAccounts','pqMissingProviderSales','pqMotherAccounts','pqQualityPlatform','pqQualityProvider','pqQualitySeller','pqQualityProduct','pqRecentReports'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.innerHTML='<p class="small-text">Calculando...</p>';
     });
     try{
@@ -385,6 +418,29 @@
       render(data);
     }catch(e){
       if(typeof showMessage==='function') showMessage(e.message||'Error cargando rentabilidad y calidad','error');
+    }
+  };
+
+  window.saveMissingProviderSale=async function(motherId,orderId){
+    const input=document.getElementById(`pq-sale-provider-${motherId}-${orderId}`);
+    const btn=input?.closest('.pq-missing-provider-row')?.querySelector('.pq-inline-save');
+    const provider=String(input?.value||'').trim();
+    if(!provider){
+      if(typeof showMessage==='function') showMessage('Escribe o selecciona el proveedor antes de guardar','error');
+      input?.focus();
+      return;
+    }
+    try{
+      if(btn){btn.disabled=true;btn.textContent='Guardando...';}
+      const result=await api(`/api/admin/mother-accounts/${motherId}/analytics-meta`,{
+        method:'PATCH',
+        body:JSON.stringify({partial_update:true,provider_name:provider})
+      });
+      if(typeof showMessage==='function') showMessage(result.message||'Proveedor asignado a la cuenta madre');
+      await loadProfitQuality();
+    }catch(e){
+      if(typeof showMessage==='function') showMessage(e.message||'Error asignando proveedor','error');
+      if(btn){btn.disabled=false;btn.textContent='💾 Asignar proveedor';}
     }
   };
 

@@ -9813,6 +9813,39 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       []
     );
 
+    // Ventas históricas que sí conservan vínculo con una cuenta madre, pero cuya cuenta madre
+    // todavía no tiene proveedor. Esta bandeja es independiente del periodo seleccionado para
+    // permitir corregir también ventas antiguas y que el proveedor quede bien asignado en todo
+    // el histórico de la cuenta.
+    const missingProviderSalesResult = await pool.query(
+      `SELECT DISTINCT ON (o.id, ma.id)
+         o.id AS order_id, o.created_at, o.amount, o.product_cost_snapshot,
+         o.product_name_snapshot,
+         u.name AS seller_name, u.email AS seller_email,
+         pa.id AS account_id, pa.platform AS account_platform, pa.product_name AS account_product_name,
+         ma.id AS mother_account_id, ma.product_name AS mother_product_name, ma.account_email,
+         ma.sell_by_profile, ma.purchase_cost_total, ma.configured_profile_count,
+         ${effectivePlatformAccountCostSql('pa','ma')} AS effective_unit_cost
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       JOIN platform_accounts pa ON (
+         pa.assigned_order_id = o.id
+         OR pa.id = o.assigned_platform_account_id
+         OR EXISTS (
+           SELECT 1 FROM account_recovery_log arl
+           WHERE arl.order_id = o.id AND arl.account_id = pa.id
+         )
+       )
+       JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+       WHERE o.status = 'exito'
+         AND COALESCE(o.owner_admin_id, 0) = 0
+         AND COALESCE(pa.owner_admin_id, 0) = 0
+         AND COALESCE(ma.owner_admin_id, 0) = 0
+         AND NULLIF(TRIM(COALESCE(ma.provider_name, '')), '') IS NULL
+       ORDER BY o.id DESC, ma.id, pa.id`,
+      []
+    );
+
     // Referencias actuales de Productos para mostrar/configurar cuentas históricas.
     const productRefsResult = await pool.query(
       `SELECT name, COALESCE(price, 0) AS sale_price, COALESCE(cost_price, 0) AS cost_price
@@ -10196,8 +10229,34 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       profile_count_missing: missingAccounts.filter(r=>r.profile_count_missing).length,
       profile_sale_missing: missingAccounts.filter(r=>r.profile_sale_missing).length,
       full_sale_missing: missingAccounts.filter(r=>r.full_sale_missing).length,
-      manual_profile_cost_configured: finalizedMothers.filter(r=>r.id && r.manual_profile_cost_configured).length
+      manual_profile_cost_configured: finalizedMothers.filter(r=>r.id && r.manual_profile_cost_configured).length,
+      sales_missing_provider: missingProviderSalesResult.rows.length
     };
+
+    const missingProviderSales = missingProviderSalesResult.rows.map(row => {
+      const snapshotCost = Math.max(0, money(row.product_cost_snapshot));
+      const unitCost = row.effective_unit_cost === null || row.effective_unit_cost === undefined
+        ? null : money(row.effective_unit_cost);
+      const productName = String(row.product_name_snapshot || row.account_product_name || row.mother_product_name || 'Sin producto').trim();
+      return {
+        order_id: Number(row.order_id),
+        created_at: row.created_at,
+        amount: money(row.amount),
+        product_name: productName,
+        seller_name: row.seller_name || row.seller_email || 'Usuario',
+        seller_email: row.seller_email || '',
+        account_id: Number(row.account_id || 0),
+        mother_account_id: Number(row.mother_account_id || 0),
+        mother_product_name: row.mother_product_name || 'Sin producto',
+        account_email: row.account_email || '',
+        account_platform: row.account_platform || '',
+        sell_by_profile: row.sell_by_profile === true,
+        purchase_cost_total: row.purchase_cost_total === null ? null : money(row.purchase_cost_total),
+        configured_profile_count: row.configured_profile_count === null ? null : Number(row.configured_profile_count),
+        sale_cost: snapshotCost > 0 ? snapshotCost : (unitCost === null ? 0 : unitCost),
+        cost_source: snapshotCost > 0 ? 'Costo guardado en la venta' : (unitCost !== null && unitCost > 0 ? 'Costo actual de la cuenta madre' : 'Sin costo')
+      };
+    });
 
     const adjustedProfit = money(adminRevenue - saleCost - replacementCost);
     res.json({
@@ -10210,7 +10269,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         failures: reportsResult.rows.length, replacements: replacementCount, refund_reports: refundReportCount,
         missing_mother_accounts: missingSummary
       },
-      profitability: { providers, mother_accounts: finalizedMothers, missing_mother_accounts: missingAccounts },
+      profitability: { providers, mother_accounts: finalizedMothers, missing_mother_accounts: missingAccounts, missing_provider_sales: missingProviderSales },
       quality: {
         by_platform: finalizeQuality(qualityMaps.platform), by_provider: finalizeQuality(qualityMaps.provider),
         by_seller: finalizeQuality(qualityMaps.seller), by_product: finalizeQuality(qualityMaps.product),
