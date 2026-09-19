@@ -10066,6 +10066,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
               COALESCE(earnings.movement_count, 0)::int AS distributor_earning_movements
        FROM links l
        JOIN orders o ON o.id = l.order_id
+       JOIN platform_accounts pa ON pa.id = l.account_id
        JOIN users u ON u.id = o.user_id
        LEFT JOIN products p ON p.id = o.product_id
        LEFT JOIN LATERAL (
