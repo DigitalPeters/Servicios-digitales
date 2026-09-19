@@ -20,3 +20,9 @@ El servidor crea automáticamente, si no existe:
 `orders.profitability_provider_override TEXT DEFAULT ''`
 
 No requiere ejecutar SQL manualmente si el servidor tiene permisos para ejecutar sus migraciones de inicio, como las demás columnas del proyecto.
+
+## V2.1 — Exclusión de trámites
+
+Los pedidos identificados como **trámites digitales** quedan fuera de la rentabilidad por proveedor/inventario y de la bandeja **Ventas sin proveedor**. La detección usa la categoría histórica/actual del producto y, como respaldo, el nombre histórico/actual cuando contiene "tramite/trámite".
+
+Esto evita que servicios que no tienen proveedor, cuenta madre ni perfiles aparezcan artificialmente como **Sin proveedor**.

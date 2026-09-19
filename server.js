@@ -9770,6 +9770,18 @@ app.patch('/api/admin/profit-quality/orders/:id/provider', authMiddleware, admin
 app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminMiddleware, async (req, res) => {
   try {
     const { startDate, endDate } = normalizeAnalyticsDateRange(req.query.start_date, req.query.end_date);
+
+    // Trámites digitales no forman parte de la rentabilidad por proveedor/inventario.
+    // No llevan cuenta madre, proveedor ni perfiles, por lo que deben quedar fuera de
+    // los totales de rentabilidad y de la bandeja de ventas sin proveedor.
+    // Se usa la categoría como fuente principal y el nombre/categoría histórica como
+    // respaldo para pedidos antiguos.
+    const nonProfitabilityTramiteSql = `
+      (
+        translate(lower(COALESCE(NULLIF(TRIM(o.product_category_snapshot), ''), NULLIF(TRIM(p.category), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+        OR translate(lower(COALESCE(NULLIF(TRIM(o.product_name_snapshot), ''), NULLIF(TRIM(p.name), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+      )
+    `;
     const salesResult = await pool.query(
       `SELECT
          o.id, o.user_id, o.product_id, o.amount, o.product_cost_snapshot, o.distributor_cost_snapshot,
@@ -9798,6 +9810,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        ) earnings ON TRUE
        WHERE o.status = 'exito'
          AND COALESCE(o.owner_admin_id, 0) = 0
+         AND NOT ${nonProfitabilityTramiteSql}
          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
        ORDER BY o.created_at DESC, o.id DESC`,
       [startDate, endDate]
@@ -9810,6 +9823,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
               COALESCE(NULLIF(TRIM(pa.product_name), ''), ma.product_name, 'Sin producto') AS account_product_name,
               ma.product_name AS mother_product_name
        FROM orders o
+       LEFT JOIN products p ON p.id = o.product_id
        JOIN platform_accounts pa ON (
          pa.assigned_order_id = o.id
          OR pa.id = o.assigned_platform_account_id
@@ -9823,6 +9837,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        WHERE o.status = 'exito'
          AND COALESCE(o.owner_admin_id, 0) = 0
          AND COALESCE(pa.owner_admin_id, 0) = 0
+         AND NOT ${nonProfitabilityTramiteSql}
          AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date BETWEEN $1::date AND $2::date
          AND pa.mother_account_id IS NOT NULL`,
       [startDate, endDate]
@@ -9903,6 +9918,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
          link.configured_profile_count, link.effective_unit_cost
        FROM orders o
        JOIN users u ON u.id = o.user_id
+       LEFT JOIN products p ON p.id = o.product_id
        LEFT JOIN LATERAL (
          SELECT
            pa.id AS account_id, pa.mother_account_id, pa.account_email,
@@ -9930,6 +9946,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        ) link ON TRUE
        WHERE o.status = 'exito'
          AND COALESCE(o.owner_admin_id, 0) = 0
+         AND NOT ${nonProfitabilityTramiteSql}
          AND NULLIF(TRIM(COALESCE(o.profitability_provider_override, '')), '') IS NULL
          AND NULLIF(TRIM(COALESCE(link.provider_name, '')), '') IS NULL
        ORDER BY o.created_at DESC, o.id DESC`,
@@ -9951,6 +9968,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       `WITH links AS (
          SELECT DISTINCT pa.id AS account_id, pa.mother_account_id, o.id AS order_id
          FROM orders o
+         LEFT JOIN products p ON p.id = o.product_id
          JOIN platform_accounts pa ON (
            pa.assigned_order_id = o.id
            OR pa.id = o.assigned_platform_account_id
@@ -9962,6 +9980,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
          WHERE o.status = 'exito'
            AND COALESCE(o.owner_admin_id, 0) = 0
            AND COALESCE(pa.owner_admin_id, 0) = 0
+           AND NOT ${nonProfitabilityTramiteSql}
            AND pa.mother_account_id IS NOT NULL
        )
        SELECT l.account_id, l.mother_account_id, l.order_id,

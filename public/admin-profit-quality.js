@@ -292,7 +292,7 @@
       }).join('')}
       </tbody></table></div>
       <datalist id="pqProviderSuggestions">${(cache?.profitability?.providers||[]).filter(p=>p.provider_name && p.provider_name!=='Sin proveedor').map(p=>`<option value="${esc(p.provider_name)}"></option>`).join('')}</datalist>
-      <p class="small-text pq-provider-pending-note"><b>Importante:</b> si la venta tiene cuenta madre, se corrige el proveedor de esa cuenta y el histórico. Si no tiene cuenta madre, se guarda un proveedor histórico directamente en la venta para que deje de aparecer como “Sin proveedor” y sí se atribuya al proveedor correcto en Rentabilidad.</p>`;
+      <p class="small-text pq-provider-pending-note"><b>Importante:</b> los trámites digitales quedan fuera de esta bandeja y de la rentabilidad por proveedor porque no manejan proveedor, cuenta madre ni perfiles. Para las demás ventas: si tienen cuenta madre, se corrige el proveedor de esa cuenta y el histórico; si no tienen cuenta madre, se guarda un proveedor histórico directamente en la venta.</p>`;
   }
 
   function renderMothers(rows){
