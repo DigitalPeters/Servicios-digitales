@@ -10618,6 +10618,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
          COALESCE(SUM(${adminSaleExpr} - ${costExpr}), 0)::numeric AS total_profit
        FROM orders
+       LEFT JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
        ${inventoryCostJoin}
        WHERE orders.status = 'exito'
@@ -10656,6 +10657,7 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
          COALESCE(SUM(${adminSaleExpr} - ${costExpr}), 0)::numeric AS total_profit
        FROM orders
+       LEFT JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
        ${inventoryCostJoin}
        WHERE orders.status = 'exito'
