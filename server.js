@@ -8744,7 +8744,7 @@ app.get("/api/admin/subadmin-prices/:userId", authMiddleware, adminMiddleware, a
          products.name,
          products.category,
          products.price AS general_price,
-         products.cost_price,
+         COALESCE(products.cost_price, 0) AS cost_price,
          COALESCE(user_product_prices.sale_price, products.price) AS sale_price
        FROM products
        LEFT JOIN user_product_prices

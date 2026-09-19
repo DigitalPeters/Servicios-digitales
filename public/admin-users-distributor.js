@@ -337,7 +337,20 @@ async function loadAdminSubadminPrices(){
     if(!userId){ if(box) box.innerHTML='Selecciona un admin distribuidor.'; return; }
     const prices=await api('/api/admin/subadmin-prices/'+userId);
     if(!box) return;
-    box.innerHTML=prices.length ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Precio general</th><th>Precio para este admin</th><th>Guardar</th></tr></thead><tbody>${prices.map(p=>`<tr><td><b>${safeText(p.name)}</b><br><span class="small-text">${safeText(p.category||'')}</span></td><td>$${formatMoney(p.general_price)}</td><td><input id="subadminPrice-${p.product_id}" type="number" step="0.01" value="${Number(p.sale_price||0)}" /></td><td><button class="primary-btn" onclick="saveAdminSubadminPrice(${userId}, ${p.product_id})">Guardar</button></td></tr>`).join('')}</tbody></table></div>` : 'No hay productos.';
+    box.innerHTML=prices.length ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Producto</th><th>Precio compra<br><span class="small-text">Tu costo</span></th><th>Precio vendedor</th><th>Precio distribuidor</th><th>Ganancia admin</th><th>Guardar</th></tr></thead><tbody>${prices.map(p=>{
+      const purchaseCost=Number(p.cost_price||0);
+      const sellerPrice=Number(p.general_price||0);
+      const distributorPrice=Number(p.sale_price||0);
+      const adminProfit=distributorPrice-purchaseCost;
+      return `<tr>
+        <td><b>${safeText(p.name)}</b><br><span class="small-text">${safeText(p.category||'')}</span></td>
+        <td><b>$${formatMoney(purchaseCost)}</b><br><span class="small-text">Costo real de compra</span></td>
+        <td>$${formatMoney(sellerPrice)}</td>
+        <td><input id="subadminPrice-${p.product_id}" type="number" min="0" step="0.01" value="${distributorPrice}" placeholder="Ej. 20" /></td>
+        <td><b class="${adminProfit<0?'text-danger':''}">$${formatMoney(adminProfit)}</b><br><span class="small-text">Distribuidor − compra</span></td>
+        <td><button class="primary-btn" onclick="saveAdminSubadminPrice(${userId}, ${p.product_id})">Guardar</button></td>
+      </tr>`;
+    }).join('')}</tbody></table></div>` : 'No hay productos.';
   }catch(e){ showMessage(e.message || 'Error cargando precios','error'); }
 }
 
