@@ -9722,7 +9722,6 @@ app.patch('/api/admin/mother-accounts/:id/analytics-meta', authMiddleware, admin
          FROM recalculated r
          WHERE o.id = r.order_id
            AND COALESCE(o.owner_admin_id, 0) = 0
-           AND COALESCE(o.product_cost_snapshot, 0) = 0
            AND r.account_count = r.priced_count`,
         [id]
       );
@@ -9857,6 +9856,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
          p.name AS current_product_name,
          COALESCE(p.price, 0) AS admin_list_price,
          COALESCE(p.cost_price, 0) AS current_product_cost,
+         COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(o.product_cost_snapshot, 0), 0) AS effective_inventory_cost,
          COALESCE(refunds.refund_amount, 0) AS refund_amount,
          COALESCE(earnings.final_earning, 0) AS distributor_final_earning,
          COALESCE(earnings.movement_count, 0)::int AS distributor_earning_movements
@@ -9864,6 +9864,24 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
        JOIN users u ON u.id = o.user_id
        LEFT JOIN users distributor ON distributor.id = u.owner_user_id
        LEFT JOIN products p ON p.id = o.product_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(COALESCE(NULLIF(
+           CASE
+             WHEN COALESCE(ma.sell_by_profile, FALSE) = TRUE THEN
+               COALESCE(ma.profile_cost_override,
+                 CASE
+                   WHEN COALESCE(ma.configured_profile_count, 0) > 0 AND ma.purchase_cost_total IS NOT NULL
+                     THEN ma.purchase_cost_total / ma.configured_profile_count
+                   ELSE NULL
+                 END
+               )
+             ELSE ma.purchase_cost_total
+           END, 0), NULLIF(pa.purchase_price, 0), 0)), 0)::numeric AS inventory_cost
+         FROM platform_accounts pa
+         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+         WHERE pa.assigned_order_id = o.id
+            OR pa.id = o.assigned_platform_account_id
+       ) sale_inventory_cost ON TRUE
        LEFT JOIN LATERAL (
          SELECT COALESCE(SUM(ar.refund_amount), 0) AS refund_amount
          FROM account_reports ar
@@ -10125,7 +10143,7 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
       ));
       const refundRatio = gross > 0 ? Math.max(0, Math.min(1, refund / gross)) : 0;
       const revenue = money(adminSalePrice * (1 - refundRatio));
-      const snapshotCost = Math.max(0, money(row.product_cost_snapshot));
+      const snapshotCost = Math.max(0, money(row.effective_inventory_cost || row.product_cost_snapshot));
       const currentProductCost = Math.max(0, money(row.current_product_cost));
       const productName = String(row.product_name_snapshot || row.current_product_name || 'Sin producto').trim();
       const item = { ...row, gross, refund, distributor_earning: distEarn, admin_revenue: revenue, sale_cost_snapshot: snapshotCost, current_product_cost: currentProductCost, sale_cost: snapshotCost, cost_source: snapshotCost > 0 ? 'snapshot' : 'pending', product_name: productName };
@@ -10278,8 +10296,8 @@ app.get('/api/admin/profit-quality', authMiddleware, adminMiddleware, mainAdminM
         stat.lifetime_orders.add(orderId);
         stat.lifetime_linked_units += 1;
         stat.lifetime_admin_revenue_actual += revenuePerLink;
-        if (snapshotCost > 0) stat.lifetime_sale_cost_actual += snapshotCost / links.length;
-        else if (derivedTotal > 0) stat.lifetime_sale_cost_actual += unitCosts[idx] || 0;
+        if (derivedTotal > 0) stat.lifetime_sale_cost_actual += unitCosts[idx] || 0;
+        else if (snapshotCost > 0) stat.lifetime_sale_cost_actual += snapshotCost / links.length;
         else stat.lifetime_sale_cost_actual += fallbackPerLink;
       });
     }
@@ -10560,17 +10578,48 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
       )
     `;
 
-    const costExpr = `COALESCE(NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)`;
+    // Rentabilidad del admin: primero usa el costo configurado en la cuenta madre.
+    // Si es venta por perfil, usa costo por perfil; si es cuenta completa, el costo total.
+    // Solo si no existe vínculo con inventario se usan los snapshots/fallbacks.
+    const inventoryCostJoin = `
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(COALESCE(NULLIF(
+          CASE
+            WHEN COALESCE(ma.sell_by_profile, FALSE) = TRUE THEN
+              COALESCE(ma.profile_cost_override,
+                CASE
+                  WHEN COALESCE(ma.configured_profile_count, 0) > 0 AND ma.purchase_cost_total IS NOT NULL
+                    THEN ma.purchase_cost_total / ma.configured_profile_count
+                  ELSE NULL
+                END
+              )
+            ELSE ma.purchase_cost_total
+          END, 0), NULLIF(pa.purchase_price, 0), 0)), 0)::numeric AS inventory_cost
+        FROM platform_accounts pa
+        LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+        WHERE pa.assigned_order_id = orders.id
+           OR pa.id = orders.assigned_platform_account_id
+      ) sale_inventory_cost ON TRUE
+    `;
+    const costExpr = `COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)`;
+    // Si la venta es de un vendedor perteneciente a un distribuidor, el ingreso
+    // real del admin es el precio del distribuidor; la diferencia es del distribuidor.
+    const adminSaleExpr = `CASE
+      WHEN users.owner_user_id IS NOT NULL AND orders.distributor_cost_snapshot IS NOT NULL
+        THEN orders.distributor_cost_snapshot
+      ELSE orders.amount
+    END`;
     const dateCondition = `((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date = $1::date`;
 
     const summaryResult = await pool.query(
       `SELECT
          COUNT(*)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
+         COALESCE(SUM(${adminSaleExpr}), 0)::numeric AS total_sales,
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - ${costExpr}), 0)::numeric AS total_profit
+         COALESCE(SUM(${adminSaleExpr} - ${costExpr}), 0)::numeric AS total_profit
        FROM orders
        JOIN products ON products.id = orders.product_id
+       ${inventoryCostJoin}
        WHERE orders.status = 'exito'
          AND ${dateCondition}
          AND ${scopeCondition}`,
@@ -10583,12 +10632,13 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          users.name AS customer_name,
          users.email AS customer_email,
          COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
+         COALESCE(SUM(${adminSaleExpr}), 0)::numeric AS total_sales,
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - ${costExpr}), 0)::numeric AS total_profit
+         COALESCE(SUM(${adminSaleExpr} - ${costExpr}), 0)::numeric AS total_profit
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
+       ${inventoryCostJoin}
        WHERE orders.status = 'exito'
          AND ${dateCondition}
          AND ${scopeCondition}
@@ -10602,11 +10652,12 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
          COUNT(orders.id)::int AS total_orders,
-         COALESCE(SUM(orders.amount), 0)::numeric AS total_sales,
+         COALESCE(SUM(${adminSaleExpr}), 0)::numeric AS total_sales,
          COALESCE(SUM(${costExpr}), 0)::numeric AS total_cost,
-         COALESCE(SUM(orders.amount - ${costExpr}), 0)::numeric AS total_profit
+         COALESCE(SUM(${adminSaleExpr} - ${costExpr}), 0)::numeric AS total_profit
        FROM orders
        JOIN products ON products.id = orders.product_id
+       ${inventoryCostJoin}
        WHERE orders.status = 'exito'
          AND ${dateCondition}
          AND ${scopeCondition}
@@ -10622,15 +10673,16 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
          users.email AS customer_email,
          ${saleProductNameExpr} AS product_name,
          ${saleProductCategoryExpr} AS product_category,
-         orders.amount,
+         ${adminSaleExpr} AS amount,
          ${costExpr} AS cost_price,
-         (orders.amount - ${costExpr}) AS profit,
+         (${adminSaleExpr} - ${costExpr}) AS profit,
          orders.status,
          orders.created_at,
          to_char(((orders.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'), 'DD/MM/YYYY HH24:MI:SS') AS created_at_mx
        FROM orders
        JOIN users ON users.id = orders.user_id
        JOIN products ON products.id = orders.product_id
+       ${inventoryCostJoin}
        WHERE orders.status = 'exito'
          AND ${dateCondition}
          AND ${scopeCondition}
