@@ -100,6 +100,13 @@ function isMailConfigured() {
   return Boolean(apiKey && notifyTo && fromEmail);
 }
 
+// Para correos dirigidos directamente al vendedor/usuario no necesitamos NOTIFY_EMAIL.
+// Solo requerimos la API de Resend y un remitente válido.
+function isDirectUserMailConfigured() {
+  const { apiKey, fromEmail } = getMailConfig();
+  return Boolean(apiKey && fromEmail);
+}
+
 function formatOrderData(orderData) {
   const data = safeJsonObject(orderData);
   const entries = Object.entries(data);
@@ -116,7 +123,7 @@ function formatOrderData(orderData) {
 
 async function sendDirectUserEmail({ to, subject, text }) {
   try {
-    if (!isMailConfigured()) {
+    if (!isDirectUserMailConfigured()) {
       console.log("Correo al usuario NO enviado: faltan variables RESEND_API_KEY o FROM_EMAIL.");
       return false;
     }
@@ -155,6 +162,36 @@ async function sendDirectUserEmail({ to, subject, text }) {
     console.error("Error enviando correo al usuario:", err.message);
     return false;
   }
+}
+
+
+async function sendAdminResponseEmail({ type, id, customerName, customerEmail, subject, status, response, productName, amount }) {
+  const cleanEmail = String(customerEmail || "").trim();
+  const cleanResponse = String(response || "").trim();
+
+  if (!cleanEmail || !cleanResponse) {
+    console.log(`Notificación ${type} #${id} no enviada: falta correo del usuario o respuesta.`);
+    return false;
+  }
+
+  const safeType = type === "reporte" ? "reporte de falla" : "pedido";
+  const text = `Hola ${customerName || "cliente"}.
+
+
+Ya hay una respuesta de Servicios Digitales Peters sobre tu ${safeType} #${id}.
+
+${productName ? `Producto: ${productName}\n` : ""}${amount !== undefined && amount !== null ? `Monto: $${Number(amount || 0).toFixed(2)}\n` : ""}${status ? `Estado: ${status}\n` : ""}
+Respuesta del administrador:
+
+${cleanResponse}
+
+No necesitas entrar al panel para enterarte de esta respuesta. Si necesitas revisar el historial completo, puedes entrar a tu panel de Servicios Digitales Peters.`.trim();
+
+  return sendDirectUserEmail({
+    to: cleanEmail,
+    subject: subject || `Nueva respuesta sobre ${safeType} #${id}`,
+    text
+  });
 }
 
 
@@ -7051,6 +7088,23 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
     }
 
     const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+
+    const previousReportResult = await pool.query(
+      `SELECT admin_response
+       FROM account_reports ar
+       WHERE ar.id = $1
+         AND ($2::int IS NULL OR ar.owner_admin_id = $2 OR ar.user_id = $2 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id = $2)
+              OR (ar.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$2)))
+       LIMIT 1`,
+      [reportId, ownerId]
+    );
+
+    if (previousReportResult.rowCount === 0) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    const previousReportResponse = String(previousReportResult.rows[0]?.admin_response || "").trim();
+
     const result = await pool.query(
       `UPDATE account_reports ar
        SET status = $1,
@@ -7059,7 +7113,8 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
            provider_reported_at = CASE WHEN $1 = 'proveedor_reportado' AND ar.provider_reported_at IS NULL THEN NOW() ELSE ar.provider_reported_at END
        WHERE ar.id = $3
          AND ($4::int IS NULL OR ar.owner_admin_id = $4 OR ar.user_id = $4 OR ar.user_id IN (SELECT id FROM users WHERE owner_user_id = $4)
-              OR (ar.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$4)))`,
+              OR (ar.direct_customer_report = TRUE AND EXISTS (SELECT 1 FROM orders o WHERE o.id=ar.order_id AND o.admin_quick_sale=TRUE AND o.owner_admin_id=$4)))
+       RETURNING id, user_id, email, status, admin_response, order_id`,
       [status, admin_response || "", reportId, ownerId]
     );
 
@@ -7067,7 +7122,28 @@ app.patch("/api/admin/account-reports/:reportId/status", authMiddleware, adminMi
       return res.status(404).json({ error: "Reporte no encontrado" });
     }
 
-    res.json({ message: "Veredicto guardado correctamente" });
+    const updatedReport = result.rows[0];
+    let reportEmailNotified = false;
+    const reportResponse = String(updatedReport.admin_response || "").trim();
+
+    if (reportResponse && reportResponse !== previousReportResponse) {
+      const userResult = await pool.query(
+        `SELECT name, email FROM users WHERE id = $1 LIMIT 1`,
+        [updatedReport.user_id]
+      );
+      const reportUser = userResult.rows[0];
+      reportEmailNotified = await sendAdminResponseEmail({
+        type: "reporte",
+        id: updatedReport.id,
+        customerName: reportUser?.name,
+        customerEmail: reportUser?.email,
+        subject: `Respuesta a tu reporte de falla #${updatedReport.id}`,
+        status: updatedReport.status,
+        response: reportResponse
+      });
+    }
+
+    res.json({ message: "Veredicto guardado correctamente", email_notified: reportEmailNotified });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: "Error actualizando reporte de cuenta" });
@@ -8451,6 +8527,7 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
     const orderResult = await client.query(
       `SELECT
         orders.*,
+        products.name AS product_name,
         products.charge_mode AS charge_mode,
         products.product_type AS product_type
        FROM orders
@@ -8673,19 +8750,40 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
 
     await client.query("COMMIT");
 
+    // Notificar automáticamente al vendedor cuando el administrador realmente deja una respuesta nueva.
+    const previousOrderResponse = String(order.admin_response || "").trim();
+    const currentOrderResponse = String(finalResponseMessage || "").trim();
+    const shouldNotifyOrder = Boolean(currentOrderResponse) && currentOrderResponse !== previousOrderResponse;
+    let orderEmailNotified = false;
+    if (shouldNotifyOrder) {
+      orderEmailNotified = await sendAdminResponseEmail({
+        type: "pedido",
+        id: orderId,
+        customerName: user.name,
+        customerEmail: user.email,
+        subject: `Respuesta a tu pedido #${orderId}`,
+        status,
+        response: currentOrderResponse,
+        productName: order.product_name,
+        amount
+      });
+    }
+
     if (shouldChargeOnSuccess) {
       return res.json({
-        message: `Pedido actualizado correctamente. Se descontaron $${amount.toFixed(2)} del saldo del cliente.`
+        message: `Pedido actualizado correctamente. Se descontaron $${amount.toFixed(2)} del saldo del cliente.`,
+        email_notified: orderEmailNotified
       });
     }
 
     if (shouldRefund) {
       return res.json({
-        message: `Pedido actualizado correctamente. Se devolvieron $${amount.toFixed(2)} al cliente.`
+        message: `Pedido actualizado correctamente. Se devolvieron $${amount.toFixed(2)} al cliente.`,
+        email_notified: orderEmailNotified
       });
     }
 
-    res.json({ message: "Pedido actualizado correctamente" });
+    res.json({ message: "Pedido actualizado correctamente", email_notified: orderEmailNotified });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err.message);
