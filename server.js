@@ -8101,33 +8101,36 @@ app.get("/api/admin/master/operations", authMiddleware, adminMiddleware, mainAdm
                     LEFT JOIN products p ON p.id = o.product_id
                     WHERE (o.owner_admin_id IS NULL OR o.owner_admin_id = 0)
                       AND o.status='exito'
-                      AND NOT (
-                        translate(lower(COALESCE(NULLIF(TRIM(o.product_category_snapshot), ''), NULLIF(TRIM(p.category), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
-                        OR translate(lower(COALESCE(NULLIF(TRIM(o.product_name_snapshot), ''), NULLIF(TRIM(p.name), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
-                      )
                       AND ((o.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')::date
                           = (NOW() AT TIME ZONE 'America/Mexico_City')::date
                   ), costs AS (
                     SELECT o.id,
-                           COALESCE(
-                             NULLIF((
-                               SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
-                               FROM platform_accounts pa
-                               LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
-                               WHERE COALESCE(pa.owner_admin_id,0)=0
-                                 AND (
-                                   pa.assigned_order_id = o.id
-                                   OR pa.id = o.assigned_platform_account_id
-                                   OR EXISTS (
-                                     SELECT 1 FROM account_recovery_log arl
-                                     WHERE arl.order_id = o.id AND arl.account_id = pa.id
+                           CASE
+                             WHEN (
+                               translate(lower(COALESCE(NULLIF(TRIM(o.product_category_snapshot), ''), NULLIF(TRIM(o.current_product_category), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+                               OR translate(lower(COALESCE(NULLIF(TRIM(o.product_name_snapshot), ''), NULLIF(TRIM(o.current_product_name), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+                             )
+                             THEN COALESCE(NULLIF(o.product_cost_snapshot, 0), NULLIF(o.current_product_cost, 0), 0)
+                             ELSE COALESCE(
+                               NULLIF((
+                                 SELECT SUM(${effectivePlatformAccountCostSql('pa','ma')})
+                                 FROM platform_accounts pa
+                                 LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
+                                 WHERE COALESCE(pa.owner_admin_id,0)=0
+                                   AND (
+                                     pa.assigned_order_id = o.id
+                                     OR pa.id = o.assigned_platform_account_id
+                                     OR EXISTS (
+                                       SELECT 1 FROM account_recovery_log arl
+                                       WHERE arl.order_id = o.id AND arl.account_id = pa.id
+                                     )
                                    )
-                                 )
-                             ), 0),
-                             NULLIF(o.product_cost_snapshot, 0),
-                             NULLIF(o.current_product_cost, 0),
-                             0
-                           ) AS effective_cost
+                               ), 0),
+                               NULLIF(o.product_cost_snapshot, 0),
+                               NULLIF(o.current_product_cost, 0),
+                               0
+                             )
+                           END AS effective_cost
                     FROM todays o
                   )
                   SELECT COUNT(*)::int AS orders,
@@ -10699,14 +10702,18 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
         LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
       ) sale_inventory_cost ON TRUE
     `;
-    // Para streaming/perfiles, jamás usamos products.cost_price como costo real si
-    // existe una venta de inventario. El snapshot de la orden queda como respaldo
-    // porque fue calculado al entregar la cuenta. products.cost_price solo se usa
-    // para productos manuales sin inventario.
+    // Los trámites SÍ forman parte de la contabilidad de ventas.
+    // Para un trámite no existe inventario de cuentas, así que su costo real
+    // proviene del costo guardado en la orden y, si el histórico no lo tiene,
+    // del costo de compra configurado en el producto.
+    // Para streaming/perfiles se mantiene la prioridad del inventario real.
+    const tramiteExpr = `(
+      translate(lower(COALESCE(NULLIF(TRIM(orders.product_category_snapshot), ''), NULLIF(TRIM(products.category), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+      OR translate(lower(COALESCE(NULLIF(TRIM(orders.product_name_snapshot), ''), NULLIF(TRIM(products.name), ''), '')), 'áéíóúü', 'aeiouu') LIKE '%tramite%'
+    )`;
     const costExpr = `CASE
-      WHEN lower(COALESCE(products.category, '')) LIKE '%tramite%'
-        OR lower(COALESCE(products.category, '')) LIKE '%trámite%'
-        THEN 0
+      WHEN ${tramiteExpr}
+        THEN COALESCE(NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)
       WHEN lower(COALESCE(products.product_type, '')) IN ('streaming_auto','combo_auto')
         THEN COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(orders.product_cost_snapshot, 0), 0)
       ELSE COALESCE(NULLIF(sale_inventory_cost.inventory_cost, 0), NULLIF(orders.product_cost_snapshot, 0), NULLIF(products.cost_price, 0), 0)
@@ -10791,8 +10798,9 @@ app.get("/api/admin/sales-report", authMiddleware, adminMiddleware, async (req, 
                 AND NULLIF(sale_inventory_cost.inventory_cost, 0) IS NOT NULL THEN 'inventario:precio_compra'
            WHEN lower(COALESCE(products.product_type, '')) IN ('streaming_auto','combo_auto')
                 AND NULLIF(orders.product_cost_snapshot, 0) IS NOT NULL THEN 'snapshot_de_entrega'
-           WHEN lower(COALESCE(products.category, '')) LIKE '%tramite%'
-                OR lower(COALESCE(products.category, '')) LIKE '%trámite%' THEN 'tramite_excluido'
+           WHEN ${tramiteExpr} AND NULLIF(orders.product_cost_snapshot, 0) IS NOT NULL THEN 'tramite:snapshot'
+           WHEN ${tramiteExpr} AND NULLIF(products.cost_price, 0) IS NOT NULL THEN 'tramite:producto'
+           WHEN ${tramiteExpr} THEN 'tramite:sin_costo'
            ELSE 'producto'
          END AS cost_source,
          (${adminSaleExpr} - ${costExpr}) AS profit,
