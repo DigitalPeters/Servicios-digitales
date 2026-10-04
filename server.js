@@ -5091,6 +5091,182 @@ app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req, res) =>
   }
 });
 
+
+// ============================================================
+// REPORTE PRECISO DE ACTIVIDAD DE VENDEDORES
+// Clasifica usuarios directos por ventas reales, cargas de saldo
+// y último movimiento. No usa el saldo actual como indicador de
+// que alguna vez cargaron saldo.
+// ============================================================
+app.get("/api/admin/user-activity-report", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const panelScope = req.isPanelAdmin;
+    const scopeSql = panelScope
+      ? `u.owner_user_id = $1`
+      : `u.owner_user_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM admin_panels own_ap WHERE own_ap.owner_user_id = u.id)`;
+    const params = panelScope ? [req.user.id] : [];
+
+    const result = await pool.query(`
+      WITH seller_base AS (
+        SELECT
+          u.id,
+          u.name,
+          u.email,
+          u.balance,
+          u.created_at,
+          COALESCE(u.is_enabled, TRUE) AS is_enabled,
+          u.owner_user_id
+        FROM users u
+        WHERE u.role = 'user'
+          AND COALESCE(u.is_subadmin, FALSE) = FALSE
+          AND ${scopeSql}
+      ),
+      sales AS (
+        SELECT
+          o.user_id,
+          COUNT(*) FILTER (WHERE lower(COALESCE(o.status,'')) = 'exito')::int AS total_sales,
+          COUNT(*) FILTER (
+            WHERE lower(COALESCE(o.status,'')) = 'exito'
+              AND o.created_at >= NOW() - INTERVAL '30 days'
+          )::int AS sales_30d,
+          MAX(o.created_at) FILTER (WHERE lower(COALESCE(o.status,'')) = 'exito') AS last_sale_at
+        FROM orders o
+        JOIN seller_base sb ON sb.id = o.user_id
+        GROUP BY o.user_id
+      ),
+      balance_loads AS (
+        SELECT
+          bl.user_id,
+          COUNT(*)::int AS load_events,
+          COALESCE(SUM(bl.amount),0)::numeric AS loaded_total,
+          MAX(bl.created_at) AS last_load_at
+        FROM balance_ledger bl
+        JOIN seller_base sb ON sb.id = bl.user_id
+        WHERE bl.amount > 0
+          AND lower(COALESCE(bl.movement_type,'')) IN ('recarga_admin','solicitud_saldo_aprobada')
+        GROUP BY bl.user_id
+      ),
+      approved_requests AS (
+        SELECT
+          br.user_id,
+          COUNT(*)::int AS approved_request_count,
+          COALESCE(SUM(br.amount),0)::numeric AS approved_total,
+          MAX(COALESCE(br.reviewed_at, br.created_at)) AS last_approved_load_at
+        FROM balance_requests br
+        JOIN seller_base sb ON sb.id = br.user_id
+        WHERE lower(COALESCE(br.status,'')) = 'aprobado'
+        GROUP BY br.user_id
+      ),
+      activity AS (
+        SELECT
+          sb.id AS user_id,
+          MAX(x.ts) AS last_activity_at
+        FROM seller_base sb
+        LEFT JOIN LATERAL (
+          SELECT o.created_at AS ts, 'Venta'::text AS source
+          FROM orders o WHERE o.user_id = sb.id
+          UNION ALL
+          SELECT br.created_at AS ts, 'Solicitud de saldo'::text AS source
+          FROM balance_requests br WHERE br.user_id = sb.id
+          UNION ALL
+          SELECT ar.created_at AS ts, 'Reporte/falla'::text AS source
+          FROM account_reports ar WHERE ar.user_id = sb.id
+          UNION ALL
+          SELECT bl.created_at AS ts, 'Movimiento de saldo'::text AS source
+          FROM balance_ledger bl WHERE bl.user_id = sb.id
+        ) x ON TRUE
+        GROUP BY sb.id
+      ),
+      base AS (
+        SELECT
+          sb.*,
+          COALESCE(sa.total_sales,0)::int AS total_sales,
+          COALESCE(sa.sales_30d,0)::int AS sales_30d,
+          sa.last_sale_at,
+          COALESCE(bl.load_events,0)::int AS ledger_load_events,
+          COALESCE(bl.loaded_total,0)::numeric AS ledger_loaded_total,
+          bl.last_load_at,
+          COALESCE(ar.approved_request_count,0)::int AS approved_request_count,
+          COALESCE(ar.approved_total,0)::numeric AS approved_total,
+          ar.last_approved_load_at,
+          ac.last_activity_at,
+          CASE
+            WHEN COALESCE(bl.load_events,0) > 0 THEN COALESCE(bl.loaded_total,0)
+            ELSE COALESCE(ar.approved_total,0)
+          END::numeric AS loaded_total,
+          CASE
+            WHEN COALESCE(bl.load_events,0) > 0 THEN bl.last_load_at
+            ELSE ar.last_approved_load_at
+          END AS last_load_at_effective,
+          CASE
+            WHEN COALESCE(bl.load_events,0) > 0 OR COALESCE(ar.approved_request_count,0) > 0 THEN TRUE
+            ELSE FALSE
+          END AS ever_loaded_balance
+        FROM seller_base sb
+        LEFT JOIN sales sa ON sa.user_id = sb.id
+        LEFT JOIN balance_loads bl ON bl.user_id = sb.id
+        LEFT JOIN approved_requests ar ON ar.user_id = sb.id
+        LEFT JOIN activity ac ON ac.user_id = sb.id
+      )
+      SELECT
+        b.*,
+        CASE
+          WHEN b.total_sales = 0 AND NOT b.ever_loaded_balance THEN 'never_registered'
+          WHEN b.total_sales = 0 AND b.ever_loaded_balance THEN 'loaded_no_sales'
+          WHEN b.total_sales > 0
+               AND b.ever_loaded_balance
+               AND (b.last_activity_at IS NULL OR b.last_activity_at < NOW() - INTERVAL '30 days')
+            THEN 'sold_inactive_30d'
+          WHEN b.total_sales > 0 AND b.ever_loaded_balance THEN 'active_or_recent'
+          ELSE 'other'
+        END AS classification
+      FROM base b
+      ORDER BY
+        CASE
+          WHEN b.total_sales = 0 AND NOT b.ever_loaded_balance THEN 1
+          WHEN b.total_sales = 0 AND b.ever_loaded_balance THEN 2
+          WHEN b.total_sales > 0 AND b.ever_loaded_balance
+               AND (b.last_activity_at IS NULL OR b.last_activity_at < NOW() - INTERVAL '30 days') THEN 3
+          ELSE 4
+        END,
+        b.created_at ASC,
+        b.id ASC
+    `, params);
+
+    const rows = result.rows.map(r => ({
+      id: Number(r.id),
+      name: r.name || '',
+      email: r.email || '',
+      balance: Number(r.balance || 0),
+      created_at: r.created_at,
+      is_enabled: Boolean(r.is_enabled),
+      total_sales: Number(r.total_sales || 0),
+      sales_30d: Number(r.sales_30d || 0),
+      last_sale_at: r.last_sale_at || null,
+      loaded_total: Number(r.loaded_total || 0),
+      last_load_at: r.last_load_at_effective || null,
+      load_events: Number(r.ledger_load_events || r.approved_request_count || 0),
+      last_activity_at: r.last_activity_at || null,
+      classification: r.classification
+    }));
+
+    const summary = {
+      never_registered: rows.filter(r => r.classification === 'never_registered').length,
+      loaded_no_sales: rows.filter(r => r.classification === 'loaded_no_sales').length,
+      sold_inactive_30d: rows.filter(r => r.classification === 'sold_inactive_30d').length,
+      active_or_recent: rows.filter(r => r.classification === 'active_or_recent').length,
+      other: rows.filter(r => r.classification === 'other').length,
+      total_sellers: rows.length
+    };
+
+    res.json({ generated_at: new Date().toISOString(), summary, rows });
+  } catch (err) {
+    console.error('Error reporte actividad vendedores:', err.message);
+    res.status(500).json({ error: 'No se pudo generar el reporte de actividad de vendedores.' });
+  }
+});
+
 app.patch("/api/admin/users/:userId/status", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -5178,19 +5354,28 @@ app.delete("/api/admin/users/:userId", authMiddleware, adminMiddleware, async (r
       `SELECT
          (SELECT COUNT(*)::int FROM orders WHERE user_id = $1) AS orders_count,
          (SELECT COUNT(*)::int FROM balance_requests WHERE user_id = $1) AS balance_count,
-         (SELECT COUNT(*)::int FROM account_reports WHERE user_id = $1) AS reports_count`,
+         (SELECT COUNT(*)::int FROM account_reports WHERE user_id = $1) AS reports_count,
+         (SELECT COUNT(*)::int FROM balance_ledger WHERE user_id = $1) AS ledger_count,
+         (SELECT COUNT(*)::int FROM distributor_earnings_ledger WHERE seller_id = $1 OR distributor_id = $1) AS earnings_count`,
       [userId]
     );
 
     const counts = usage.rows[0] || {};
-    const hasMovements = Number(counts.orders_count || 0) > 0 || Number(counts.balance_count || 0) > 0 || Number(counts.reports_count || 0) > 0;
+    const hasMovements = Number(counts.orders_count || 0) > 0
+      || Number(counts.balance_count || 0) > 0
+      || Number(counts.reports_count || 0) > 0
+      || Number(counts.ledger_count || 0) > 0
+      || Number(counts.earnings_count || 0) > 0;
     if (hasMovements) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "No se puede eliminar porque el usuario ya tiene movimientos históricos." });
+      return res.status(400).json({ error: "No se puede eliminar permanentemente porque este usuario ya tiene historial (ventas, saldo, reportes o movimientos contables). Para conservar la trazabilidad, primero debes deshabilitarlo." });
     }
 
     await client.query(`DELETE FROM subadmin_reseller_prices WHERE owner_user_id = $1`, [userId]);
     await client.query(`DELETE FROM user_product_prices WHERE user_id = $1`, [userId]);
+    await client.query(`DELETE FROM distributor_earnings_state WHERE distributor_id = $1`, [userId]);
+    await client.query(`DELETE FROM distributor_earnings_ledger WHERE seller_id = $1 OR distributor_id = $1`, [userId]);
+    await client.query(`DELETE FROM balance_ledger WHERE user_id = $1`, [userId]);
     await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
 
     await client.query("COMMIT");
