@@ -358,7 +358,7 @@
           const expiration=esc(String(row.expiration_date||'').slice(0,10)||'Sin fecha');
           const status=String(row.status||'').toLowerCase();
           const statusText=['active','activa'].includes(status)?'Activa':(status||'Sin estado');
-          return `<button type="button" class="master-search-result master-trace-choice" style="width:100%;text-align:left;border:1px solid #dbe3ee;background:#fff;border-radius:12px;padding:13px 15px;cursor:pointer;" onclick="loadMasterTraceByMotherAccount(${id}, ${JSON.stringify(String(query))})">
+          return `<button type="button" class="master-search-result master-trace-choice" style="width:100%;text-align:left;border:1px solid #dbe3ee;background:#fff;border-radius:12px;padding:13px 15px;cursor:pointer;" onclick="loadMasterTraceByMotherAccount(${id}, decodeURIComponent('${encodeURIComponent(String(query))}'))">
             <span style="display:block;font-size:16px;font-weight:800;">🔐 ${product} · Cuenta madre #${id}</span>
             <span style="display:block;margin-top:4px;">📧 ${email}</span>
             <span style="display:block;margin-top:4px;color:#64748b;">Proveedor: ${provider} · Vence: ${expiration} · Perfiles: ${Number(row.profile_count||0)} · ${esc(statusText)}</span>
