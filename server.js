@@ -165,6 +165,114 @@ async function sendDirectUserEmail({ to, subject, text }) {
 }
 
 
+// ============================================================
+// V1.8.1 · AVISOS AUTOMÁTICOS DE VENCIMIENTO DE CUENTAS MADRE
+// ============================================================
+function getMotherExpirationNotificationDays() {
+  const raw = String(process.env.MOTHER_EXPIRATION_NOTIFICATION_DAYS || '7,3,1,0');
+  const values = raw.split(',')
+    .map(value => Number(value.trim()))
+    .filter(value => Number.isInteger(value) && value >= 0 && value <= 365);
+  return [...new Set(values)].sort((a, b) => b - a);
+}
+
+async function sendMotherAccountExpirationNotification(account) {
+  const days = Number(account.days_remaining);
+  const recipient = String(account.notify_email || '').trim();
+  if (!account.id || !recipient || !Number.isInteger(days) || days < 0) return false;
+
+  const claim = await pool.query(`
+    INSERT INTO mother_account_expiration_notifications
+      (mother_account_id, notification_days, status, sent_to, created_at)
+    VALUES ($1, $2, 'pending', $3, NOW())
+    ON CONFLICT (mother_account_id, notification_days) DO NOTHING
+    RETURNING id
+  `, [Number(account.id), days, recipient]);
+
+  if (!claim.rows[0]) return false;
+
+  const expiration = String(account.expiration_date || '').slice(0, 10);
+  const platform = String(account.product_name || account.platform || 'Cuenta madre').trim();
+  const email = String(account.account_email || 'Sin correo').trim();
+  const when = days === 0 ? 'VENCE HOY' : `vence en ${days} día${days === 1 ? '' : 's'}`;
+  const subject = `⚠️ Cuenta madre ${when}: ${platform}`;
+  const text = `
+Aviso automático de Servicios Digitales Peters
+
+La siguiente cuenta madre está próxima a vencer:
+
+Cuenta madre: #${Number(account.id)}
+Plataforma / producto: ${platform}
+Correo de la cuenta: ${email}
+Proveedor: ${String(account.provider_name || 'Sin proveedor')}
+Fecha de vencimiento: ${expiration || 'Sin fecha'}
+Estado: ${when}
+Perfiles registrados: ${Number(account.profile_count || 0)}
+
+Revisa el inventario y renueva o reemplaza la cuenta si corresponde.
+`.trim();
+
+  const sent = await sendDirectUserEmail({ to: recipient, subject, text });
+  if (sent) {
+    await pool.query(`UPDATE mother_account_expiration_notifications SET status='sent', sent_at=NOW(), sent_to=$2 WHERE id=$1`, [claim.rows[0].id, recipient]);
+    return true;
+  }
+
+  await pool.query(`DELETE FROM mother_account_expiration_notifications WHERE id=$1`, [claim.rows[0].id]);
+  return false;
+}
+
+let motherExpirationNotificationRunning = false;
+
+async function checkMotherAccountExpirations() {
+  if (motherExpirationNotificationRunning) return;
+  motherExpirationNotificationRunning = true;
+  try {
+    const thresholds = getMotherExpirationNotificationDays();
+    if (!thresholds.length || !process.env.RESEND_API_KEY) return;
+    const maxDays = Math.max(...thresholds);
+    const { notifyTo } = getMailConfig();
+
+    const result = await pool.query(`
+      SELECT
+        ma.id,
+        ma.product_name,
+        ma.account_email,
+        ma.provider_name,
+        ma.expiration_date,
+        COALESCE(NULLIF(owner.email,''), $1) AS notify_email,
+        COUNT(pa.id)::int AS profile_count,
+        (ma.expiration_date - (NOW() AT TIME ZONE 'America/Mexico_City')::date)::int AS days_remaining
+      FROM mother_accounts ma
+      LEFT JOIN users owner ON owner.id = ma.owner_admin_id
+      LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
+      WHERE ma.status = 'active'
+        AND ma.expiration_date IS NOT NULL
+        AND ma.expiration_date BETWEEN (NOW() AT TIME ZONE 'America/Mexico_City')::date
+                                   AND ((NOW() AT TIME ZONE 'America/Mexico_City')::date + $2::int)
+        AND COALESCE(NULLIF(owner.email,''), $1) <> ''
+      GROUP BY ma.id, owner.email
+      ORDER BY ma.expiration_date ASC, ma.id ASC
+    `, [notifyTo, maxDays]);
+
+    for (const account of result.rows) {
+      if (thresholds.includes(Number(account.days_remaining))) {
+        await sendMotherAccountExpirationNotification(account);
+      }
+    }
+  } catch (error) {
+    console.error('[EXPIRACION MADRE] Error en chequeo automático:', error.message);
+  } finally {
+    motherExpirationNotificationRunning = false;
+  }
+}
+
+function startMotherExpirationNotificationScheduler() {
+  checkMotherAccountExpirations().catch(() => {});
+  setInterval(() => checkMotherAccountExpirations().catch(() => {}), 60 * 60 * 1000);
+}
+
+
 async function sendAdminResponseEmail({ type, id, customerName, customerEmail, subject, status, response, productName, amount }) {
   const cleanEmail = String(customerEmail || "").trim();
   const cleanResponse = String(response || "").trim();
@@ -1667,6 +1775,21 @@ async function initDatabase() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_group ON mother_accounts (lower(product_name), lower(account_email), COALESCE(owner_admin_id, 0), status)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_replaces ON mother_accounts (replaces_mother_account_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_accounts_expiration ON mother_accounts (status, expiration_date)`);
+
+  // V1.8.1: registro idempotente de avisos de vencimiento de cuentas madre.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mother_account_expiration_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      mother_account_id INTEGER NOT NULL REFERENCES mother_accounts(id) ON DELETE CASCADE,
+      notification_days INTEGER NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'sent',
+      sent_to TEXT NOT NULL DEFAULT '',
+      sent_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE (mother_account_id, notification_days)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mother_expiration_notifications_account ON mother_account_expiration_notifications(mother_account_id, sent_at DESC)`);
 
 
   // MASTER V1.4: proveedores y registro de compras de inventario.
@@ -11035,6 +11158,7 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
     const isEmailSearch = search.includes('@');
     const isNumericSearch = /^\d+$/.test(search);
     const numericSearch = isNumericSearch ? Number(search) : null;
+    const requestedMotherAccountId = Number(req.query.mother_account_id || 0) || null;
 
     // La trazabilidad pertenece al inventario efectivo del usuario actual.
     // Admin principal y distribuidores convertidos usan owner 0/global;
@@ -11220,8 +11344,47 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
     `;
 
     let result;
+    let accountChoices = [];
 
     if (isEmailSearch && !includeBuyer) {
+      const choicesQuery = `
+        SELECT
+          ma.id,
+          COALESCE(NULLIF(ma.product_name,''), MAX(pa.product_name), MAX(pa.platform), 'Cuenta madre') AS product_name,
+          ma.account_email,
+          COALESCE(NULLIF(ma.provider_name,''), 'Sin proveedor') AS provider_name,
+          ma.status,
+          ma.original_purchase_date,
+          ma.expiration_date,
+          COUNT(pa.id)::int AS profile_count,
+          COUNT(pa.id) FILTER (WHERE lower(COALESCE(pa.status,'')) IN ('available','disponible'))::int AS available_profiles
+        FROM mother_accounts ma
+        LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
+        WHERE lower(regexp_replace(trim(COALESCE(ma.account_email,'')), '\\s+', '', 'g')) = $1
+          AND COALESCE(ma.owner_admin_id,0) = COALESCE($2::int,0)
+        GROUP BY ma.id
+        ORDER BY ma.expiration_date DESC NULLS LAST, ma.id DESC
+      `;
+      const choicesResult = await pool.query(choicesQuery, [normalizedSearch, scopeOwnerId]);
+      accountChoices = choicesResult.rows;
+
+      if (requestedMotherAccountId) {
+        const selectedExists = accountChoices.some(row => Number(row.id) === requestedMotherAccountId);
+        if (!selectedExists) {
+          return res.status(404).json({ error: 'La cuenta madre seleccionada no pertenece a este inventario.' });
+        }
+        const selectedQuery = `
+          ${selectSql}
+          WHERE COALESCE(pa.owner_admin_id, 0) = COALESCE($1::int, 0)
+            AND pa.mother_account_id = $2
+          ORDER BY
+            ${officialDateExpression} DESC NULLS LAST,
+            pa.created_at DESC NULLS LAST,
+            pa.delivered_at DESC NULLS LAST,
+            pa.id DESC;
+        `;
+        result = await pool.query(selectedQuery, [scopeOwnerId, requestedMotherAccountId]);
+      } else {
       // Un correo se interpreta exclusivamente como correo de CUENTA MADRE.
       // Primero localizamos sus mother_account_id exactos y después seguimos
       // únicamente la cadena de reemplazos relacionada con esos IDs.
@@ -11272,6 +11435,7 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
           pa.id DESC;
       `;
       result = await pool.query(emailQuery, [normalizedSearch, scopeOwnerId]);
+      }
     } else if (isNumericSearch) {
       // Para números priorizamos coincidencia exacta de pedido, ID de perfil o PIN.
       // Ya no usamos LIKE sobre pedidos porque #12 no debe traer #120, #312, etc.
@@ -11339,7 +11503,8 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
       events: result.rows || [],
       search_mode: (isEmailSearch && !includeBuyer) ? 'mother_email' : (isNumericSearch ? 'exact_number' : (includeBuyer ? 'global_trace' : 'account_fields')),
       include_buyer: includeBuyer,
-      query: search
+      query: search,
+      account_choices: accountChoices
     });
   } catch (error) {
     console.error('Error en historial de inventario:', error.message);
@@ -12241,6 +12406,7 @@ app.get('/api/admin/master/export/:kind', authMiddleware, adminMiddleware, mainA
 
 initDatabase()
   .then(() => {
+    startMotherExpirationNotificationScheduler();
     app.listen(PORT, () => {
       console.log(`Servidor corriendo en puerto ${PORT}`);
     });

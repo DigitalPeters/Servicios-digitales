@@ -825,6 +825,64 @@ function openInventoryHistory() {
   setTimeout(() => document.getElementById('section-inventory-history')?.scrollIntoView({behavior:'smooth', block:'start'}), 100);
 }
 
+
+function renderInventoryTraceAccountChoices(query, choices) {
+  const timelineItems = document.getElementById('inventoryTimelineItems');
+  const timelinePanel = document.getElementById('inventoryHistoryTimeline');
+  if (!timelineItems || !timelinePanel) return;
+
+  const rows = Array.isArray(choices) ? choices : [];
+  timelineItems.innerHTML = `
+    <div class="trace-account-choice-box" style="border:1px solid #bfdbfe;background:#f8fbff;border-radius:14px;padding:16px;">
+      <h3 style="margin:0 0 6px;">📧 Encontré ${rows.length} cuentas con ese mismo correo</h3>
+      <p class="small-text" style="margin:0 0 14px;">El correo no es único. Elige la plataforma/cuenta madre que quieres revisar para abrir su trazabilidad exacta.</p>
+      <div style="display:grid;gap:10px;">
+        ${rows.map(row => {
+          const id = Number(row.id || 0);
+          const expiration = formatInventoryHistoryDate(row.expiration_date || row.original_purchase_date);
+          const status = String(row.status || 'active').toLowerCase();
+          const statusText = ['active','activa'].includes(status) ? 'Activa' : (status || 'Sin estado');
+          return `
+            <button type="button" class="outline-btn inventory-trace-choice" style="width:100%;text-align:left;padding:13px 15px;border-radius:12px;" onclick="loadInventoryHistoryForMotherAccount(${id}, ${JSON.stringify(String(query))})">
+              <span style="display:block;font-size:16px;font-weight:800;">${safeText(row.product_name || 'Cuenta madre')} · #${id}</span>
+              <span style="display:block;margin-top:4px;">📧 ${safeText(row.account_email || query)}</span>
+              <span class="small-text" style="display:block;margin-top:4px;">Vence: ${safeText(expiration)} · Perfiles: ${Number(row.profile_count || 0)} · ${safeText(statusText)}</span>
+            </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+  timelinePanel.classList.remove('hidden');
+}
+
+async function loadInventoryHistoryForMotherAccount(motherAccountId, email) {
+  const id = Number(motherAccountId || 0);
+  const query = String(email || '').trim();
+  const timelineItems = document.getElementById('inventoryTimelineItems');
+  const summary = document.getElementById('inventoryHistorySummary');
+  const timelinePanel = document.getElementById('inventoryHistoryTimeline');
+  if (!id || !query) return;
+
+  if (timelineItems) timelineItems.innerHTML = '<p>Abriendo trazabilidad de la cuenta seleccionada...</p>';
+  if (summary) summary.classList.add('hidden');
+  if (timelinePanel) timelinePanel.classList.remove('hidden');
+
+  try {
+    const response = await api(`/api/admin/inventory-history?q=${encodeURIComponent(query)}&mother_account_id=${id}`);
+    if (!response.events || response.events.length === 0) {
+      if (timelineItems) timelineItems.innerHTML = '<p>No se encontraron eventos para la cuenta madre seleccionada.</p>';
+      return;
+    }
+    renderInventoryHistorySummary(response.events);
+    renderInventoryHistoryTimeline(response.events);
+    renderInventoryHistoryModal(response.events);
+    openInventoryHistoryModal();
+    if (summary) summary.classList.remove('hidden');
+  } catch (error) {
+    if (timelineItems) timelineItems.innerHTML = `<p style="color:red;">Error: ${safeText(error.message)}</p>`;
+  }
+}
+window.loadInventoryHistoryForMotherAccount = loadInventoryHistoryForMotherAccount;
+
 async function searchInventoryHistory() {
   const input = document.getElementById('inventorySearchInput');
   const query = String(input?.value || '').trim();
@@ -833,7 +891,7 @@ async function searchInventoryHistory() {
   const timelinePanel = document.getElementById('inventoryHistoryTimeline');
 
   if (!query) {
-    alert('Por favor ingresa un correo madre, correo de cliente, nombre, perfil, PIN o número de pedido para buscar la historia de inventario.');
+    alert('Por favor ingresa un correo madre, nombre de plataforma, perfil, PIN o número de pedido para buscar la historia de inventario.');
     return;
   }
 
@@ -847,6 +905,23 @@ async function searchInventoryHistory() {
     if (!response.events || response.events.length === 0) {
       if (timelineItems) timelineItems.innerHTML = '<p>No se encontraron registros para esta cuenta madre.</p>';
       if (timelinePanel) timelinePanel.classList.remove('hidden');
+      return;
+    }
+
+    const choices = Array.isArray(response.account_choices) ? response.account_choices : [];
+    const isEmail = query.includes('@');
+
+    // Caso importante: el mismo correo se usa en Disney, Prime, etc.
+    // No mostramos una cuenta al azar. Primero permitimos elegir la cuenta madre.
+    if (isEmail && choices.length > 1) {
+      renderInventoryTraceAccountChoices(query, choices);
+      return;
+    }
+
+    // Si solo existe una cuenta madre para ese correo, la fijamos por ID para
+    // que la trazabilidad quede anclada al registro correcto.
+    if (isEmail && choices.length === 1) {
+      await loadInventoryHistoryForMotherAccount(Number(choices[0].id), query);
       return;
     }
 
