@@ -344,6 +344,46 @@
     }catch(e){console.warn('No se pudo abrir trazabilidad completa',e);}
   };
 
+  function renderMasterTraceAccountChoices(query, choices){
+    const rows=Array.isArray(choices)?choices:[];
+    if(!rows.length)return '';
+    return `<section class="master-trace-account-choices" style="border:1px solid #bfdbfe;background:#f8fbff;border-radius:16px;padding:16px;margin-bottom:14px;">
+      <div style="margin-bottom:12px;"><span class="master-eyebrow">TRAZABILIDAD</span><h3 style="margin:4px 0 4px;">Encontré ${rows.length} cuentas con este mismo correo</h3><p class="small-text" style="margin:0;">El correo no es único. Selecciona la plataforma/cuenta madre que quieres revisar.</p></div>
+      <div style="display:grid;gap:10px;">
+        ${rows.map(row=>{
+          const id=Number(row.id||0);
+          const product=esc(row.product_name||'Cuenta madre');
+          const email=esc(row.account_email||query);
+          const provider=esc(row.provider_name||'Sin proveedor');
+          const expiration=esc(String(row.expiration_date||'').slice(0,10)||'Sin fecha');
+          const status=String(row.status||'').toLowerCase();
+          const statusText=['active','activa'].includes(status)?'Activa':(status||'Sin estado');
+          return `<button type="button" class="master-search-result master-trace-choice" style="width:100%;text-align:left;border:1px solid #dbe3ee;background:#fff;border-radius:12px;padding:13px 15px;cursor:pointer;" onclick="loadMasterTraceByMotherAccount(${id}, ${JSON.stringify(String(query))})">
+            <span style="display:block;font-size:16px;font-weight:800;">🔐 ${product} · Cuenta madre #${id}</span>
+            <span style="display:block;margin-top:4px;">📧 ${email}</span>
+            <span style="display:block;margin-top:4px;color:#64748b;">Proveedor: ${provider} · Vence: ${expiration} · Perfiles: ${Number(row.profile_count||0)} · ${esc(statusText)}</span>
+            <span style="display:inline-block;margin-top:8px;font-weight:800;">Ver trazabilidad →</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </section>`;
+  }
+
+  window.loadMasterTraceByMotherAccount=async function(motherAccountId, query){
+    const id=Number(motherAccountId||0);
+    const email=String(query||'').trim();
+    const box=document.getElementById('masterGlobalSearchResults');
+    if(!id||!email||!box)return;
+    try{
+      box.innerHTML='<div class="small-text">Abriendo trazabilidad de la cuenta seleccionada…</div>';
+      const trace=await api(`/api/admin/inventory-history?q=${encodeURIComponent(email)}&mother_account_id=${id}`);
+      const traceHtml=buildTracePreview(trace);
+      box.innerHTML=traceHtml || '<div class="master-v14-empty">No encontramos eventos para la cuenta madre seleccionada.</div>';
+    }catch(e){
+      box.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudo abrir la trazabilidad')}</div>`;
+    }
+  };
+
   async function runMasterGlobalSearch(){
     const input=document.getElementById('masterGlobalSearchInput'),box=document.getElementById('masterGlobalSearchResults');const q=input?.value.trim()||'';
     if(q.length<2){if(box)box.innerHTML='<div class="master-v14-empty">Escribe al menos 2 caracteres.</div>';return;}
@@ -354,15 +394,30 @@
         api(`/api/admin/inventory-history?q=${encodeURIComponent(q)}&include_buyer=1`)
       ]);
       const d=globalResult.status==='fulfilled'?globalResult.value:{};
-      const trace=traceResult.status==='fulfilled'?traceResult.value:{events:[]};
+      let trace=traceResult.status==='fulfilled'?traceResult.value:{events:[],account_choices:[]};
       const sections=[];
-      const traceHtml=buildTracePreview(trace);
-      if(traceHtml)sections.push(traceHtml);
+      const isEmail=q.includes('@');
+      const choices=Array.isArray(trace.account_choices)?trace.account_choices:[];
+
+      // Si el correo pertenece a varias cuentas madre, NO elegimos la última
+      // plataforma. Primero obligamos a seleccionar el registro correcto por ID.
+      if(isEmail && choices.length>1){
+        sections.push(renderMasterTraceAccountChoices(q, choices));
+      }else{
+        // Si solo existe una cuenta madre, fijamos la trazabilidad por ID.
+        if(isEmail && choices.length===1){
+          try{
+            trace=await api(`/api/admin/inventory-history?q=${encodeURIComponent(q)}&mother_account_id=${Number(choices[0].id)}`);
+          }catch(_){/* conservamos la respuesta inicial como respaldo */}
+        }
+        const traceHtml=buildTracePreview(trace);
+        if(traceHtml)sections.push(traceHtml);
+      }
       if(d.users?.length)sections.push(searchGroup('Usuarios',d.users.map(x=>({icon:'👤',title:x.name||x.email,sub:`${x.email} · saldo $${money(x.balance)}`,action:`openMasterUser360(${Number(x.id)})`}))));
       if(d.orders?.length)sections.push(searchGroup('Pedidos',d.orders.map(x=>{let od={};try{od=typeof x.order_data==='string'?JSON.parse(x.order_data||'{}'):(x.order_data||{});}catch(_){}const buyer=od._cliente_final_nombre?`Cliente final: ${od._cliente_final_nombre}`:(x.user_name||x.user_email||'');return {icon:'▤',title:`Pedido #${x.id} · ${x.product_name}`,sub:`${buyer} · $${money(x.amount)} · ${x.status}`,action:`openMasterManualDeliveryOrder(${Number(x.id)}, true)`};})));
-      if(d.accounts?.length && !traceHtml)sections.push(searchGroup('Inventario',d.accounts.map(x=>({icon:'🔐',title:`${x.product_name||x.platform} · ${x.account_email}`,sub:`${x.profile_name||'Sin perfil'} · ${x.status}`,action:`masterOpenAdminTarget('adminPlatformAccountsPanel')`}))));
+      if(d.accounts?.length && !(isEmail && choices.length>1))sections.push(searchGroup('Inventario',d.accounts.map(x=>({icon:'🔐',title:`${x.product_name||x.platform} · ${x.account_email}`,sub:`${x.profile_name||'Sin perfil'} · ${x.status}`,action:`masterOpenAdminTarget('adminPlatformAccountsPanel')`}))));
       if(d.products?.length)sections.push(searchGroup('Productos',d.products.map(x=>({icon:'📦',title:x.name,sub:`${x.category||''} · venta $${money(x.price)} · costo $${money(x.cost_price)}`,action:`masterOpenAdminTarget('adminProductsPanel')`}))));
-      if(d.reports?.length && !traceHtml)sections.push(searchGroup('Reportes',d.reports.map(x=>({icon:'⚠️',title:`Reporte #${x.id} · ${x.issue_type}`,sub:`${x.user_name||x.user_email||''} · ${x.status}`,action:`masterOpenAdminTarget('adminAccountReportsPanel')`}))));
+      if(d.reports?.length && !(isEmail && choices.length>1))sections.push(searchGroup('Reportes',d.reports.map(x=>({icon:'⚠️',title:`Reporte #${x.id} · ${x.issue_type}`,sub:`${x.user_name||x.user_email||''} · ${x.status}`,action:`masterOpenAdminTarget('adminAccountReportsPanel')`}))));
       if(box)box.innerHTML=sections.join('')||'<div class="master-v14-empty">No encontramos coincidencias.</div>';
     }catch(e){if(box)box.innerHTML=`<div class="master-v14-error">${esc(e.message||'Error de búsqueda')}</div>`;}
   }
