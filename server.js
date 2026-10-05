@@ -11346,7 +11346,11 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
     let result;
     let accountChoices = [];
 
-    if (isEmailSearch && !includeBuyer) {
+    // IMPORTANTE: las opciones de cuenta madre deben calcularse también cuando
+    // include_buyer=1, porque la búsqueda global usa ese modo. El correo puede
+    // pertenecer a varias plataformas/cuentas madre y nunca debe resolverse con
+    // el último registro solamente.
+    if (isEmailSearch) {
       const choicesQuery = `
         SELECT
           ma.id,
@@ -11360,8 +11364,17 @@ app.get('/api/admin/inventory-history', authMiddleware, inventoryHistoryAccessMi
           COUNT(pa.id) FILTER (WHERE lower(COALESCE(pa.status,'')) IN ('available','disponible'))::int AS available_profiles
         FROM mother_accounts ma
         LEFT JOIN platform_accounts pa ON pa.mother_account_id = ma.id
-        WHERE lower(regexp_replace(trim(COALESCE(ma.account_email,'')), '\\s+', '', 'g')) = $1
-          AND COALESCE(ma.owner_admin_id,0) = COALESCE($2::int,0)
+        WHERE COALESCE(ma.owner_admin_id,0) = COALESCE($2::int,0)
+          AND (
+            lower(regexp_replace(trim(COALESCE(ma.account_email,'')), '\\s+', '', 'g')) = $1
+            OR EXISTS (
+              SELECT 1
+              FROM platform_accounts pa_email
+              WHERE pa_email.mother_account_id = ma.id
+                AND COALESCE(pa_email.owner_admin_id,0) = COALESCE($2::int,0)
+                AND lower(regexp_replace(trim(COALESCE(pa_email.account_email,'')), '\\s+', '', 'g')) = $1
+            )
+          )
         GROUP BY ma.id
         ORDER BY ma.expiration_date DESC NULLS LAST, ma.id DESC
       `;
