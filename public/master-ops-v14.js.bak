@@ -131,7 +131,7 @@
       if(customer)customer.innerHTML=`<span><b>${esc(customerName)}</b><small>${esc(phone||email||'Cliente final')} · Pedido #${directReportOrderId}</small></span>`;
       const d=await api(`/api/admin/master/quick-sale/order-accounts?order_id=${directReportOrderId}`);
       const accounts=d.rows||[]; const select=document.getElementById('masterDirectReportAccount');
-      if(!accounts.length) throw new Error('No hay una cuenta/perfil ligado a este pedido que pueda reportarse.');
+      if(!accounts.length) throw new Error('No hay un perfil entregado disponible para reportar en este pedido.');
       if(select)select.innerHTML=accounts.map(a=>`<option value="${Number(a.id)}">${esc(a.platform||a.product_name||'Cuenta')} · ${esc(a.account_email||'')}${a.profile_name?' · '+esc(a.profile_name):''}</option>`).join('');
       if(result)result.innerHTML='';
     }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron cargar las cuentas')}</div>`;}
