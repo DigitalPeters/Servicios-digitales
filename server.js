@@ -6471,6 +6471,38 @@ app.get("/api/my-account-reports/:reportId/evidence", authMiddleware, async (req
   }
 });
 
+// ADMIN: CUENTAS DE COMPRAS PROPIAS ENTREGADAS, REPORTABLES DESDE EL PANEL
+// Este endpoint es distinto de la Venta rápida: aquí el administrador es el comprador
+// real del pedido (orders.user_id = req.user.id). Se devuelve el ID exacto de cada
+// cuenta para que un correo repetido entre plataformas nunca mezcle la trazabilidad.
+app.get('/api/admin/my-purchase/order-accounts', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const orderId = Number(req.query.order_id || 0);
+    if (!orderId) return res.status(400).json({ error: 'Pedido inválido' });
+    const ownerId = req.isPanelAdmin ? Number(req.user.id) : null;
+    const result = await pool.query(`
+      SELECT pa.id, pa.platform, pa.product_name, pa.account_email, pa.account_password,
+             pa.profile_name, pa.profile_pin, pa.status, pa.delivered_at, pa.expires_at,
+             pa.official_purchase_date, pa.access_url, pa.mother_account_id,
+             pa.assigned_order_id
+      FROM platform_accounts pa
+      JOIN orders o ON o.id = pa.assigned_order_id
+      WHERE o.id = $1
+        AND o.user_id = $2
+        AND COALESCE(o.admin_quick_sale, FALSE) = FALSE
+        AND o.status = 'exito'
+        AND ($3::int IS NULL OR o.owner_admin_id = $3)
+        AND pa.assigned_order_id = o.id
+        AND pa.assigned_user_id = o.user_id
+        AND pa.status = 'delivered'
+      ORDER BY pa.id ASC`, [orderId, req.user.id, ownerId]);
+    res.json({ order_id: orderId, rows: result.rows });
+  } catch (err) {
+    console.error('Error cargando cuentas de compra propia del admin:', err.message);
+    res.status(500).json({ error: 'No se pudieron cargar las cuentas de esa compra' });
+  }
+});
+
 // MASTER: CUENTAS ENTREGADAS EN VENTA DIRECTA PARA REPORTAR FALLAS
 app.get('/api/admin/master/quick-sale/order-accounts', authMiddleware, adminMiddleware, async (req, res) => {
   try {

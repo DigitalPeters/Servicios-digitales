@@ -1698,6 +1698,81 @@ function renderManualDeliveryFormFinal(o){
   </div>`;
 }
 
+
+let adminOwnPurchaseReportOrderId = 0;
+
+function ensureAdminOwnPurchaseReportModal(){
+  if(document.getElementById('adminOwnPurchaseReportModal')) return document.getElementById('adminOwnPurchaseReportModal');
+  const modal=document.createElement('div');
+  modal.id='adminOwnPurchaseReportModal';
+  modal.className='modal-overlay';
+  modal.style.display='none';
+  modal.innerHTML=`<div class="modal-content" style="max-width:760px;width:94%">
+    <div class="modal-header"><h2>⚠ Reportar falla · Mi compra</h2><button type="button" class="modal-close" onclick="closeAdminOwnPurchaseReport()">×</button></div>
+    <div class="modal-body">
+      <div id="adminOwnPurchaseReportInfo" class="order-data">Cargando cuentas…</div>
+      <form id="adminOwnPurchaseReportForm">
+        <label class="field-label">Cuenta / perfil que falló</label>
+        <select id="adminOwnPurchaseReportAccount" required></select>
+        <label class="field-label">Tipo de falla</label>
+        <select id="adminOwnPurchaseReportIssue"><option value="no funciona">No funciona</option><option value="credenciales incorrectas">Credenciales incorrectas</option><option value="perfil bloqueado">Perfil bloqueado</option><option value="no reproduce">No permite reproducir</option><option value="otro">Otro</option></select>
+        <label class="field-label">¿Qué sucede?</label>
+        <textarea id="adminOwnPurchaseReportDescription" rows="5" required placeholder="Describe brevemente la falla…"></textarea>
+        <div id="adminOwnPurchaseReportResult"></div>
+        <div class="modal-footer"><button type="button" class="outline-btn" onclick="closeAdminOwnPurchaseReport()">Cancelar</button><button type="submit" class="primary-btn">🚨 Registrar falla</button></div>
+      </form>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  const form=modal.querySelector('#adminOwnPurchaseReportForm');
+  form.addEventListener('submit', submitAdminOwnPurchaseReport);
+  return modal;
+}
+
+async function openAdminOwnPurchaseReport(orderId){
+  const modal=ensureAdminOwnPurchaseReportModal();
+  adminOwnPurchaseReportOrderId=Number(orderId||0);
+  modal.style.display='flex';
+  const info=document.getElementById('adminOwnPurchaseReportInfo');
+  const select=document.getElementById('adminOwnPurchaseReportAccount');
+  const result=document.getElementById('adminOwnPurchaseReportResult');
+  if(info) info.innerHTML=`<b>Pedido #${adminOwnPurchaseReportOrderId}</b><br><span class="small-text">Cargando perfiles entregados…</span>`;
+  if(result) result.innerHTML='';
+  if(select) select.innerHTML='<option value="">Cargando…</option>';
+  try{
+    const d=await api(`/api/admin/my-purchase/order-accounts?order_id=${adminOwnPurchaseReportOrderId}`);
+    const accounts=Array.isArray(d.rows)?d.rows:[];
+    if(!accounts.length) throw new Error('Esta compra no tiene una cuenta entregada que pueda reportarse.');
+    if(info) info.innerHTML=`<b>Pedido #${adminOwnPurchaseReportOrderId}</b><br><span class="small-text">Selecciona exactamente el perfil que está fallando.</span>`;
+    if(select) select.innerHTML=accounts.map(a=>`<option value="${Number(a.id)}">#${Number(a.id)} · ${safeText(a.platform||a.product_name||'Cuenta')} · ${safeText(a.account_email||'')}${a.profile_name?' · '+safeText(a.profile_name):''}</option>`).join('');
+  }catch(e){
+    if(info) info.innerHTML=`<div class="error-message">${safeText(e.message||'No se pudieron cargar las cuentas')}</div>`;
+    if(select) select.innerHTML='<option value="">Sin cuentas reportables</option>';
+  }
+}
+window.openAdminOwnPurchaseReport=openAdminOwnPurchaseReport;
+window.closeAdminOwnPurchaseReport=function(){ const m=document.getElementById('adminOwnPurchaseReportModal'); if(m) m.style.display='none'; };
+
+async function submitAdminOwnPurchaseReport(ev){
+  ev.preventDefault();
+  const result=document.getElementById('adminOwnPurchaseReportResult');
+  try{
+    const accountId=Number(document.getElementById('adminOwnPurchaseReportAccount')?.value||0);
+    const issueType=document.getElementById('adminOwnPurchaseReportIssue')?.value||'otro';
+    const description=document.getElementById('adminOwnPurchaseReportDescription')?.value.trim()||'';
+    if(!accountId) throw new Error('Selecciona la cuenta o perfil que presenta la falla.');
+    if(!description) throw new Error('Describe la falla antes de enviar el reporte.');
+    if(result) result.innerHTML='<div class="small-text">Registrando reporte…</div>';
+    const d=await api('/api/account-reports',{method:'POST',body:JSON.stringify({reported_account_id:accountId,issue_type:issueType,description})});
+    if(result) result.innerHTML=`<div class="success-message"><b>✓ Reporte #${Number(d.report_id||0)} registrado</b><br>Quedó pendiente de revisión.</div>`;
+    if(typeof loadAccountReports==='function') await loadAccountReports(1);
+    if(typeof actualizarConteosDashboard==='function') await actualizarConteosDashboard();
+    setTimeout(()=>closeAdminOwnPurchaseReport(),700);
+  }catch(e){
+    if(result) result.innerHTML=`<div class="error-message">${safeText(e.message||'No se pudo registrar el reporte')}</div>`;
+  }
+}
+
 function renderAdminOrderCompactFinal(o){
   const od=parseJsonObject(o.order_data);
   const isDirect=Boolean(o.admin_quick_sale);
@@ -1706,7 +1781,9 @@ function renderAdminOrderCompactFinal(o){
   const directCustomerPhone=isDirect ? (od._cliente_final_whatsapp || '') : '';
   const itemId=`admin-order-compact-${o.id}`;
   const copyButton=hasAccountDelivery(o)?`<button class="copy-account-btn" onclick="copyAccountDataFromOrder(${o.id}, 'admin')">📋 Copiar datos de cuenta</button>`:'';
+  const isOwnAdminPurchase = Number(o.user_id||0) === Number(currentUser?.id||0) && !o.admin_quick_sale && String(o.status||'').toLowerCase() === 'exito';
   const directReportButton=o.admin_quick_sale && hasAccountDelivery(o)?`<button class="danger-btn" type="button" onclick="openMasterDirectReport(${o.id})">⚠ Reportar falla de este cliente</button>`:'';
+  const ownPurchaseReportButton=isOwnAdminPurchase && hasAccountDelivery(o)?`<button class="danger-btn" type="button" onclick="openAdminOwnPurchaseReport(${o.id})">⚠ Reportar falla de mi compra</button>`:'';
   const manualChip=String(o.product_type||'').toLowerCase()==='manual'?'<span class="chip">Manual</span>':'';
   return `<div class="item compact-item" id="${itemId}">
     <div class="compact-header" onclick="toggleCompactItemFinal('${itemId}')">
@@ -1730,6 +1807,7 @@ function renderAdminOrderCompactFinal(o){
       ${renderManualDeliveryFormFinal(o)}
       ${copyButton}
       ${directReportButton}
+      ${ownPurchaseReportButton}
       <label class="checkbox-row"><input type="checkbox" id="refund-${o.id}" /> Devolver saldo si se rechaza</label>
       <button onclick="updateOrderStatus(${o.id})">Actualizar pedido</button>
     </div>
