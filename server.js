@@ -6494,7 +6494,7 @@ app.get('/api/admin/my-purchase/order-accounts', authMiddleware, adminMiddleware
         AND ($3::int IS NULL OR o.owner_admin_id = $3)
         AND pa.assigned_order_id = o.id
         AND pa.assigned_user_id = o.user_id
-        AND pa.status = 'delivered'
+        AND lower(COALESCE(pa.status, '')) IN ('delivered','available','disponible')
       ORDER BY pa.id ASC`, [orderId, req.user.id, ownerId]);
     res.json({ order_id: orderId, rows: result.rows });
   } catch (err) {
@@ -6519,7 +6519,7 @@ app.get('/api/admin/master/quick-sale/order-accounts', authMiddleware, adminMidd
         AND ($2::int IS NULL OR o.owner_admin_id = $2)
         AND pa.assigned_order_id = o.id
         AND pa.assigned_user_id = o.user_id
-        AND pa.status = 'delivered'
+        AND lower(COALESCE(pa.status, '')) IN ('delivered','available','disponible')
       ORDER BY pa.id ASC`, [orderId, ownerId]);
     res.json({ order_id: orderId, rows: result.rows });
   } catch (err) {
@@ -6562,9 +6562,13 @@ app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddle
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'No se encontró esa cuenta dentro de una venta directa administrada por ti' });
     }
-    if (String(row.account_status || '').toLowerCase() !== 'delivered') {
+    // Las cuentas reutilizables pueden conservar estado 'available'/'disponible'
+    // después de una venta, pero siguen ligadas al pedido y son reportables.
+    // No debemos exigir exclusivamente 'delivered' para estos casos.
+    const reportableStatuses = new Set(['delivered','available','disponible']);
+    if (!reportableStatuses.has(String(row.account_status || '').toLowerCase())) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Esa cuenta ya no está en estado entregado' });
+      return res.status(400).json({ error: 'Esa cuenta ya no está disponible para reportar' });
     }
 
     const duplicate = await client.query(`
