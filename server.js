@@ -524,6 +524,20 @@ async function recordBalanceLedger(client, {
   }
 }
 
+async function linkOrderPlatformAccount(client, orderId, accountId, userId, relationType = 'purchase') {
+  const oid = Number(orderId || 0);
+  const aid = Number(accountId || 0);
+  if (!oid || !aid) return;
+  await client.query(
+    `INSERT INTO order_platform_accounts(order_id, platform_account_id, user_id, relation_type)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (order_id, platform_account_id)
+     DO UPDATE SET user_id = COALESCE(order_platform_accounts.user_id, EXCLUDED.user_id),
+                   relation_type = CASE WHEN order_platform_accounts.relation_type = 'replacement' THEN 'replacement' ELSE EXCLUDED.relation_type END`,
+    [oid, aid, userId ? Number(userId) : null, String(relationType || 'purchase')]
+  );
+}
+
 async function markAccountAsSold(client, accountId, orderId, userId, isReusableSale = false) {
     try {
         console.log(`[INVENTARIO] Intentando descontar cuenta ${accountId} para pedido ${orderId}`);
@@ -549,7 +563,8 @@ async function markAccountAsSold(client, accountId, orderId, userId, isReusableS
             throw new Error(`La cuenta ${accountId} ya no está disponible o no existe.`);
         }
         
-        console.log(`[INVENTARIO] Éxito: Cuenta ${accountId} marcada como entregada.`);
+        await linkOrderPlatformAccount(client, orderId, accountId, userId, 'purchase');
+        console.log(`[INVENTARIO] Éxito: Cuenta ${accountId} vinculada al pedido ${orderId}.`);
         return true;
     } catch (error) {
         console.error(`[INVENTARIO] ERROR CRÍTICO: ${error.message}`);
@@ -1685,6 +1700,41 @@ async function initDatabase() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_available ON platform_accounts (status, lower(product_name), lower(platform))`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_platform_accounts_mother_account ON platform_accounts (mother_account_id)`);
 
+  // Historial permanente de qué cuentas/perfiles pertenecieron a cada pedido.
+  // Es indispensable para cuentas reutilizables: platform_accounts.assigned_order_id
+  // solo puede guardar el último pedido y por eso NO es una relación histórica.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_platform_accounts (
+      id BIGSERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      platform_account_id INTEGER NOT NULL REFERENCES platform_accounts(id) ON DELETE RESTRICT,
+      user_id INTEGER,
+      relation_type TEXT DEFAULT 'purchase',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(order_id, platform_account_id)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_platform_accounts_order ON order_platform_accounts(order_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_platform_accounts_account ON order_platform_accounts(platform_account_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_platform_accounts_user ON order_platform_accounts(user_id)`);
+
+  // Backfill seguro para pedidos históricos. Se toman tanto la cuenta principal
+  // guardada en orders como las cuentas que todavía conservan assigned_order_id.
+  await pool.query(`
+    INSERT INTO order_platform_accounts(order_id, platform_account_id, user_id, relation_type)
+    SELECT o.id, o.assigned_platform_account_id, o.user_id, 'purchase'
+    FROM orders o
+    JOIN platform_accounts pa ON pa.id = o.assigned_platform_account_id
+    WHERE o.assigned_platform_account_id IS NOT NULL
+    ON CONFLICT (order_id, platform_account_id) DO NOTHING
+  `);
+  await pool.query(`
+    INSERT INTO order_platform_accounts(order_id, platform_account_id, user_id, relation_type)
+    SELECT pa.assigned_order_id, pa.id, pa.assigned_user_id, 'purchase'
+    FROM platform_accounts pa
+    WHERE pa.assigned_order_id IS NOT NULL
+    ON CONFLICT (order_id, platform_account_id) DO NOTHING
+  `);
   // Historial permanente de asignaciones recuperadas. Permite reconstruir
   // rentabilidad/proveedor incluso después de liberar y reutilizar una cuenta.
   await pool.query(`
@@ -2030,6 +2080,15 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE account_reports ADD COLUMN IF NOT EXISTS provider_response_updated_at TIMESTAMP`);
   await pool.query(`UPDATE account_reports ar SET owner_admin_id = o.owner_admin_id FROM orders o WHERE ar.direct_customer_report = TRUE AND ar.order_id = o.id AND o.admin_quick_sale = TRUE AND ar.owner_admin_id IS DISTINCT FROM o.owner_admin_id`);
   await pool.query(`UPDATE account_reports ar SET provider_name_snapshot = COALESCE(NULLIF(ma.provider_name,''),'') FROM platform_accounts pa LEFT JOIN mother_accounts ma ON ma.id=pa.mother_account_id WHERE ar.reported_account_id=pa.id AND COALESCE(ar.provider_name_snapshot,'')=''`);
+  // Completa el historial de reemplazos una vez que replacement_account_id ya existe.
+  await pool.query(`
+    INSERT INTO order_platform_accounts(order_id, platform_account_id, user_id, relation_type)
+    SELECT ar.order_id, ar.replacement_account_id, ar.user_id, 'replacement'
+    FROM account_reports ar
+    JOIN platform_accounts pa ON pa.id = ar.replacement_account_id
+    WHERE ar.order_id IS NOT NULL AND ar.replacement_account_id IS NOT NULL AND ar.replacement_account_id > 0
+    ON CONFLICT (order_id, platform_account_id) DO NOTHING
+  `);
   await pool.query(`UPDATE account_reports SET provider_reported_at = reviewed_at WHERE provider_reported_at IS NULL AND status='proveedor_reportado' AND reviewed_at IS NOT NULL`);
 
   // Ganancias del distribuidor: cuenta separada del saldo comprado.
@@ -2344,6 +2403,7 @@ function buildDeliveredAccountData(assignedAccount, productName = "", productCat
   return lines.join("\n");
 }
 async function findReportedPurchase(client, userId, accountEmail) {
+  const normalizedEmail = String(accountEmail || '').trim();
   const result = await client.query(
     `SELECT
        o.id AS order_id,
@@ -2362,59 +2422,30 @@ async function findReportedPurchase(client, userId, accountEmail) {
        pa.account_email,
        pa.status AS account_status,
        pa.owner_admin_id
-     FROM platform_accounts pa
-     JOIN orders o ON o.id = pa.assigned_order_id
+     FROM order_platform_accounts opa
+     JOIN orders o ON o.id = opa.order_id
+     JOIN platform_accounts pa ON pa.id = opa.platform_account_id
      JOIN products p ON p.id = o.product_id
-     WHERE pa.assigned_user_id = $1
+     WHERE opa.user_id = $1
        AND o.user_id = $1
-       AND lower(pa.account_email) = lower($2)
+       AND lower(trim(COALESCE(pa.account_email,''))) = lower($2)
        AND o.status = 'exito'
-       AND pa.status = 'delivered'
+       AND lower(COALESCE(pa.status,'')) NOT IN ('failed','discarded','recovery_pending')
        AND NOT EXISTS (
-         SELECT 1
-         FROM account_reports replaced_report
+         SELECT 1 FROM account_reports replaced_report
          WHERE replaced_report.user_id = $1
            AND replaced_report.order_id = o.id
            AND replaced_report.reported_account_id = pa.id
            AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
        )
-       AND (
-         lower(COALESCE(p.product_type, '')) LIKE '%combo%'
-         OR pa.id = o.assigned_platform_account_id
-         OR EXISTS (
-           SELECT 1
-           FROM account_reports replacement_report
-           WHERE replacement_report.user_id = $1
-             AND replacement_report.order_id = o.id
-             AND replacement_report.replacement_account_id = pa.id
-         )
-         OR pa.id = (
-           SELECT current_pa.id
-           FROM platform_accounts current_pa
-           WHERE current_pa.assigned_order_id = o.id
-             AND current_pa.assigned_user_id = $1
-             AND current_pa.status = 'delivered'
-             AND NOT EXISTS (
-               SELECT 1
-               FROM account_reports previous_report
-               WHERE previous_report.user_id = $1
-                 AND previous_report.order_id = o.id
-                 AND previous_report.reported_account_id = current_pa.id
-                 AND NULLIF(previous_report.replacement_account_id, 0) IS NOT NULL
-             )
-           ORDER BY current_pa.delivered_at DESC NULLS LAST, current_pa.id DESC
-           LIMIT 1
-         )
-       )
      ORDER BY
        CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END,
-       pa.delivered_at DESC NULLS LAST,
+       opa.created_at DESC,
        o.id DESC,
        pa.id DESC
      LIMIT 1`,
-    [userId, String(accountEmail || "").trim()]
+    [userId, normalizedEmail]
   );
-
   return result.rows[0] || null;
 }
 
@@ -2885,15 +2916,17 @@ async function getCurrentOrderDeliveryState(client, orderId) {
   if (!order) return { order: null, accounts: [], deliveredAccountData: '' };
 
   const accountsResult = await client.query(
-    `SELECT id, platform, product_name, account_email, account_password,
-            profile_name, profile_pin, access_url, extra_data, status,
-            assigned_order_id, assigned_user_id, delivered_at, expires_at,
-            official_purchase_date, mother_account_id
-     FROM platform_accounts
-     WHERE assigned_order_id = $1
-       AND assigned_user_id = $2
-       AND status = 'delivered'
-     ORDER BY id ASC`,
+    `SELECT pa.id, pa.platform, pa.product_name, pa.account_email, pa.account_password,
+            pa.profile_name, pa.profile_pin, pa.access_url, pa.extra_data, pa.status,
+            pa.assigned_order_id, pa.assigned_user_id, pa.delivered_at, pa.expires_at,
+            pa.official_purchase_date, pa.mother_account_id
+     FROM order_platform_accounts opa
+     JOIN platform_accounts pa ON pa.id = opa.platform_account_id
+     WHERE opa.order_id = $1
+       AND opa.user_id = $2
+       AND lower(COALESCE(pa.status,'')) NOT IN ('failed','discarded','recovery_pending')
+     ORDER BY CASE WHEN pa.id = (SELECT assigned_platform_account_id FROM orders WHERE id=$1) THEN 0 ELSE 1 END,
+              opa.id ASC`,
     [orderId, order.user_id]
   );
 
@@ -3632,6 +3665,7 @@ app.post("/api/buy/:productId", authMiddleware, async (req, res) => {
            WHERE id = $3`,
           [newOrderId, userId, account.id]
         );
+        await linkOrderPlatformAccount(client, newOrderId, account.id, userId, 'purchase');
       }
 
       if (Number(product.stock_enabled || 0) === 1 && normalizeProductType(product.product_type) === 'manual') {
@@ -6102,43 +6136,9 @@ Entra a tu panel en Respuesta de fallos para ver/copiar los datos.`;
 app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `WITH latest_replacement AS (
-         SELECT DISTINCT ON (ar.order_id)
-                ar.order_id,
-                ar.replacement_account_id
-         FROM account_reports ar
-         JOIN platform_accounts replacement_pa
-           ON replacement_pa.id = ar.replacement_account_id
-          AND replacement_pa.assigned_order_id = ar.order_id
-          AND replacement_pa.assigned_user_id = ar.user_id
-          AND replacement_pa.status = 'delivered'
-         WHERE ar.user_id = $1
-           AND NULLIF(ar.replacement_account_id, 0) IS NOT NULL
-         ORDER BY ar.order_id,
-                  COALESCE(ar.reviewed_at, ar.created_at) DESC NULLS LAST,
-                  ar.id DESC
-       ), latest_delivered AS (
-         SELECT DISTINCT ON (candidate.assigned_order_id)
-                candidate.assigned_order_id AS order_id,
-                candidate.id AS account_id
-         FROM platform_accounts candidate
-         WHERE candidate.assigned_user_id = $1
-           AND candidate.status = 'delivered'
-           AND NOT EXISTS (
-             SELECT 1
-             FROM account_reports replaced_report
-             WHERE replaced_report.user_id = $1
-               AND replaced_report.order_id = candidate.assigned_order_id
-               AND replaced_report.reported_account_id = candidate.id
-               AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
-           )
-         ORDER BY candidate.assigned_order_id,
-                  candidate.delivered_at DESC NULLS LAST,
-                  candidate.id DESC
-       )
-       SELECT
+      `SELECT
          pa.id,
-         pa.assigned_order_id AS order_id,
+         opa.order_id,
          pa.platform,
          pa.product_name,
          pa.account_email,
@@ -6149,19 +6149,19 @@ app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
          pa.official_purchase_date,
          o.created_at AS order_created_at,
          COALESCE(NULLIF(o.product_name_snapshot, ''), p.name, '') AS order_product_name,
-         CASE
-           WHEN pa.id = lr.replacement_account_id THEN true
-           ELSE false
-         END AS is_replacement
-       FROM platform_accounts pa
-       JOIN orders o ON o.id = pa.assigned_order_id
+         CASE WHEN opa.relation_type = 'replacement' OR EXISTS (
+           SELECT 1 FROM account_reports rr
+           WHERE rr.order_id = o.id AND rr.replacement_account_id = pa.id
+         ) THEN true ELSE false END AS is_replacement
+       FROM order_platform_accounts opa
+       JOIN platform_accounts pa ON pa.id = opa.platform_account_id
+       JOIN orders o ON o.id = opa.order_id
        LEFT JOIN products p ON p.id = o.product_id
-       LEFT JOIN latest_replacement lr ON lr.order_id = o.id
-       LEFT JOIN latest_delivered ld ON ld.order_id = o.id
-       WHERE pa.assigned_user_id = $1
+       WHERE opa.user_id = $1
          AND o.user_id = $1
          AND o.status = 'exito'
-         AND pa.status = 'delivered'
+         AND COALESCE(o.refunded,0) = 0
+         AND lower(COALESCE(pa.status,'')) NOT IN ('failed','discarded','recovery_pending')
          AND NOT EXISTS (
            SELECT 1
            FROM account_reports replaced_report
@@ -6170,17 +6170,7 @@ app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
              AND replaced_report.reported_account_id = pa.id
              AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
          )
-         AND (
-           lower(COALESCE(p.product_type, '')) LIKE '%combo%'
-           OR pa.id = lr.replacement_account_id
-           OR pa.id = o.assigned_platform_account_id
-           OR pa.id = ld.account_id
-         )
-       ORDER BY o.id DESC,
-                CASE WHEN pa.id = lr.replacement_account_id THEN 0
-                     WHEN pa.id = o.assigned_platform_account_id THEN 1
-                     ELSE 2 END,
-                pa.id ASC`,
+       ORDER BY o.id DESC, CASE WHEN opa.relation_type = 'replacement' THEN 0 ELSE 1 END, pa.id ASC`,
       [req.user.id]
     );
     res.json(result.rows);
@@ -6189,6 +6179,7 @@ app.get("/api/reportable-accounts", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Error cargando cuentas reportables" });
   }
 });
+
 
 
 // USUARIO: REPORTAR PROBLEMA DE CUENTA
@@ -6231,14 +6222,15 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
            pa.account_email,
            pa.status AS account_status,
            pa.owner_admin_id
-         FROM platform_accounts pa
-         JOIN orders o ON o.id = pa.assigned_order_id
+         FROM order_platform_accounts opa
+         JOIN platform_accounts pa ON pa.id = opa.platform_account_id
+         JOIN orders o ON o.id = opa.order_id
          JOIN products p ON p.id = o.product_id
-         WHERE pa.id = $1
-           AND pa.assigned_user_id = $2
+         WHERE opa.platform_account_id = $1
+           AND opa.user_id = $2
            AND o.user_id = $2
            AND o.status = 'exito'
-           AND pa.status = 'delivered'
+           AND lower(COALESCE(pa.status,'')) NOT IN ('failed','discarded','recovery_pending')
            AND NOT EXISTS (
              SELECT 1
              FROM account_reports replaced_report
@@ -6247,57 +6239,20 @@ console.log("📸 FOTO RECIBIDA EN SERVER:", evidence_image ? "SÍ LLEGÓ, longi
                AND replaced_report.reported_account_id = pa.id
                AND NULLIF(replaced_report.replacement_account_id, 0) IS NOT NULL
            )
-           AND (
-             lower(COALESCE(p.product_type, '')) LIKE '%combo%'
-             OR pa.id = o.assigned_platform_account_id
-             OR EXISTS (
-               SELECT 1
-               FROM account_reports replacement_report
-               WHERE replacement_report.user_id = $2
-                 AND replacement_report.order_id = o.id
-                 AND replacement_report.replacement_account_id = pa.id
-             )
-             OR pa.id = (
-               SELECT current_pa.id
-               FROM platform_accounts current_pa
-               WHERE current_pa.assigned_order_id = o.id
-                 AND current_pa.assigned_user_id = $2
-                 AND current_pa.status = 'delivered'
-                 AND NOT EXISTS (
-                   SELECT 1
-                   FROM account_reports previous_report
-                   WHERE previous_report.user_id = $2
-                     AND previous_report.order_id = o.id
-                     AND previous_report.reported_account_id = current_pa.id
-                     AND NULLIF(previous_report.replacement_account_id, 0) IS NOT NULL
-                 )
-               ORDER BY current_pa.delivered_at DESC NULLS LAST, current_pa.id DESC
-               LIMIT 1
-             )
-           )
+         ORDER BY CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END,
+                  opa.created_at DESC NULLS LAST,
+                  o.id DESC
          LIMIT 1`,
         [reportedAccountId, userId]
       );
-
       purchase = selectedResult.rows[0] || null;
       if (!purchase) {
         return res.status(400).json({ error: "No se encontró ese perfil vigente dentro de tus pedidos o reemplazos." });
       }
 
-      // Repara de forma segura pedidos históricos cuyo reemplazo sí está ligado al
-      // usuario/pedido, pero el pedido todavía apunta a la cuenta anterior.
-      if (
-        normalizeProductType(purchase.product_type) !== 'combo_auto' &&
-        Number(purchase.assigned_platform_account_id || 0) !== Number(purchase.account_id || 0)
-      ) {
-        await pool.query(
-          `UPDATE orders
-           SET assigned_platform_account_id = $1
-           WHERE id = $2 AND user_id = $3`,
-          [purchase.account_id, purchase.order_id, userId]
-        );
-      }
-
+      // La relación histórica vive en order_platform_accounts.
+      // No modificamos orders.assigned_platform_account_id aquí porque una cuenta
+      // reutilizable puede pertenecer legítimamente a muchos pedidos distintos.
       email = purchase.account_email || email;
     }
 
@@ -6484,23 +6439,23 @@ app.get('/api/admin/my-purchase/order-accounts', authMiddleware, adminMiddleware
       SELECT pa.id, pa.platform, pa.product_name, pa.account_email, pa.account_password,
              pa.profile_name, pa.profile_pin, pa.status, pa.delivered_at, pa.expires_at,
              pa.official_purchase_date, pa.access_url, pa.mother_account_id,
-             pa.assigned_order_id
-      FROM platform_accounts pa
-      JOIN orders o ON (
-        o.id = pa.assigned_order_id
-        OR pa.id = o.assigned_platform_account_id
-      )
-      WHERE o.id = $1
+             opa.order_id AS assigned_order_id
+      FROM order_platform_accounts opa
+      JOIN platform_accounts pa ON pa.id = opa.platform_account_id
+      JOIN orders o ON o.id = opa.order_id
+      WHERE opa.order_id = $1
         AND o.user_id = $2
         AND COALESCE(o.admin_quick_sale, FALSE) = FALSE
         AND o.status = 'exito'
         AND ($3::int IS NULL OR o.owner_admin_id = $3)
-        AND (
-          pa.assigned_order_id = o.id
-          OR pa.id = o.assigned_platform_account_id
-        )
         AND lower(COALESCE(pa.status, '')) NOT IN ('failed','discarded','recovery_pending')
-      ORDER BY CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END, pa.id ASC`, [orderId, req.user.id, ownerId]);
+        AND NOT EXISTS (
+          SELECT 1 FROM account_reports ar
+          WHERE ar.order_id = o.id
+            AND ar.reported_account_id = pa.id
+            AND NULLIF(ar.replacement_account_id,0) IS NOT NULL
+        )
+      ORDER BY CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END, opa.id ASC`, [orderId, req.user.id, ownerId]);
     res.json({ order_id: orderId, rows: result.rows });
   } catch (err) {
     console.error('Error cargando cuentas de compra propia del admin:', err.message);
@@ -6517,20 +6472,20 @@ app.get('/api/admin/master/quick-sale/order-accounts', authMiddleware, adminMidd
     const result = await pool.query(`
       SELECT pa.id, pa.platform, pa.product_name, pa.account_email, pa.profile_name, pa.profile_pin,
              pa.status, pa.delivered_at, pa.expires_at, pa.assigned_order_id
-      FROM platform_accounts pa
-      JOIN orders o ON (
-        o.id = pa.assigned_order_id
-        OR pa.id = o.assigned_platform_account_id
-      )
-      WHERE o.id = $1
+      FROM order_platform_accounts opa
+      JOIN platform_accounts pa ON pa.id = opa.platform_account_id
+      JOIN orders o ON o.id = opa.order_id
+      WHERE opa.order_id = $1
         AND o.admin_quick_sale = TRUE
         AND ($2::int IS NULL OR o.owner_admin_id = $2)
-        AND (
-          pa.assigned_order_id = o.id
-          OR pa.id = o.assigned_platform_account_id
-        )
         AND lower(COALESCE(pa.status, '')) NOT IN ('failed','discarded','recovery_pending')
-      ORDER BY CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END, pa.id ASC`, [orderId, ownerId]);
+        AND NOT EXISTS (
+          SELECT 1 FROM account_reports ar
+          WHERE ar.order_id = o.id
+            AND ar.reported_account_id = pa.id
+            AND NULLIF(ar.replacement_account_id,0) IS NOT NULL
+        )
+      ORDER BY CASE WHEN pa.id = o.assigned_platform_account_id THEN 0 ELSE 1 END, opa.id ASC`, [orderId, ownerId]);
     res.json({ order_id: orderId, rows: result.rows });
   } catch (err) {
     console.error('Error cargando cuentas de venta directa:', err.message);
@@ -6558,21 +6513,21 @@ app.post('/api/admin/master/direct-account-reports', authMiddleware, adminMiddle
              pa.id AS account_id, pa.platform, pa.product_name AS account_product_name,
              pa.account_email, pa.profile_name, pa.profile_pin, pa.status AS account_status,
              pa.owner_admin_id AS account_owner_admin_id, ma.provider_name
-      FROM orders o
+      FROM order_platform_accounts opa
+      JOIN orders o ON o.id = opa.order_id
       JOIN products p ON p.id = o.product_id
-      JOIN platform_accounts pa ON (
-        pa.assigned_order_id = o.id
-        OR pa.id = o.assigned_platform_account_id
-      )
+      JOIN platform_accounts pa ON pa.id = opa.platform_account_id
       LEFT JOIN mother_accounts ma ON ma.id = pa.mother_account_id
       WHERE o.id = $1
         AND o.admin_quick_sale = TRUE
         AND ($2::int IS NULL OR o.owner_admin_id = $2)
-        AND (
-          pa.assigned_order_id = o.id
-          OR pa.id = o.assigned_platform_account_id
+        AND opa.platform_account_id = $3
+        AND lower(COALESCE(pa.status,'')) NOT IN ('failed','discarded','recovery_pending')
+        AND NOT EXISTS (
+          SELECT 1 FROM account_reports ar
+          WHERE ar.order_id = o.id AND ar.reported_account_id = pa.id
+            AND NULLIF(ar.replacement_account_id,0) IS NOT NULL
         )
-        AND pa.id = $3
       LIMIT 1 FOR UPDATE OF o, pa`, [orderId, ownerId, accountId]);
     const row = result.rows[0];
     if (!row) {
@@ -6770,60 +6725,31 @@ app.get("/api/admin/account-reports/:reportId/evidence", authMiddleware, adminMi
 
 
 // CUENTAS DEL PEDIDO DE UN REPORTE
+// CUENTAS DEL PEDIDO DE UN REPORTE
 app.get("/api/admin/account-reports/:reportId/order-accounts", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.reportId || 0);
     const reportResult = await pool.query(
       `SELECT id, order_id, reported_account_id, replacement_account_id
-       FROM account_reports
-       WHERE id = $1
-       LIMIT 1`,
+       FROM account_reports WHERE id = $1 LIMIT 1`,
       [reportId]
     );
-
     const report = reportResult.rows[0];
-
-    if (report && Number(report.reported_account_id || 0) > 0) {
-      const selectedAccountResult = await pool.query(
-        `SELECT *
-         FROM platform_accounts
-         WHERE id = $1
-           AND assigned_order_id = $2
-         LIMIT 1
-         FOR UPDATE`,
-        [Number(report.reported_account_id), report.order_id]
-      );
-
-      const selectedAccount = selectedAccountResult.rows[0];
-      if (!selectedAccount) {
-               return res.status(400).json({ error: "La cuenta seleccionada no pertenece a ese pedido/combo" });
-      }
-
-      report.reported_account_id = selectedAccount.id;
-      report.platform = selectedAccount.platform || report.platform;
-      report.account_product_name = selectedAccount.product_name || report.account_product_name;
-      report.resolved_owner_admin_id = selectedAccount.owner_admin_id || report.resolved_owner_admin_id;
-
-      await pool.query(
-        `UPDATE account_reports
-         SET reported_account_id = $1,
-             reported_platform = $2,
-             owner_admin_id = COALESCE(owner_admin_id, $3)
-         WHERE id = $4`,
-        [selectedAccount.id, selectedAccount.platform || selectedAccount.product_name || "", selectedAccount.owner_admin_id || null, reportId]
-      );
-    }
-
-    if (!report || !report.order_id) {
-      return res.status(404).json({ error: "Reporte sin pedido ligado" });
-    }
+    if (!report || !report.order_id) return res.status(404).json({ error: "Reporte sin pedido ligado" });
 
     const accountsResult = await pool.query(
-      `SELECT id, platform, product_name, account_email, profile_name, profile_pin, status, delivered_at
-       FROM platform_accounts
-       WHERE assigned_order_id = $1
-       ORDER BY id ASC`,
-      [report.order_id]
+      `SELECT pa.id, pa.platform, pa.product_name, pa.account_email, pa.profile_name, pa.profile_pin,
+              pa.status, pa.delivered_at,
+              CASE WHEN opa.relation_type='replacement' OR EXISTS(
+                SELECT 1 FROM account_reports rr WHERE rr.order_id=opa.order_id AND rr.replacement_account_id=pa.id
+              ) THEN true ELSE false END AS is_replacement
+       FROM order_platform_accounts opa
+       JOIN platform_accounts pa ON pa.id = opa.platform_account_id
+       WHERE opa.order_id = $1
+         AND lower(COALESCE(pa.status,'')) NOT IN ('failed','discarded','recovery_pending')
+       ORDER BY CASE WHEN pa.id = $2 THEN 0 WHEN opa.relation_type='replacement' THEN 1 ELSE 2 END,
+                opa.id ASC`,
+      [report.order_id, Number(report.reported_account_id || 0)]
     );
 
     res.json({
@@ -6855,6 +6781,7 @@ app.get("/api/admin/account-reports/:reportId/replacement-options", authMiddlewa
        JOIN products p ON p.id = o.product_id
        LEFT JOIN platform_accounts pa ON pa.id = COALESCE(NULLIF(ar.reported_account_id,0), NULLIF($2,0))
        WHERE ar.id = $1
+         AND (pa.id IS NULL OR EXISTS (SELECT 1 FROM order_platform_accounts opa WHERE opa.order_id = ar.order_id AND opa.platform_account_id = pa.id))
        LIMIT 1`,
       [reportId, selectedAccountId]
     );
@@ -6947,8 +6874,12 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
        JOIN products p ON p.id = o.product_id
        LEFT JOIN platform_accounts pa
          ON pa.id = COALESCE(NULLIF(ar.reported_account_id, 0), NULLIF($2::int, 0))
-        AND pa.assigned_order_id = ar.order_id
-        AND pa.assigned_user_id = ar.user_id
+        AND EXISTS (
+          SELECT 1 FROM order_platform_accounts opa
+          WHERE opa.order_id = ar.order_id
+            AND opa.platform_account_id = pa.id
+            AND (opa.user_id = ar.user_id OR opa.user_id IS NULL)
+        )
        WHERE ar.id = $1
        FOR UPDATE OF ar, o`,
       [reportId, selectedReportedAccountId]
@@ -7024,6 +6955,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
       );
 
       newAccount = insertAccountResult.rows[0];
+      await linkOrderPlatformAccount(client, report.order_id, newAccount.id, report.user_id, 'replacement');
     } else {
       let availableResult;
 
@@ -7077,6 +7009,7 @@ app.post("/api/admin/account-reports/:reportId/replace", authMiddleware, adminMi
         [report.order_id, report.user_id, newAccount.id, warrantyExpirationDate, warrantyPurchaseDate]
       );
       newAccount = deliveredReplacementResult.rows[0] || newAccount;
+      await linkOrderPlatformAccount(client, report.order_id, newAccount.id, report.user_id, 'replacement');
     }
 // Solo descontar stock cuando se toma una cuenta del inventario
 if (!(manual === true || manual === "true")) {
@@ -9096,6 +9029,7 @@ app.patch("/api/admin/orders/:orderId/status", authMiddleware, adminMiddleware, 
          WHERE id = $3`,
         [platformAccountId, deliveredAccountDataToSave, orderId]
       );
+      await linkOrderPlatformAccount(client, orderId, platformAccountId, order.user_id, 'purchase');
     }
 
     await client.query(
