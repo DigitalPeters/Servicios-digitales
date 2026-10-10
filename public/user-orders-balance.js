@@ -1,4 +1,5 @@
 let __exactReportAccountId = 0;
+let __exactReportOrderId = 0;
 
 function setExactReportAccountId(value) {
   const id = Number(value || 0);
@@ -10,18 +11,40 @@ function getExactReportAccountId() {
   return Number(__exactReportAccountId || 0);
 }
 
+function setExactReportOrderId(value) {
+  const id = Number(value || 0);
+  __exactReportOrderId = Number.isInteger(id) && id > 0 ? id : 0;
+  return __exactReportOrderId;
+}
+
+function getExactReportOrderId() {
+  return Number(__exactReportOrderId || 0);
+}
+
+function parseReportAccountOptionValue(value) {
+  const parts = String(value || '').split('|');
+  return { accountId: Number(parts[0] || 0), orderId: Number(parts[1] || 0) };
+}
+
 function ensureExactReportOption(select, account = {}) {
   if (!select) return false;
   const id = Number(account?.id || 0);
+  const orderId = Number(account?.order_id || 0);
   if (id <= 0) return false;
 
-  let option = Array.from(select.options || []).find((item) => Number(item.value || 0) === id);
+  const optionValue = orderId > 0 ? `${id}|${orderId}` : String(id);
+  let option = Array.from(select.options || []).find((item) => {
+    const parsed = parseReportAccountOptionValue(item.value);
+    return parsed.accountId === id && (!orderId || parsed.orderId === orderId);
+  });
   if (!option) {
     option = document.createElement('option');
-    option.value = String(id);
+    option.value = optionValue;
+    option.dataset.accountId = String(id);
+    option.dataset.orderId = String(orderId || '');
     option.dataset.email = String(account?.account_email || account?.email || '').trim();
     const label = [
-      account?.order_id ? `Pedido #${Number(account.order_id)}` : '',
+      orderId ? `Pedido #${orderId}` : '',
       account?.platform || account?.product_name || 'Cuenta de reemplazo',
       account?.account_email || account?.email || '',
       account?.profile_name ? `Perfil: ${account.profile_name}` : '',
@@ -31,13 +54,16 @@ function ensureExactReportOption(select, account = {}) {
     select.appendChild(option);
   }
 
-  select.value = String(id);
+  select.value = option.value;
   setExactReportAccountId(id);
-  return select.value === String(id);
+  if (orderId) setExactReportOrderId(orderId);
+  return select.value === option.value;
 }
 
 window.setExactReportAccountIdStable = setExactReportAccountId;
 window.getExactReportAccountIdStable = getExactReportAccountId;
+window.setExactReportOrderIdStable = setExactReportOrderId;
+window.getExactReportOrderIdStable = getExactReportOrderId;
 window.ensureExactReportOptionStable = ensureExactReportOption;
 
 async function loadMyOrders(page = 1) {
@@ -179,6 +205,7 @@ window.reportReplacementAccount = async function reportReplacementAccount(report
   }
 
   setExactReportAccountId(accountId);
+  setExactReportOrderId(Number(report?.order_id || 0));
   showSection('reports');
 
   if (typeof window.ensureReportSelectStable === 'function') window.ensureReportSelectStable();
@@ -399,7 +426,11 @@ async function enviarReporteCuenta() {
       });
     }
 
-    const reportedAccountId = Number(getExactReportAccountId() || document.getElementById('reporteCuentaSelect')?.value || 0);
+    const reportSelect = document.getElementById('reporteCuentaSelect');
+    const selectedOption = reportSelect?.selectedOptions?.[0];
+    const parsedSelection = parseReportAccountOptionValue(selectedOption?.value || reportSelect?.value || '');
+    const reportedAccountId = Number(getExactReportAccountId() || parsedSelection.accountId || 0);
+    const requestedOrderId = Number(getExactReportOrderId() || parsedSelection.orderId || selectedOption?.dataset?.orderId || 0);
 
     const data = await api('/api/account-reports', {
       method: 'POST',
@@ -408,7 +439,8 @@ async function enviarReporteCuenta() {
         issue_type: tipo,
         description: explicacion,
         evidence_image: fotoBase64,
-        ...(reportedAccountId > 0 ? { reported_account_id: reportedAccountId } : {})
+        ...(reportedAccountId > 0 ? { reported_account_id: reportedAccountId } : {}),
+        ...(requestedOrderId > 0 ? { order_id: requestedOrderId } : {})
       })
     });
 
@@ -418,6 +450,7 @@ async function enviarReporteCuenta() {
     if (document.getElementById('reporteExplicacion')) document.getElementById('reporteExplicacion').value = '';
     if (document.getElementById('reporteCuentaSelect')) document.getElementById('reporteCuentaSelect').value = '';
     setExactReportAccountId(0);
+    setExactReportOrderId(0);
     if (fotoInput) fotoInput.value = '';
 
     if (typeof loadAccountReports === 'function') await loadAccountReports(1);
@@ -790,6 +823,7 @@ async function reportEntregaInmediata() {
 
   closeModalEntregaInmediata();
   setExactReportAccountId(accountId);
+  setExactReportOrderId(Number(immediateDeliveryModalState.orderId || 0));
   showSection('reports');
 
   try {
@@ -870,6 +904,7 @@ async function reportDeliveredAccount(orderId, accountId = 0) {
   }
 
   setExactReportAccountId(exactAccountId);
+  setExactReportOrderId(Number(order.id || 0));
   showSection('reports');
   if (typeof window.ensureReportSelectStable === 'function') window.ensureReportSelectStable();
   if (typeof window.loadReportableAccountsStable === 'function') await window.loadReportableAccountsStable();

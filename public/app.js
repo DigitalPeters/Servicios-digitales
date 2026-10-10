@@ -1763,7 +1763,7 @@ async function submitAdminOwnPurchaseReport(ev){
     if(!accountId) throw new Error('Selecciona la cuenta o perfil que presenta la falla.');
     if(!description) throw new Error('Describe la falla antes de enviar el reporte.');
     if(result) result.innerHTML='<div class="small-text">Registrando reporte…</div>';
-    const d=await api('/api/account-reports',{method:'POST',body:JSON.stringify({reported_account_id:accountId,issue_type:issueType,description})});
+    const d=await api('/api/account-reports',{method:'POST',body:JSON.stringify({reported_account_id:accountId,order_id:adminOwnPurchaseReportOrderId,issue_type:issueType,description})});
     if(result) result.innerHTML=`<div class="success-message"><b>✓ Reporte #${Number(d.report_id||0)} registrado</b><br>Quedó pendiente de revisión.</div>`;
     if(typeof loadAccountReports==='function') await loadAccountReports(1);
     if(typeof actualizarConteosDashboard==='function') await actualizarConteosDashboard();
@@ -3146,23 +3146,36 @@ window.buyProduct = async function(productId){
     try {
       const select=document.getElementById('reporteCuentaSelect');
       if(!select) return;
-      const preferredId=Number(
-        (typeof window.getExactReportAccountIdStable==='function' ? window.getExactReportAccountIdStable() : 0)
-        || select.value
-        || 0
-      );
+      const exactAccountId=Number(typeof window.getExactReportAccountIdStable==='function' ? window.getExactReportAccountIdStable() : 0);
+      const exactOrderId=Number(typeof window.getExactReportOrderIdStable==='function' ? window.getExactReportOrderIdStable() : 0);
+      const currentParts=String(select.value||'').split('|');
+      const preferredId=exactAccountId || Number(currentParts[0]||0);
+      const preferredOrderId=exactOrderId || (exactAccountId ? 0 : Number(currentParts[1]||0));
       const accounts=await api('/api/reportable-accounts');
-      select.innerHTML='<option value="">Selecciona cuenta/plataforma entregada</option>'+(accounts||[]).map(a=>{
+      const accountRows=Array.isArray(accounts)?accounts:[];
+      select.innerHTML=(accountRows.length?'<option value="">Selecciona cuenta/plataforma entregada</option>':'<option value="">No hay cuentas reportables para tus pedidos exitosos</option>')+accountRows.map(a=>{
         const replacementLabel=a.is_replacement===true || a.is_replacement==='true' ? ' | Reemplazo vigente' : '';
         const label=`Pedido #${a.order_id} | ${a.platform||a.product_name||'Plataforma'} | ${a.account_email||''}${a.profile_name?' | Perfil: '+a.profile_name:''} | ID #${a.id}${replacementLabel}`;
-        return `<option value="${a.id}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
+        return `<option value="${Number(a.id)}|${Number(a.order_id)}" data-account-id="${Number(a.id)}" data-order-id="${Number(a.order_id)}" data-email="${safeText(a.account_email||'')}">${safeText(label)}</option>`;
       }).join('');
-      if(preferredId>0 && Array.from(select.options).some(opt=>Number(opt.value||0)===preferredId)){
-        select.value=String(preferredId);
+      const preferredOption=Array.from(select.options).find(opt=>{
+        const parts=String(opt.value||'').split('|').map(Number);
+        return parts[0]===preferredId && (!preferredOrderId || parts[1]===preferredOrderId);
+      });
+      if(preferredOption){
+        select.value=preferredOption.value;
         select.dispatchEvent(new Event('change',{bubbles:true}));
       }
     } catch(e) {
       console.warn('No se pudieron cargar cuentas reportables', e);
+      const select=document.getElementById('reporteCuentaSelect');
+      if(select) select.innerHTML='<option value="">Error al cargar cuentas. Vuelve a abrir Reportar falla.</option>';
+      const correo=document.getElementById('reporteCorreo');
+      if(correo && correo.parentElement) {
+        let note=document.getElementById('reporteCuentaLoadError');
+        if(!note){ note=document.createElement('p'); note.id='reporteCuentaLoadError'; note.className='error-message'; correo.parentElement.insertBefore(note, correo); }
+        note.textContent=e?.message || 'No se pudieron cargar las cuentas reportables.';
+      }
     }
   }
 
@@ -3185,10 +3198,11 @@ window.buyProduct = async function(productId){
   window.onSelectReportAccountStable=function(){
     const select=document.getElementById('reporteCuentaSelect');
     const opt=select?.selectedOptions?.[0];
-    const selectedId=Number(select?.value||0);
-    if(typeof window.setExactReportAccountIdStable==='function'){
-      window.setExactReportAccountIdStable(selectedId);
-    }
+    const selectedParts=String(select?.value||'').split('|');
+    const selectedId=Number(selectedParts[0]||opt?.dataset?.accountId||0);
+    const selectedOrderId=Number(selectedParts[1]||opt?.dataset?.orderId||0);
+    if(typeof window.setExactReportAccountIdStable==='function') window.setExactReportAccountIdStable(selectedId);
+    if(typeof window.setExactReportOrderIdStable==='function') window.setExactReportOrderIdStable(selectedOrderId);
     const email=opt?.getAttribute('data-email')||'';
     const correo=document.getElementById('reporteCorreo');
     if(correo && email) correo.value=email;

@@ -131,10 +131,10 @@
       if(customer)customer.innerHTML=`<span><b>${esc(customerName)}</b><small>${esc(phone||email||'Cliente final')} · Pedido #${directReportOrderId}</small></span>`;
       const d=await api(`/api/admin/master/quick-sale/order-accounts?order_id=${directReportOrderId}`);
       const accounts=d.rows||[]; const select=document.getElementById('masterDirectReportAccount');
-      if(!accounts.length) throw new Error('No hay una cuenta/perfil ligado a este pedido que pueda reportarse.');
-      if(select)select.innerHTML=accounts.map(a=>`<option value="${Number(a.id)}">${esc(a.platform||a.product_name||'Cuenta')} · ${esc(a.account_email||'')}${a.profile_name?' · '+esc(a.profile_name):''}</option>`).join('');
+      if(!accounts.length){ if(select)select.innerHTML='<option value="">No hay cuentas ligadas a este pedido</option>'; throw new Error('No se encontró una cuenta vinculada a este pedido. Si la compra es histórica, la relación se resolverá usando el registro del pedido.'); }
+      if(select)select.innerHTML=accounts.map(a=>`<option value="${Number(a.id)}">${esc(a.platform||a.product_name||'Cuenta')} · ${esc(a.account_email||'')}${a.profile_name?' · '+esc(a.profile_name):''} · ID #${Number(a.id)}</option>`).join('');
       if(result)result.innerHTML='';
-    }catch(e){if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron cargar las cuentas')}</div>`;}
+    }catch(e){const select=document.getElementById('masterDirectReportAccount'); if(select && (!select.options.length || select.options[0].textContent==='Cargando…')) select.innerHTML='<option value="">No se pudieron cargar las cuentas</option>'; if(result)result.innerHTML=`<div class="master-v14-error">${esc(e.message||'No se pudieron cargar las cuentas')}</div>`;}
   }
   window.openMasterDirectReport=openMasterDirectReport;
   window.closeMasterDirectReport=()=>closeModal('masterDirectReportModal');

@@ -1,6 +1,6 @@
 {
   "name": "servicios-digitales",
-  "version": "1.8.0",
+  "version": "1.8.9",
   "description": "Servicios Digitales Peters · Master estable V1.8",
   "main": "server.js",
   "scripts": {
